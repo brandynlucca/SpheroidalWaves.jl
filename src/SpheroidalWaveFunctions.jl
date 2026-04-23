@@ -737,27 +737,33 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
     
     Args:
         m, n, c: spheroidal parameters
-        arg: evaluation points (η ∈ [-1,1] for angular; |x| > 1 for radial)
+        arg: evaluation points (η ∈ [-1,1] for angular; x-domain depends on spheroid for radial)
         spheroid: :prolate or :oblate
         precision: :double or :quad
         kind: for radial functions, which kind (1-4)
+        target: :radial (default) or :angular
+        normalize: angular normalization flag (used when target=:angular)
     
     Returns:
         Vector of estimated decimal digit accuracy at each evaluation point
     
-    Example:
+    Examples:
         # Angular function accuracy
-        acc_ang = accuracy(0, 1, 200, [0.5, 0.6, 0.7]; spheroid=:prolate)
+        acc_ang = accuracy(0, 1, 200, [0.5, 0.6, 0.7]; spheroid=:prolate, target=:angular)
         # → [14, 14, 14]  # All values ~14 decimal digits accurate
         
         # Radial function accuracy
-        acc_rad = accuracy(0, 1, 200, [1.5, 2.0]; spheroid=:prolate, kind=1)
+        acc_rad = accuracy(0, 1, 200, [1.5, 2.0]; spheroid=:prolate, target=:radial, kind=1)
         # → [13, 13]  # All values ~13 decimal digits accurate
+
+        # Complex oblate accuracy at quad precision
+        acc_c = accuracy(0, 1, 200 + 0.1im, [1.2, 1.5];
+                         spheroid=:oblate, precision=:quad, target=:radial, kind=3)
     
     Notes:
-        - **Limitation**: Currently only supported for real prolate spheroidal functions
-        - Complex c values are not yet supported
-        - Oblate and complex solvers accuracy requires Fortran interface modification
+        - Supported for real and complex c
+        - Supported for both :prolate and :oblate spheroids
+        - Supported for both :double and :quad precision backends
         - For exact spherical limit (c=0), returns theoretical maximum accuracy
     """
     
