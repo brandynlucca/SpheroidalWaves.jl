@@ -1,1 +1,30 @@
+# Build artifacts
+/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Generated library configuration
+deps/library_config.jl
+
+# Compiled files
+*.o
+*.mod
+*.a
+*.so
+*.dll
+*.dylib
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Julia
+Manifest.toml
 

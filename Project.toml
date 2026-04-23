@@ -3,6 +3,9 @@ uuid = "5995e872-983e-498e-9750-1cefbd4fb98d"
 authors = ["brandynlucca <brandyn.lucca@gmail.com> and contributors"]
 version = "1.0.0-DEV"
 
+[deps]
+Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
+
 [compat]
 julia = "1.10"
 
