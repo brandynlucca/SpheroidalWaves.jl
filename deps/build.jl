@@ -11,6 +11,7 @@ using Libdl
 const SCRIPT_DIR = dirname(@__FILE__)
 const PROJECT_DIR = dirname(SCRIPT_DIR)
 const BUILD_DIR = joinpath(PROJECT_DIR, "build")
+const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
 const SELECTED_FORTRAN = Ref{Union{Nothing,String}}(nothing)
 
 function detect_library_dir()
@@ -104,6 +105,16 @@ function choose_fortran_compiler()
         end
     end
 
+    return nothing
+end
+
+function choose_cmake_generator()
+    if Sys.which(Sys.iswindows() ? "ninja.exe" : "ninja") !== nothing
+        return "Ninja"
+    end
+    if Sys.iswindows()
+        return "MinGW Makefiles"
+    end
     return nothing
 end
 
@@ -211,13 +222,13 @@ function run_build()
         "-B", BUILD_DIR,
     ]
 
+    generator = choose_cmake_generator()
+    if generator !== nothing
+        push!(configure_cmd, "-G", generator)
+    end
+
     if SELECTED_FORTRAN[] !== nothing
         push!(configure_cmd, "-DCMAKE_Fortran_COMPILER=$(SELECTED_FORTRAN[])")
-    end
-    
-    # Add platform-specific flags
-    if Sys.iswindows()
-        push!(configure_cmd, "-G", "MinGW Makefiles")  # or "Unix Makefiles" if using Unix-like on Windows
     end
     
     info_msg("Command: $(join(configure_cmd, " "))")
@@ -236,9 +247,20 @@ function run_build()
     info_msg("Command: $(join(build_cmd, " "))")
     
     try
-        run(Cmd(build_cmd))
+        open(BUILD_LOG, "w") do io
+            run(pipeline(Cmd(build_cmd), stdout=io, stderr=io))
+        end
     catch e
         error_msg("CMake build failed: $e")
+        if isfile(BUILD_LOG)
+            error_msg("Last build log lines:")
+            for line in split(read(BUILD_LOG, String), '\n')[max(1, end - 39):end]
+                if !isempty(line)
+                    println(line)
+                end
+            end
+            error_msg("Full build log: $BUILD_LOG")
+        end
         return false
     end
     
@@ -259,14 +281,36 @@ function _backend_filename(stem::String)
     end
 end
 
+function _backend_filename_candidates(stem::String)
+    names = String[]
+    push!(names, _backend_filename(stem))
+    if !Sys.iswindows()
+        unprefixed = Sys.isapple() ? "$stem.dylib" : "$stem.so"
+        if unprefixed ∉ names
+            push!(names, unprefixed)
+        end
+    end
+    return names
+end
+
+function _find_built_library(lib_dir::String, stem::String)
+    for name in _backend_filename_candidates(stem)
+        path = joinpath(lib_dir, name)
+        if isfile(path)
+            return path
+        end
+    end
+    return nothing
+end
+
 function verify_libraries_built()
     lib_dir = detect_library_dir()
-    expected = [_backend_filename("spheroidal_batch_r8"), _backend_filename("spheroidal_batch_r16")]
+    stems = ["spheroidal_batch_r8", "spheroidal_batch_r16"]
     ok = true
-    for name in expected
-        path = joinpath(lib_dir, name)
-        if !isfile(path)
-            error_msg("Library not found after build: $path")
+    for stem in stems
+        path = _find_built_library(lib_dir, stem)
+        if path === nothing
+            error_msg("Library not found after build for $stem in $lib_dir")
             ok = false
         else
             info_msg("Library verified: $path")
@@ -280,8 +324,14 @@ end
 # ============================================================================
 function configure_library_paths()
     lib_dir = detect_library_dir()
-    lib_r8 = replace(joinpath(lib_dir, _backend_filename("spheroidal_batch_r8")), '\\' => '/')
-    lib_r16 = replace(joinpath(lib_dir, _backend_filename("spheroidal_batch_r16")), '\\' => '/')
+    lib_r8_path = _find_built_library(lib_dir, "spheroidal_batch_r8")
+    lib_r16_path = _find_built_library(lib_dir, "spheroidal_batch_r16")
+    if lib_r8_path === nothing || lib_r16_path === nothing
+        error_msg("Cannot write library config because one or more built libraries were not found.")
+        return false
+    end
+    lib_r8 = replace(lib_r8_path, '\\' => '/')
+    lib_r16 = replace(lib_r16_path, '\\' => '/')
 
     config_script = """
     # Auto-generated: library path configuration

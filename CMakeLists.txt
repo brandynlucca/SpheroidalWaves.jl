@@ -52,8 +52,11 @@ set_target_properties(spheroidal_batch_r8 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
   Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/mod_r8"
-  PREFIX ""
 )
+
+if(WIN32)
+  set_target_properties(spheroidal_batch_r8 PROPERTIES PREFIX "")
+endif()
 
 add_library(spheroidal_batch_r16 SHARED ${R16_BASE} ${R16_WRAP})
 set_target_properties(spheroidal_batch_r16 PROPERTIES
@@ -61,8 +64,11 @@ set_target_properties(spheroidal_batch_r16 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
   Fortran_MODULE_DIRECTORY "${CMAKE_BINARY_DIR}/mod_r16"
-  PREFIX ""
 )
+
+if(WIN32)
+  set_target_properties(spheroidal_batch_r16 PROPERTIES PREFIX "")
+endif()
 
 message(STATUS "Configured dual backends:")
 message(STATUS "  r8  -> spheroidal_batch_r8")
