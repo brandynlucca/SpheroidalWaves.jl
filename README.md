@@ -27,11 +27,33 @@ SpheroidalWaveFunctions.jl provides high-performance Julia bindings to batch-vec
 - **Batch evaluation** for multiple function parameters
 - **True vectorization** with no per-element Julia loops
 
+## Documentation
+
+- Mathematical basis and usage for all public operations: [docs/mathematical-basis-and-usage.md](docs/mathematical-basis-and-usage.md)
+- Low-level Fortran argument mapping: [docs/fortran-api-user-facing.md](docs/fortran-api-user-facing.md)
+
+Build the API website locally with Documenter:
+
+```julia
+julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
+julia --project=docs docs/make.jl
+```
+
 ## Key Features
 
-### 1. Two Simple Entry Points
+### 1. Core Evaluation Entry Points
 - `smn(m, n, c, η; spheroid=:prolate, normalize=false)` — Angular functions
 - `rmn(m, n, c, x; spheroid=:prolate, kind=1)` — Radial functions
+
+Additional public analysis operations:
+
+- `eigenvalue(m, n, c; spheroid=:prolate, precision=:double)`
+- `accuracy(m, n, c, arg; spheroid=:prolate, precision=:double, target=:radial|:angular)`
+- `radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double)`
+- `jacobian_eigen(m, n, c; ...)`
+- `jacobian_smn(m, n, c, eta; ...)`
+- `jacobian_rmn(m, n, c, x; ...)`
+- `find_c_for_eigenvalue(m, n, lambda_target; bracket=(c_lo,c_hi), ...)`
 
 Each function intelligently dispatches to the correct solver based on:
 - `c` type: Real → double-precision; Complex → complex-valued
@@ -103,6 +125,8 @@ vals = rmn(1, 2, 1.5, [1.1, 1.2]; kind=3)
 ```
 
 ## API Reference
+
+For complete mathematical definitions and usage patterns for every public operation, see [docs/mathematical-basis-and-usage.md](docs/mathematical-basis-and-usage.md).
 
 ### Angular Functions
 
