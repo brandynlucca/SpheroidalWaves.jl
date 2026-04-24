@@ -37,7 +37,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gfortran cmake ninja-build build-essential
+          sudo apt-get install -y gfortran cmake build-essential
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}

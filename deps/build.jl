@@ -109,9 +109,6 @@ function choose_fortran_compiler()
 end
 
 function choose_cmake_generator()
-    if Sys.which(Sys.iswindows() ? "ninja.exe" : "ninja") !== nothing
-        return "Ninja"
-    end
     if Sys.iswindows()
         return "MinGW Makefiles"
     end
