@@ -16,5 +16,5 @@ makedocs(
 
 deploydocs(
     repo = "github.com/Brandyn/SpheroidalWaveFunctions.jl.git",
-    devbranch = "master",
+    devbranch = "main",
 )

@@ -1,7 +1,7 @@
 # SpheroidalWaveFunctions.jl
 
-[![Build Status](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml/badge.svg?branch=master)](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml?query=branch%3Amaster)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/blob/master/LICENSE)
+[![Build Status](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/Brandyn/SpheroidalWaveFunctions.jl/blob/main/LICENSE)
 
 Fast, vectorized computation of spheroidal wave functions with native Fortran kernels.
 
