@@ -5,6 +5,12 @@
 
 using Libdl
 
+# Skip build in CI environments - rely on pre-built artifacts instead
+if get(ENV, "CI", "false") == "true"
+    println("[SpheroidalWaveFunctions.jl] Skipping local build in CI environment. Using pre-built artifacts.")
+    exit(0)
+end
+
 # ============================================================================
 # Configuration
 # ============================================================================
