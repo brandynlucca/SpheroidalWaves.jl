@@ -146,10 +146,3 @@ function eigenvalue_sweep(m::Integer,
     return (c=cvals, lambda=lambdas, selected_n=selected_n, switched_branch=switched_branch)
 end
 
-"""
-Deprecated alias for `eigenvalue_sweep`.
-"""
-function eigenvalue_continuation(args...; kwargs...)
-    Base.depwarn("`eigenvalue_continuation` is deprecated; use `eigenvalue_sweep`.", :eigenvalue_continuation)
-    return eigenvalue_sweep(args...; kwargs...)
-end

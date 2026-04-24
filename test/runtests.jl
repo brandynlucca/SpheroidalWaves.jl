@@ -20,7 +20,6 @@ using Test
         @test :accuracy in exported
         @test :eigenvalue in exported
         @test :eigenvalue_sweep in exported
-        @test :eigenvalue_continuation in exported
         @test :jacobian_eigen in exported
         @test :jacobian_smn in exported
         @test :jacobian_rmn in exported
@@ -84,12 +83,6 @@ using Test
         @test raw.selected_n == [2, 2, 2, 2]
         @test locked.selected_n == [2, 3, 2, 2]
         @test locked.switched_branch == [false, true, true, false]
-
-        @test_logs (:warn,) match_mode=:any eigenvalue_continuation(0, 2, cgrid;
-                                                                     branch_lock=true,
-                                                                     branch_window=1,
-                                                                     use_jacobian_predictor=false,
-                                                                     evaluator=synthetic_eval)
     end
 
     @testset "Double Precision Numerical Paths" begin

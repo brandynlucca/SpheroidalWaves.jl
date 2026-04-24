@@ -3,7 +3,7 @@ module SpheroidalWaves
 using Artifacts
 using Libdl
 
-export smn, rmn, radial_wronskian, accuracy, eigenvalue, eigenvalue_sweep, eigenvalue_continuation, jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
+export smn, rmn, radial_wronskian, accuracy, eigenvalue, eigenvalue_sweep, jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
 
 const _backend_libraries = Dict{Symbol,Union{Nothing,String}}(
     :double => nothing,
