@@ -34,6 +34,10 @@ jobs:
           - x64
     steps:
       - uses: actions/checkout@v6
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gfortran cmake build-essential
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}

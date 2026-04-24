@@ -5,12 +5,6 @@
 
 using Libdl
 
-# Skip build in CI environments - rely on pre-built artifacts instead
-if get(ENV, "CI", "false") == "true"
-    println("[SpheroidalWaveFunctions.jl] Skipping local build in CI environment. Using pre-built artifacts.")
-    exit(0)
-end
-
 # ============================================================================
 # Configuration
 # ============================================================================
@@ -357,5 +351,26 @@ end
 # Entry Point
 # ============================================================================
 if !main()
-    error("Build failed. See errors above.")
+    is_ci = get(ENV, "CI", "false") == "true"
+    
+    if is_ci
+        error("Build failed in CI. This indicates a real installation problem. See errors above.")
+    else
+        warn_msg("Local backend build failed. This is expected if:")
+        warn_msg("  - You don't have a Fortran compiler installed")
+        warn_msg("  - CMake is not available")
+        warn_msg("")
+        warn_msg("You can still use SpheroidalWaveFunctions if:")
+        warn_msg("  1. Pre-built artifacts are available (automatic download)")
+        warn_msg("  2. You set environment variables with backend paths")
+        warn_msg("  3. You install a Fortran compiler and rebuild")
+        warn_msg("")
+        warn_msg("To install a Fortran compiler:")
+        warn_msg("  - Ubuntu/Debian: sudo apt-get install gfortran cmake")
+        warn_msg("  - macOS: brew install gcc cmake")
+        warn_msg("  - Windows: install MinGW-w64 (gfortran) and CMake")
+        warn_msg("")
+        warn_msg("Then rebuild with: julia> import Pkg; Pkg.build(\"SpheroidalWaveFunctions\")")
+    end
+end
 end
