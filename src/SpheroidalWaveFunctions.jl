@@ -624,9 +624,7 @@ function _call_complex_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Com
     return complex(eig_re[], eig_im[])
 end
 
-function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
-             spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false)
-    """
+"""
     Spheroidal angular wave functions (first kind).
     
     Computes prolate or oblate spheroidal angular wave functions of the first kind,
@@ -721,8 +719,10 @@ function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector
     **References:**
         - DLMF §30.2: https://dlmf.nist.gov/30.2
         - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
-    """
-    
+"""
+function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
+             spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false)
+
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
         error("spheroid must be :prolate or :oblate, got :$spheroid")
@@ -737,9 +737,7 @@ function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector
     end
 end
 
-function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
-             spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1)
-    """
+"""
     Spheroidal radial wave functions (characteristic-exponent form).
     
     Computes prolate or oblate spheroidal radial wave functions and their derivatives,
@@ -838,8 +836,10 @@ function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<
     **References:**
         - DLMF §30.3: https://dlmf.nist.gov/30.3
         - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
-    """
-    
+"""
+function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
+             spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1)
+
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
         error("spheroid must be :prolate or :oblate, got :$spheroid")
@@ -854,9 +854,7 @@ function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<
     end
 end
 
-function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
-                          spheroid::Symbol=:prolate, precision::Symbol=:double)
-    """
+"""
     Verify consistency of radial functions via the Wronskian determinant.
     
     Computes the Wronskian W = R₁·R₂' - R₁'·R₂ for pairs of radial functions.
@@ -943,8 +941,10 @@ function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abs
     **References:**
         - Mathematical background on Wronskians: ODE theory texts
         - DLMF §30.3: Spheroidal wave function properties
-    """
-    
+"""
+function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
+                          spheroid::Symbol=:prolate, precision::Symbol=:double)
+
     r1 = rmn(m, n, c, x; spheroid=spheroid, precision=precision, kind=1)
     r2 = rmn(m, n, c, x; spheroid=spheroid, precision=precision, kind=2)
     
@@ -954,9 +954,7 @@ function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abs
     return W
 end
 
-function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
-                    spheroid::Symbol=:prolate, precision::Symbol=:double)
-    """
+"""
     Compute the spheroidal separation constant λₘₙ(c).
 
     Returns the eigenvalue associated with order `m`, degree `n`, and size parameter `c`
@@ -969,7 +967,9 @@ function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
 
     Returns:
         Real value when `c` is real, complex value when `c` is complex.
-    """
+"""
+function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
+                    spheroid::Symbol=:prolate, precision::Symbol=:double)
 
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
@@ -985,11 +985,7 @@ function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
     end
 end
 
-function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
-                                                spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
-                                                with_metadata::Bool=false, adaptive::Bool=true,
-                                                rtol::Real=1e-6, atol::Real=1e-10)
-        """
+"""
         Numerical Jacobian of `eigenvalue` with respect to `c`.
 
         This function estimates parameter sensitivities of the spheroidal separation
@@ -1023,7 +1019,11 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
         - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
         - Complex `c`, `with_metadata=true`:
             `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`
-        """
+"""
+function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
+                                                spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
+                                                with_metadata::Bool=false, adaptive::Bool=true,
+                                                rtol::Real=1e-6, atol::Real=1e-10)
 
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
@@ -1064,11 +1064,7 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
     end
 end
 
-function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
-                      spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false, h=nothing,
-                      with_metadata::Bool=false, adaptive::Bool=true,
-                      rtol::Real=1e-6, atol::Real=1e-10)
-    """
+"""
     Numerical Jacobian of `smn` outputs with respect to `c`.
 
     For real `c`, returns:
@@ -1078,7 +1074,11 @@ function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::Abstr
     For complex `c = a + ib`, returns:
     - `dvalue_dcreal`, `dvalue_dcimag`
     - `dderivative_dcreal`, `dderivative_dcimag`
-    """
+"""
+function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
+                      spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false, h=nothing,
+                      with_metadata::Bool=false, adaptive::Bool=true,
+                      rtol::Real=1e-6, atol::Real=1e-10)
 
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
@@ -1153,11 +1153,7 @@ function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::Abstr
     end
 end
 
-function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
-                      spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, h=nothing,
-                      with_metadata::Bool=false, adaptive::Bool=true,
-                      rtol::Real=1e-6, atol::Real=1e-10)
-    """
+"""
     Numerical Jacobian of `rmn` outputs with respect to `c`.
 
     For real `c`, returns:
@@ -1167,7 +1163,11 @@ function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstrac
     For complex `c = a + ib`, returns:
     - `dvalue_dcreal`, `dvalue_dcimag`
     - `dderivative_dcreal`, `dderivative_dcimag`
-    """
+"""
+function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
+                      spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, h=nothing,
+                      with_metadata::Bool=false, adaptive::Bool=true,
+                      rtol::Real=1e-6, atol::Real=1e-10)
 
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
@@ -1243,15 +1243,7 @@ function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstrac
     end
 end
 
-function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
-                               bracket::Tuple{<:Real,<:Real},
-                               spheroid::Symbol=:prolate,
-                               precision::Symbol=:double,
-                               atol::Real=1e-10,
-                               rtol::Real=1e-8,
-                               maxiter::Integer=80,
-                               use_jacobian::Bool=true)
-    """
+"""
     Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
 
     Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
@@ -1275,7 +1267,15 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
     - `iterations::Int`
     - `bracket::Tuple{Float64,Float64}`
     - `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)
-    """
+"""
+function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
+                               bracket::Tuple{<:Real,<:Real},
+                               spheroid::Symbol=:prolate,
+                               precision::Symbol=:double,
+                               atol::Real=1e-10,
+                               rtol::Real=1e-8,
+                               maxiter::Integer=80,
+                               use_jacobian::Bool=true)
 
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
@@ -1396,9 +1396,7 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
     )
 end
 
-function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractVector{<:Real};
-                  spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, target::Symbol=:radial, normalize::Bool=false)
-    """
+"""
     Estimate numerical accuracy of computed spheroidal wave functions.
     
     Returns the number of accurate decimal digits in the computed function values,
@@ -1447,8 +1445,10 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
         - Supported for both :prolate and :oblate spheroids
         - Supported for both :double and :quad precision backends
         - For exact spherical limit (c=0), returns theoretical maximum accuracy
-    """
-    
+"""
+function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractVector{<:Real};
+                  spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, target::Symbol=:radial, normalize::Bool=false)
+
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
         error("spheroid must be :prolate or :oblate, got :$spheroid")
@@ -1473,46 +1473,6 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
         end
     end
 end
-
-@doc """
-Compute angular spheroidal wave functions and derivatives with respect to `eta`.
-
-Use this for batched angular evaluations for real or complex `c`.
-""" smn
-
-@doc """
-Compute radial spheroidal wave functions and derivatives with respect to `x`.
-
-Supports radial kinds 1-4 and returns complex-valued outputs.
-""" rmn
-
-@doc """
-Compute the radial Wronskian diagnostic from kind-1 and kind-2 radial solutions.
-""" radial_wronskian
-
-@doc """
-Compute the spheroidal separation constant `lambda_mn(c)`.
-""" eigenvalue
-
-@doc """
-Estimate numerical Jacobian of `eigenvalue` with respect to `c`.
-""" jacobian_eigen
-
-@doc """
-Estimate numerical Jacobian of `smn` outputs with respect to `c`.
-""" jacobian_smn
-
-@doc """
-Estimate numerical Jacobian of `rmn` outputs with respect to `c`.
-""" jacobian_rmn
-
-@doc """
-Solve `eigenvalue(m, n, c) = lambda_target` for real `c` using a bracketed hybrid solver.
-""" find_c_for_eigenvalue
-
-@doc """
-Return backend-estimated decimal-digit accuracy for angular or radial evaluations.
-""" accuracy
 
 function __init__()
     try
