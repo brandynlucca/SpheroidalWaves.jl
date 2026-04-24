@@ -2,6 +2,7 @@
 
 [![Build Status](https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/main/LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
 
 Fast, vectorized computation of spheroidal wave functions with native Fortran kernels.
 
@@ -302,11 +303,13 @@ MIT License — see [LICENSE](LICENSE) for details.
 If you use SpheroidalWaveFunctions.jl in research, please cite:
 
 ```bibtex
-@software{lucca2025spheroidal,
+@software{lucca2026spheroidal,
   author = {Lucca, Brandyn},
   title = {SpheroidalWaveFunctions.jl: Fast Vectorized Spheroidal Wave Function Computation},
-  year = {2025},
-  url = {https://github.com/Brandyn/SpheroidalWaveFunctions.jl}
+  year = {2026},
+  version = {0.2.0},
+  doi = {10.5281/zenodo.19728040},
+  url = {https://github.com/brandynlucca/SpheroidalWaveFunctions.jl}
 }
 ```
 

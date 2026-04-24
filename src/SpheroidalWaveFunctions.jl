@@ -625,100 +625,100 @@ function _call_complex_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Com
 end
 
 """
-    Spheroidal angular wave functions (first kind).
+Spheroidal angular wave functions (first kind).
+
+Computes prolate or oblate spheroidal angular wave functions of the first kind,
+Smₙ(η, c), and their derivatives with respect to η.
+
+These are eigenfunction solutions to the angular part of the spheroidal wave equation,
+orthogonal on the interval η ∈ [-1, 1]. They closely resemble associated Legendre
+polynomials when c is small.
+
+**Mathematical Background:**
+- The spheroidal wave equation separates into radial and angular parts
+- Angular functions satisfy: d/dη[(1-η²)dSmₙ/dη] + [λ(c,m,n) - c²(1-η²)]Smₙ = 0
+- Here λ(c,m,n) is the eigenvalue (separation constant)
+- Order m: 0 ≤ m ≤ n
+- Degree n: defines which eigenvalue/eigenfunction to compute
+
+**Parameters:**
+
+    m::Integer
+        Order parameter (must satisfy 0 ≤ m ≤ n)
+    n::Integer  
+        Degree parameter (defines eigenfunction; n ≥ 0)
+    c::Real or Complex
+        Size parameter (prolate: c = kd/2 with k=wavenumber, d=interfocal distance)
+        - Real c: real-valued functions
+        - Complex c: complex-valued functions (advanced applications)
+    η::AbstractVector{<:Real}
+        Evaluation points in [-1, 1]
+        Represents cos(θ) where θ is angle in spherical coordinates
     
-    Computes prolate or oblate spheroidal angular wave functions of the first kind,
-    Smₙ(η, c), and their derivatives with respect to η.
-    
-    These are eigenfunction solutions to the angular part of the spheroidal wave equation,
-    orthogonal on the interval η ∈ [-1, 1]. They closely resemble associated Legendre
-    polynomials when c is small.
-    
-    **Mathematical Background:**
-    - The spheroidal wave equation separates into radial and angular parts
-    - Angular functions satisfy: d/dη[(1-η²)dSmₙ/dη] + [λ(c,m,n) - c²(1-η²)]Smₙ = 0
-    - Here λ(c,m,n) is the eigenvalue (separation constant)
-    - Order m: 0 ≤ m ≤ n
-    - Degree n: defines which eigenvalue/eigenfunction to compute
-    
-    **Parameters:**
-    
-        m::Integer
-            Order parameter (must satisfy 0 ≤ m ≤ n)
-        n::Integer  
-            Degree parameter (defines eigenfunction; n ≥ 0)
-        c::Real or Complex
-            Size parameter (prolate: c = kd/2 with k=wavenumber, d=interfocal distance)
-            - Real c: real-valued functions
-            - Complex c: complex-valued functions (advanced applications)
-        η::AbstractVector{<:Real}
-            Evaluation points in [-1, 1]
-            Represents cos(θ) where θ is angle in spherical coordinates
+    Keyword Arguments:
+        spheroid::Symbol = :prolate
+            :prolate or :oblate geometry
+            - :prolate: elongated spheroid (ζ > 0 in ξ,η,ϕ coordinates)
+            - :oblate: flattened spheroid (ζ < 0)
         
-        Keyword Arguments:
-            spheroid::Symbol = :prolate
-                :prolate or :oblate geometry
-                - :prolate: elongated spheroid (ζ > 0 in ξ,η,ϕ coordinates)
-                - :oblate: flattened spheroid (ζ < 0)
-            
-            precision::Symbol = :double
-                :double (default) or :quad precision
-                - :double: ~15 decimal digits (real*8)
-                - :quad: ~30 decimal digits (real*16, slower)
-            
-            normalize::Bool = false
-                Whether to scale by sqrt((2n+1)/2)
-                - false: Meixner-Schafke normalization (norm → ∞ as m → ∞)
-                - true: Unity normalization (constant norm, convenient for applications)
-    
-    **Returns:**
-        NamedTuple with fields:
-        - .value::Vector{Real or Complex}
-            Function values Smₙ(η, c) at each η point
-        - .derivative::Vector{Real or Complex}
-            First derivatives dSmₙ/dη at each η point
-    
-    **Accuracy:**
-        - Double precision: ~14 decimal digits (excellent for most applications)
-        - Quad precision: ~29 decimal digits (for high-precision research)
-    
-    **Special Cases:**
-        - c = 0 (spherical limit): Returns associated Legendre polynomials P_n^m(η)
-        - c → ∞: Functions oscillate rapidly; use appropriate η resolution
-        - m = 0: Functions are even; m > 0: mixed parity
-    
-    **Performance:**
-        - Vectorized in Fortran; fast batch evaluation
-        - O(1) cost per evaluation point (amortized over batch)
-        - Typical: 1000 points in ~0.001s
-    
-    **Examples:**
+        precision::Symbol = :double
+            :double (default) or :quad precision
+            - :double: ~15 decimal digits (real*8)
+            - :quad: ~30 decimal digits (real*16, slower)
         
-        # Basic usage: prolate Smn with c=1.5
-        η = [-0.9, -0.5, 0, 0.5, 0.9]
-        result = smn(1, 2, 1.5, η)
-        println(result.value)         # Function values
-        println(result.derivative)    # Derivatives
-        
-        # Normalized functions (unity norm)
-        result_norm = smn(0, 3, 10.0, η; normalize=true)
-        
-        # Oblate spheroid with higher precision
-        result_quad = smn(2, 4, 5.0, η; spheroid=:oblate, precision=:quad)
-        
-        # Complex parameter (advanced)
-        c_complex = 1.5 + 0.1im
-        result_c = smn(1, 2, c_complex, η)
+        normalize::Bool = false
+            Whether to scale by sqrt((2n+1)/2)
+            - false: Meixner-Schafke normalization (norm → ∞ as m → ∞)
+            - true: Unity normalization (constant norm, convenient for applications)
+
+**Returns:**
+    NamedTuple with fields:
+    - .value::Vector{Real or Complex}
+        Function values Smₙ(η, c) at each η point
+    - .derivative::Vector{Real or Complex}
+        First derivatives dSmₙ/dη at each η point
+
+**Accuracy:**
+    - Double precision: ~14 decimal digits (excellent for most applications)
+    - Quad precision: ~29 decimal digits (for high-precision research)
+
+**Special Cases:**
+    - c = 0 (spherical limit): Returns associated Legendre polynomials P_n^m(η)
+    - c → ∞: Functions oscillate rapidly; use appropriate η resolution
+    - m = 0: Functions are even; m > 0: mixed parity
+
+**Performance:**
+    - Vectorized in Fortran; fast batch evaluation
+    - O(1) cost per evaluation point (amortized over batch)
+    - Typical: 1000 points in ~0.001s
+
+**Examples:**
     
-    **Notes:**
-        - Order and degree must satisfy 0 ≤ m ≤ n
-        - All η values must be in [-1, 1]
-        - For spherical limit (c ≈ 0), uses analytic Legendre polynomial fallback
-        - Complex c support requires additional validation for branch cuts
+    # Basic usage: prolate Smn with c=1.5
+    η = [-0.9, -0.5, 0, 0.5, 0.9]
+    result = smn(1, 2, 1.5, η)
+    println(result.value)         # Function values
+    println(result.derivative)    # Derivatives
     
-    **References:**
-        - DLMF §30.2: https://dlmf.nist.gov/30.2
-        - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
+    # Normalized functions (unity norm)
+    result_norm = smn(0, 3, 10.0, η; normalize=true)
+    
+    # Oblate spheroid with higher precision
+    result_quad = smn(2, 4, 5.0, η; spheroid=:oblate, precision=:quad)
+    
+    # Complex parameter (advanced)
+    c_complex = 1.5 + 0.1im
+    result_c = smn(1, 2, c_complex, η)
+
+**Notes:**
+    - Order and degree must satisfy 0 ≤ m ≤ n
+    - All η values must be in [-1, 1]
+    - For spherical limit (c ≈ 0), uses analytic Legendre polynomial fallback
+    - Complex c support requires additional validation for branch cuts
+
+**References:**
+    - DLMF §30.2: https://dlmf.nist.gov/30.2
+    - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
 """
 function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
              spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false)
@@ -738,104 +738,104 @@ function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector
 end
 
 """
-    Spheroidal radial wave functions (characteristic-exponent form).
+Spheroidal radial wave functions (characteristic-exponent form).
+
+Computes prolate or oblate spheroidal radial wave functions and their derivatives,
+returning values in characteristic-exponent form to avoid overflow/underflow.
+
+These are eigenfunction solutions to the radial part of the spheroidal wave equation,
+defined on the interval x > 1 (for prolate) or x > -1 (for oblate, with |x| > 1).
+Four kinds of radial functions are available.
+
+**Mathematical Background:**
+- Radial functions satisfy: d/dξ[(ξ²-1)dRmₙ/dξ] - [λ(c,m,n)ξ² - m² - c²ξ(ξ²-1)]Rmₙ = 0
+- λ(c,m,n) is the eigenvalue from the angular function problem
+- Functions are related to spherical Bessel and Hankel functions when c→0
+- Characteristic-exponent representation: R = R_characteristic × 10^exponent
+
+**Parameters:**
+
+    m, n, c: See smn() documentation
     
-    Computes prolate or oblate spheroidal radial wave functions and their derivatives,
-    returning values in characteristic-exponent form to avoid overflow/underflow.
+    x::AbstractVector{<:Real}
+        Radial evaluation points
+        - For prolate: x > 1 (distance from interfocal axis)
+        - For oblate: |x| > 1
+        - Vectorized computation: all points evaluated in single Fortran call
     
-    These are eigenfunction solutions to the radial part of the spheroidal wave equation,
-    defined on the interval x > 1 (for prolate) or x > -1 (for oblate, with |x| > 1).
-    Four kinds of radial functions are available.
-    
-    **Mathematical Background:**
-    - Radial functions satisfy: d/dξ[(ξ²-1)dRmₙ/dξ] - [λ(c,m,n)ξ² - m² - c²ξ(ξ²-1)]Rmₙ = 0
-    - λ(c,m,n) is the eigenvalue from the angular function problem
-    - Functions are related to spherical Bessel and Hankel functions when c→0
-    - Characteristic-exponent representation: R = R_characteristic × 10^exponent
-    
-    **Parameters:**
-    
-        m, n, c: See smn() documentation
+    kind::Integer = 1
+        Which radial function kind:
         
-        x::AbstractVector{<:Real}
-            Radial evaluation points
-            - For prolate: x > 1 (distance from interfocal axis)
-            - For oblate: |x| > 1
-            - Vectorized computation: all points evaluated in single Fortran call
+        1: First kind R₁ (propagating, finite at x→∞)
+           - Regular solution; used for most applications
+           - Analogous to spherical Bessel j_ℓ(kr)
         
-        kind::Integer = 1
-            Which radial function kind:
-            
-            1: First kind R₁ (propagating, finite at x→∞)
-               - Regular solution; used for most applications
-               - Analogous to spherical Bessel j_ℓ(kr)
-            
-            2: Second kind R₂ (singular at x→∞)
-               - Complementary solution
-               - Analogous to spherical Bessel y_ℓ(kr)
-            
-            3: Third kind (linear combination) = R₁ + i·R₂
-               - Hankel function analog (outgoing wave)
-            
-            4: Fourth kind (linear combination) = R₁ - i·R₂
-               - Alternate Hankel function analog
-    
-    **Returns:**
-        NamedTuple with fields:
-        - .value::Vector{ComplexF64}
-            Function values Rmₙ(x, c) (always complex, even for real input)
-            Real part is the physical radial function
-            Imaginary part indicates which kind was computed
+        2: Second kind R₂ (singular at x→∞)
+           - Complementary solution
+           - Analogous to spherical Bessel y_ℓ(kr)
         
-        - .derivative::Vector{ComplexF64}
-            First derivatives dRmₙ/dx
-    
-    **Accuracy & Overflow Protection:**
-        - Uses characteristic-exponent representation internally
-        - Scales all values to [0.1, 1) × 10^exponent
-        - Automatically reconstructs full-precision values
-        - Maintains accuracy even for very large/small values
-    
-    **Special Cases:**
-        - c = 0 (spherical limit): Returns Legendre Q functions for kind=2
-        - x = 1 (boundary): kind=2 produces infinite value (singular point)
-        - Large c or x: Rapid oscillation; may need fine resolution
-    
-    **Examples:**
+        3: Third kind (linear combination) = R₁ + i·R₂
+           - Hankel function analog (outgoing wave)
         
-        # Basic radial function (kind 1)
-        x = [1.5, 2.0, 3.0, 5.0]
-        r1 = rmn(0, 1, 200, x; kind=1)
-        println(r1.value)
-        
-        # Second kind for same parameter set
-        r2 = rmn(0, 1, 200, x; kind=2)
-        
-        # Hankel-like combinations
-        r3_hankel = rmn(0, 1, 200, x; kind=3)  # Outgoing wave
-        r4_hankel = rmn(0, 1, 200, x; kind=4)  # Incoming wave
-        
-        # Verification: Wronskian should be constant
-        W = r1.value .* r2.derivative - r1.derivative .* r2.value
-        println(W)  # Should be approximately constant
-        
-        # Oblate spheroid
-        r_oblate = rmn(1, 2, 500, x; spheroid=:oblate, kind=1)
+        4: Fourth kind (linear combination) = R₁ - i·R₂
+           - Alternate Hankel function analog
+
+**Returns:**
+    NamedTuple with fields:
+    - .value::Vector{ComplexF64}
+        Function values Rmₙ(x, c) (always complex, even for real input)
+        Real part is the physical radial function
+        Imaginary part indicates which kind was computed
     
-    **Notes:**
-        - Return values are complex even when c and x are real
-        - For real c, kind=1 has real values; kind=2 has real values; kinds 3,4 are complex
-        - Characteristic-exponent format is internal; reconstructed automatically
-        - Wronskian relation: R₁·R₂' - R₁'·R₂ = constant (diagnostic check)
+    - .derivative::Vector{ComplexF64}
+        First derivatives dRmₙ/dx
+
+**Accuracy & Overflow Protection:**
+    - Uses characteristic-exponent representation internally
+    - Scales all values to [0.1, 1) × 10^exponent
+    - Automatically reconstructs full-precision values
+    - Maintains accuracy even for very large/small values
+
+**Special Cases:**
+    - c = 0 (spherical limit): Returns Legendre Q functions for kind=2
+    - x = 1 (boundary): kind=2 produces infinite value (singular point)
+    - Large c or x: Rapid oscillation; may need fine resolution
+
+**Examples:**
     
-    **Performance:**
-        - Vectorized batch computation in Fortran
-        - Four kinds computed efficiently in single Fortran call
-        - Typical: 1000 points in ~0.001s
+    # Basic radial function (kind 1)
+    x = [1.5, 2.0, 3.0, 5.0]
+    r1 = rmn(0, 1, 200, x; kind=1)
+    println(r1.value)
     
-    **References:**
-        - DLMF §30.3: https://dlmf.nist.gov/30.3
-        - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
+    # Second kind for same parameter set
+    r2 = rmn(0, 1, 200, x; kind=2)
+    
+    # Hankel-like combinations
+    r3_hankel = rmn(0, 1, 200, x; kind=3)  # Outgoing wave
+    r4_hankel = rmn(0, 1, 200, x; kind=4)  # Incoming wave
+    
+    # Verification: Wronskian should be constant
+    W = r1.value .* r2.derivative - r1.derivative .* r2.value
+    println(W)  # Should be approximately constant
+    
+    # Oblate spheroid
+    r_oblate = rmn(1, 2, 500, x; spheroid=:oblate, kind=1)
+
+**Notes:**
+    - Return values are complex even when c and x are real
+    - For real c, kind=1 has real values; kind=2 has real values; kinds 3,4 are complex
+    - Characteristic-exponent format is internal; reconstructed automatically
+    - Wronskian relation: R₁·R₂' - R₁'·R₂ = constant (diagnostic check)
+
+**Performance:**
+    - Vectorized batch computation in Fortran
+    - Four kinds computed efficiently in single Fortran call
+    - Typical: 1000 points in ~0.001s
+
+**References:**
+    - DLMF §30.3: https://dlmf.nist.gov/30.3
+    - Van Buren & Boisvert (2004): Accurate calculation of prolate spheroidal wave functions
 """
 function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
              spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1)
@@ -855,92 +855,92 @@ function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<
 end
 
 """
-    Verify consistency of radial functions via the Wronskian determinant.
+Verify consistency of radial functions via the Wronskian determinant.
+
+Computes the Wronskian W = R₁·R₂' - R₁'·R₂ for pairs of radial functions.
+A fundamental identity of spheroidal wave functions ensures this quantity
+should be approximately constant across all x values if R₁ and R₂ are
+correctly computed.
+
+**Mathematical Basis:**
+    The Wronskian of two linearly independent solutions to a second-order
+    ODE is constant. For spheroidal radial functions:
     
-    Computes the Wronskian W = R₁·R₂' - R₁'·R₂ for pairs of radial functions.
-    A fundamental identity of spheroidal wave functions ensures this quantity
-    should be approximately constant across all x values if R₁ and R₂ are
-    correctly computed.
+        W(R₁, R₂) = R₁(x)·dR₂/dx - dR₁/dx·R₂(x) = constant
     
-    **Mathematical Basis:**
-        The Wronskian of two linearly independent solutions to a second-order
-        ODE is constant. For spheroidal radial functions:
-        
-            W(R₁, R₂) = R₁(x)·dR₂/dx - dR₁/dx·R₂(x) = constant
-        
-        This constant depends on the normalization convention used by the solver.
-        The key insight is that W should NOT vary significantly across x.
+    This constant depends on the normalization convention used by the solver.
+    The key insight is that W should NOT vary significantly across x.
+
+**Purpose:**
+    - **Diagnostic**: Detects solver failures or numerical breakdown
+    - **Validation**: Confirms R₁ and R₂ are consistent eigenfunctions
+    - **Testing**: Verifies implementation correctness
+    - **Confidence**: Deviations suggest precision or domain issues
+
+**Interpretation:**
     
-    **Purpose:**
-        - **Diagnostic**: Detects solver failures or numerical breakdown
-        - **Validation**: Confirms R₁ and R₂ are consistent eigenfunctions
-        - **Testing**: Verifies implementation correctness
-        - **Confidence**: Deviations suggest precision or domain issues
+    - **Constant W (≤1% variation)**: R₁ and R₂ are accurate and consistent
+    - **Variable W (>10% variation)**: Numerical issues; solver may be struggling
+    - **NaN or Inf**: Severe failure; x likely outside valid domain or c too extreme
+
+**Parameters:**
+
+    m, n, c: spheroidal parameters (see smn/rmn documentation)
     
-    **Interpretation:**
-        
-        - **Constant W (≤1% variation)**: R₁ and R₂ are accurate and consistent
-        - **Variable W (>10% variation)**: Numerical issues; solver may be struggling
-        - **NaN or Inf**: Severe failure; x likely outside valid domain or c too extreme
+    x::AbstractVector{<:Real}
+        Radial evaluation points (must satisfy |x| > 1 for real c)
+        Best: use multiple points across the domain to verify constancy
     
-    **Parameters:**
+    spheroid::Symbol = :prolate
+        :prolate or :oblate geometry
     
-        m, n, c: spheroidal parameters (see smn/rmn documentation)
-        
-        x::AbstractVector{<:Real}
-            Radial evaluation points (must satisfy |x| > 1 for real c)
-            Best: use multiple points across the domain to verify constancy
-        
-        spheroid::Symbol = :prolate
-            :prolate or :oblate geometry
-        
-        precision::Symbol = :double
-            :double or :quad precision
+    precision::Symbol = :double
+        :double or :quad precision
+
+**Returns:**
+    Vector{ComplexF64} of Wronskian values W(x) at each x point
     
-    **Returns:**
-        Vector{ComplexF64} of Wronskian values W(x) at each x point
-        
-        For consistency verification, compute:
-            - W_mean = mean(W)
-            - W_variation = maximum(|W - W_mean|) / W_mean
-        
-        Values << 1% indicate high confidence in the computation.
+    For consistency verification, compute:
+        - W_mean = mean(W)
+        - W_variation = maximum(|W - W_mean|) / W_mean
     
-    **Examples:**
-        
-        # Verify prolate r1/r2 consistency
-        m, n, c = 0, 1, 200
-        x = [1.5, 2.0, 3.0, 5.0]
-        W = radial_wronskian(m, n, c, x)
-        
-        # Check variation
-        W_mean = mean(abs.(real.(W)))
-        W_variation = maximum(abs.(real(W) .- W_mean)) / W_mean * 100
-        println("Wronskian variation: \$(W_variation)%")
-        
-        # Should print < 1% variation for well-conditioned parameters
-        
-        # Oblate spheroid
-        W_oblate = radial_wronskian(1, 2, 500, [2.0, 3.0]; spheroid=:oblate)
-        
-        # Test at high precision for sensitive regime
-        W_quad = radial_wronskian(0, 1, 200, [1.1, 1.2]; precision=:quad)
+    Values << 1% indicate high confidence in the computation.
+
+**Examples:**
     
-    **Implementation Notes:**
-        - Computes r1 and r2 for kind=1 and kind=2 respectively
-        - Uses element-wise multiplication: W = r1.value .* r2.derivative - ...
-        - Returns complex even when c is real (due to rmn interface)
-        - Real part is the physically meaningful Wronskian value
+    # Verify prolate r1/r2 consistency
+    m, n, c = 0, 1, 200
+    x = [1.5, 2.0, 3.0, 5.0]
+    W = radial_wronskian(m, n, c, x)
     
-    **Limitations:**
-        - Does not validate against theoretical Wronskian value (depends on conventions)
-        - Primarily useful for relative consistency checking
-        - Large |W| doesn't indicate failure; variation does
-        - Best used with quad precision for extreme parameters
+    # Check variation
+    W_mean = mean(abs.(real.(W)))
+    W_variation = maximum(abs.(real(W) .- W_mean)) / W_mean * 100
+    println("Wronskian variation: \$(W_variation)%")
     
-    **References:**
-        - Mathematical background on Wronskians: ODE theory texts
-        - DLMF §30.3: Spheroidal wave function properties
+    # Should print < 1% variation for well-conditioned parameters
+    
+    # Oblate spheroid
+    W_oblate = radial_wronskian(1, 2, 500, [2.0, 3.0]; spheroid=:oblate)
+    
+    # Test at high precision for sensitive regime
+    W_quad = radial_wronskian(0, 1, 200, [1.1, 1.2]; precision=:quad)
+
+**Implementation Notes:**
+    - Computes r1 and r2 for kind=1 and kind=2 respectively
+    - Uses element-wise multiplication: W = r1.value .* r2.derivative - ...
+    - Returns complex even when c is real (due to rmn interface)
+    - Real part is the physically meaningful Wronskian value
+
+**Limitations:**
+    - Does not validate against theoretical Wronskian value (depends on conventions)
+    - Primarily useful for relative consistency checking
+    - Large |W| doesn't indicate failure; variation does
+    - Best used with quad precision for extreme parameters
+
+**References:**
+    - Mathematical background on Wronskians: ODE theory texts
+    - DLMF §30.3: Spheroidal wave function properties
 """
 function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
                           spheroid::Symbol=:prolate, precision::Symbol=:double)
@@ -955,18 +955,18 @@ function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abs
 end
 
 """
-    Compute the spheroidal separation constant λₘₙ(c).
+Compute the spheroidal separation constant λₘₙ(c).
 
-    Returns the eigenvalue associated with order `m`, degree `n`, and size parameter `c`
-    for either prolate or oblate spheroidal wave functions.
+Returns the eigenvalue associated with order `m`, degree `n`, and size parameter `c`
+for either prolate or oblate spheroidal wave functions.
 
-    Args:
-        m, n, c: spheroidal parameters
-        spheroid: `:prolate` or `:oblate`
-        precision: `:double` or `:quad`
+Args:
+    m, n, c: spheroidal parameters
+    spheroid: `:prolate` or `:oblate`
+    precision: `:double` or `:quad`
 
-    Returns:
-        Real value when `c` is real, complex value when `c` is complex.
+Returns:
+    Real value when `c` is real, complex value when `c` is complex.
 """
 function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
                     spheroid::Symbol=:prolate, precision::Symbol=:double)
@@ -986,39 +986,39 @@ function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
 end
 
 """
-        Numerical Jacobian of `eigenvalue` with respect to `c`.
+    Numerical Jacobian of `eigenvalue` with respect to `c`.
 
-        This function estimates parameter sensitivities of the spheroidal separation
-        constant `lambda_mn(c)` using centered finite differences.
+    This function estimates parameter sensitivities of the spheroidal separation
+    constant `lambda_mn(c)` using centered finite differences.
 
-        For real `c`, the return value is a scalar estimate of:
-        - `d(lambda)/dc`
+    For real `c`, the return value is a scalar estimate of:
+    - `d(lambda)/dc`
 
-        For complex `c = a + ib`, the return value is a named tuple with:
-        - `d_dcreal = ∂lambda/∂a`
-        - `d_dcimag = ∂lambda/∂b`
+    For complex `c = a + ib`, the return value is a named tuple with:
+    - `d_dcreal = ∂lambda/∂a`
+    - `d_dcimag = ∂lambda/∂b`
 
-        Keyword arguments:
-        - `spheroid`: `:prolate` or `:oblate`
-        - `precision`: `:double` or `:quad`
-        - `h`: finite-difference step (auto-selected if `nothing`)
-        - `with_metadata`: if `true`, returns derivative(s) plus reliability metadata
-        - `adaptive`: if `true`, retries with smaller step in poor-conditioning regimes
-        - `rtol`, `atol`: positive tolerances used for step-halving consistency checks
+    Keyword arguments:
+    - `spheroid`: `:prolate` or `:oblate`
+    - `precision`: `:double` or `:quad`
+    - `h`: finite-difference step (auto-selected if `nothing`)
+    - `with_metadata`: if `true`, returns derivative(s) plus reliability metadata
+    - `adaptive`: if `true`, retries with smaller step in poor-conditioning regimes
+    - `rtol`, `atol`: positive tolerances used for step-halving consistency checks
 
-        Reliability metadata fields (`with_metadata=true`):
-        - `step_used`
-        - `relative_change_when_halving_step`
-        - `finite_flag`
-        - `conditioning_flag` in `(:good, :warning, :poor)`
-        - `suggested_action` in `(:accept, :retry_smaller_h, :use_quad)`
+    Reliability metadata fields (`with_metadata=true`):
+    - `step_used`
+    - `relative_change_when_halving_step`
+    - `finite_flag`
+    - `conditioning_flag` in `(:good, :warning, :poor)`
+    - `suggested_action` in `(:accept, :retry_smaller_h, :use_quad)`
 
-        Returns:
-        - Real `c`, `with_metadata=false`: scalar derivative
-        - Real `c`, `with_metadata=true`: `(derivative=..., metadata=...)`
-        - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
-        - Complex `c`, `with_metadata=true`:
-            `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`
+    Returns:
+    - Real `c`, `with_metadata=false`: scalar derivative
+    - Real `c`, `with_metadata=true`: `(derivative=..., metadata=...)`
+    - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
+    - Complex `c`, `with_metadata=true`:
+        `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`
 """
 function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
                                                 spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
@@ -1065,15 +1065,15 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
 end
 
 """
-    Numerical Jacobian of `smn` outputs with respect to `c`.
+Numerical Jacobian of `smn` outputs with respect to `c`.
 
-    For real `c`, returns:
-    - `dvalue_dc`
-    - `dderivative_dc`
+For real `c`, returns:
+- `dvalue_dc`
+- `dderivative_dc`
 
-    For complex `c = a + ib`, returns:
-    - `dvalue_dcreal`, `dvalue_dcimag`
-    - `dderivative_dcreal`, `dderivative_dcimag`
+For complex `c = a + ib`, returns:
+- `dvalue_dcreal`, `dvalue_dcimag`
+- `dderivative_dcreal`, `dderivative_dcimag`
 """
 function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
                       spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false, h=nothing,
@@ -1154,15 +1154,15 @@ function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::Abstr
 end
 
 """
-    Numerical Jacobian of `rmn` outputs with respect to `c`.
+Numerical Jacobian of `rmn` outputs with respect to `c`.
 
-    For real `c`, returns:
-    - `dvalue_dc`
-    - `dderivative_dc`
+For real `c`, returns:
+- `dvalue_dc`
+- `dderivative_dc`
 
-    For complex `c = a + ib`, returns:
-    - `dvalue_dcreal`, `dvalue_dcimag`
-    - `dderivative_dcreal`, `dderivative_dcimag`
+For complex `c = a + ib`, returns:
+- `dvalue_dcreal`, `dvalue_dcimag`
+- `dderivative_dcreal`, `dderivative_dcimag`
 """
 function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
                       spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, h=nothing,
@@ -1244,29 +1244,29 @@ function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstrac
 end
 
 """
-    Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
+Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
 
-    Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
-    Jacobian-guided acceleration through `jacobian_eigen` when derivative quality is
-    acceptable.
+Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
+Jacobian-guided acceleration through `jacobian_eigen` when derivative quality is
+acceptable.
 
-    Keyword arguments:
-    - `bracket`: `(c_lo, c_hi)` with `c_lo < c_hi` and opposite signs of residual
-      `eigenvalue(m,n,c) - lambda_target` at the endpoints.
-    - `spheroid`: `:prolate` or `:oblate`.
-    - `precision`: `:double` or `:quad`.
-    - `atol`, `rtol`: positive absolute and relative tolerances used for both residual
-      and bracket-width stopping criteria.
-    - `maxiter`: positive maximum number of iterations.
-    - `use_jacobian`: enable derivative-based candidate steps when trusted.
+Keyword arguments:
+- `bracket`: `(c_lo, c_hi)` with `c_lo < c_hi` and opposite signs of residual
+  `eigenvalue(m,n,c) - lambda_target` at the endpoints.
+- `spheroid`: `:prolate` or `:oblate`.
+- `precision`: `:double` or `:quad`.
+- `atol`, `rtol`: positive absolute and relative tolerances used for both residual
+  and bracket-width stopping criteria.
+- `maxiter`: positive maximum number of iterations.
+- `use_jacobian`: enable derivative-based candidate steps when trusted.
 
-    Returns a named tuple with fields:
-    - `converged::Bool`
-    - `c::Float64`
-    - `residual::Float64`
-    - `iterations::Int`
-    - `bracket::Tuple{Float64,Float64}`
-    - `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)
+Returns a named tuple with fields:
+- `converged::Bool`
+- `c::Float64`
+- `residual::Float64`
+- `iterations::Int`
+- `bracket::Tuple{Float64,Float64}`
+- `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)
 """
 function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
                                bracket::Tuple{<:Real,<:Real},
@@ -1397,54 +1397,54 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
 end
 
 """
-    Estimate numerical accuracy of computed spheroidal wave functions.
-    
-    Returns the number of accurate decimal digits in the computed function values,
-    as estimated by the underlying Fortran solver. This provides confidence bounds
-    on the results.
-    
-    **Angular Functions (`smn`):**
-    - Returns `naccs`: decimal digits of accuracy for angular functions
-    - Estimated from convergence criteria in eigenvalue solver
-    
-    **Radial Functions (`rmn`):**
-    - Returns `naccr`: decimal digits of accuracy for radial functions  
-    - Estimated from recurrence relation residuals and function magnitudes
-    
-    Values near the accuracy limit indicate reliable results.
-    Values much below 1 digit suggest potential numerical issues or that
-    the chosen precision (:double or :quad) may be insufficient.
-    
-    Args:
-        m, n, c: spheroidal parameters
-        arg: evaluation points (η ∈ [-1,1] for angular; x-domain depends on spheroid for radial)
-        spheroid: :prolate or :oblate
-        precision: :double or :quad
-        kind: for radial functions, which kind (1-4)
-        target: :radial (default) or :angular
-        normalize: angular normalization flag (used when target=:angular)
-    
-    Returns:
-        Vector of estimated decimal digit accuracy at each evaluation point
-    
-    Examples:
-        # Angular function accuracy
-        acc_ang = accuracy(0, 1, 200, [0.5, 0.6, 0.7]; spheroid=:prolate, target=:angular)
-        # → [14, 14, 14]  # All values ~14 decimal digits accurate
-        
-        # Radial function accuracy
-        acc_rad = accuracy(0, 1, 200, [1.5, 2.0]; spheroid=:prolate, target=:radial, kind=1)
-        # → [13, 13]  # All values ~13 decimal digits accurate
+Estimate numerical accuracy of computed spheroidal wave functions.
 
-        # Complex oblate accuracy at quad precision
-        acc_c = accuracy(0, 1, 200 + 0.1im, [1.2, 1.5];
-                         spheroid=:oblate, precision=:quad, target=:radial, kind=3)
+Returns the number of accurate decimal digits in the computed function values,
+as estimated by the underlying Fortran solver. This provides confidence bounds
+on the results.
+
+**Angular Functions (`smn`):**
+- Returns `naccs`: decimal digits of accuracy for angular functions
+- Estimated from convergence criteria in eigenvalue solver
+
+**Radial Functions (`rmn`):**
+- Returns `naccr`: decimal digits of accuracy for radial functions  
+- Estimated from recurrence relation residuals and function magnitudes
+
+Values near the accuracy limit indicate reliable results.
+Values much below 1 digit suggest potential numerical issues or that
+the chosen precision (:double or :quad) may be insufficient.
+
+Args:
+    m, n, c: spheroidal parameters
+    arg: evaluation points (η ∈ [-1,1] for angular; x-domain depends on spheroid for radial)
+    spheroid: :prolate or :oblate
+    precision: :double or :quad
+    kind: for radial functions, which kind (1-4)
+    target: :radial (default) or :angular
+    normalize: angular normalization flag (used when target=:angular)
+
+Returns:
+    Vector of estimated decimal digit accuracy at each evaluation point
+
+Examples:
+    # Angular function accuracy
+    acc_ang = accuracy(0, 1, 200, [0.5, 0.6, 0.7]; spheroid=:prolate, target=:angular)
+    # → [14, 14, 14]  # All values ~14 decimal digits accurate
     
-    Notes:
-        - Supported for real and complex c
-        - Supported for both :prolate and :oblate spheroids
-        - Supported for both :double and :quad precision backends
-        - For exact spherical limit (c=0), returns theoretical maximum accuracy
+    # Radial function accuracy
+    acc_rad = accuracy(0, 1, 200, [1.5, 2.0]; spheroid=:prolate, target=:radial, kind=1)
+    # → [13, 13]  # All values ~13 decimal digits accurate
+
+    # Complex oblate accuracy at quad precision
+    acc_c = accuracy(0, 1, 200 + 0.1im, [1.2, 1.5];
+                     spheroid=:oblate, precision=:quad, target=:radial, kind=3)
+
+Notes:
+    - Supported for real and complex c
+    - Supported for both :prolate and :oblate spheroids
+    - Supported for both :double and :quad precision backends
+    - For exact spherical limit (c=0), returns theoretical maximum accuracy
 """
 function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractVector{<:Real};
                   spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, target::Symbol=:radial, normalize::Bool=false)
