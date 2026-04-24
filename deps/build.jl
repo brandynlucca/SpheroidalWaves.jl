@@ -3,7 +3,6 @@
 # Julia package build script: compiles Fortran batch modules into shared library
 # Runs automatically during package installation
 
-using Pkg
 using Libdl
 
 # ============================================================================
