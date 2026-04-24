@@ -1474,6 +1474,46 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
     end
 end
 
+@doc """
+Compute angular spheroidal wave functions and derivatives with respect to `eta`.
+
+Use this for batched angular evaluations for real or complex `c`.
+""" smn
+
+@doc """
+Compute radial spheroidal wave functions and derivatives with respect to `x`.
+
+Supports radial kinds 1-4 and returns complex-valued outputs.
+""" rmn
+
+@doc """
+Compute the radial Wronskian diagnostic from kind-1 and kind-2 radial solutions.
+""" radial_wronskian
+
+@doc """
+Compute the spheroidal separation constant `lambda_mn(c)`.
+""" eigenvalue
+
+@doc """
+Estimate numerical Jacobian of `eigenvalue` with respect to `c`.
+""" jacobian_eigen
+
+@doc """
+Estimate numerical Jacobian of `smn` outputs with respect to `c`.
+""" jacobian_smn
+
+@doc """
+Estimate numerical Jacobian of `rmn` outputs with respect to `c`.
+""" jacobian_rmn
+
+@doc """
+Solve `eigenvalue(m, n, c) = lambda_target` for real `c` using a bracketed hybrid solver.
+""" find_c_for_eigenvalue
+
+@doc """
+Return backend-estimated decimal-digit accuracy for angular or radial evaluations.
+""" accuracy
+
 function __init__()
     try
         # Default path for end users: shipped artifacts.
