@@ -59,6 +59,7 @@ backend_library(precision=:quad)
 ## Notes
 
 - Artifact entries must be populated for true out-of-box backend loading on fresh systems.
+- If artifacts are missing for a platform, package import attempts a one-time local build automatically.
 - `deps/library_config.jl` is generated locally by build tooling and is intentionally gitignored.
 - If a configured path does not exist, it is ignored and a warning is emitted.
 - If no backend is configured for a requested precision, calls fail with a clear error message.

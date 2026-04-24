@@ -7,24 +7,8 @@ on:
         description: "Download URL for r8 backend tarball"
         required: true
         type: string
-      r8_sha256:
-        description: "SHA256 for r8 backend tarball"
-        required: true
-        type: string
-      r8_git_tree_sha1:
-        description: "git-tree-sha1 for unpacked r8 artifact"
-        required: true
-        type: string
       r16_url:
         description: "Download URL for r16 backend tarball"
-        required: true
-        type: string
-      r16_sha256:
-        description: "SHA256 for r16 backend tarball"
-        required: true
-        type: string
-      r16_git_tree_sha1:
-        description: "git-tree-sha1 for unpacked r16 artifact"
         required: true
         type: string
 
@@ -38,11 +22,15 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.10'
+      - name: Download artifact tarballs
+        run: |
+          curl -fL "${{ inputs.r8_url }}" -o r8.tar.gz
+          curl -fL "${{ inputs.r16_url }}" -o r16.tar.gz
       - name: Update Artifacts.toml
         run: |
           julia scripts/update_artifacts.jl Artifacts.toml \
-            "${{ inputs.r8_url }}" "${{ inputs.r8_sha256 }}" "${{ inputs.r8_git_tree_sha1 }}" \
-            "${{ inputs.r16_url }}" "${{ inputs.r16_sha256 }}" "${{ inputs.r16_git_tree_sha1 }}"
+            "${{ inputs.r8_url }}" r8.tar.gz \
+            "${{ inputs.r16_url }}" r16.tar.gz
       - name: Show resulting Artifacts.toml
         run: |
           git diff -- Artifacts.toml || true

@@ -97,6 +97,8 @@ If artifacts are unavailable for the platform, the build script fallback will:
 3. Create shared libraries
 4. Register local paths for Julia to use
 
+This fallback is invoked during package installation via `Pkg.build()`, so users do not need to run manual build commands.
+
 **Build fallback prerequisites**: CMake 3.15+, Fortran compiler (gfortran or Intel Fortran)
 
 See [BUILD.md](BUILD.md) for detailed build instructions and troubleshooting.
@@ -107,8 +109,8 @@ When new backend binaries are published, update `Artifacts.toml` with:
 
 ```julia
 julia scripts/update_artifacts.jl Artifacts.toml \
-   <r8_url> <r8_sha256> <r8_git_tree_sha1> \
-   <r16_url> <r16_sha256> <r16_git_tree_sha1>
+   <r8_url> <r8_tarball_path> \
+   <r16_url> <r16_tarball_path>
 ```
 
 Or use the manual GitHub workflow:

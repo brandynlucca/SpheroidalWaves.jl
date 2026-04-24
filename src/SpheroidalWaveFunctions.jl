@@ -80,6 +80,13 @@ function _configure_one_backend_from_artifact!(artifact_name::String, precision:
         return false
     end
 
+    try
+        Artifacts.ensure_artifact_installed(artifact_name, artifacts_toml)
+    catch e
+        @warn "Failed to install artifact $artifact_name" precision exception=e maxlog=1
+        return false
+    end
+
     root = Artifacts.artifact_path(hash)
     libname = precision === :double ? _backend_filename("spheroidal_batch_r8") : _backend_filename("spheroidal_batch_r16")
     candidates = [
@@ -122,11 +129,22 @@ function _configure_backends_from_local_config!()
     return configured_any
 end
 
+
+
 function _require_backend_library(precision::Symbol)
     _validate_precision(precision)
     lib = _backend_libraries[precision]
     if lib === nothing
-        error("No backend library configured for precision :$precision.")
+        error("""
+        No backend library configured for precision :$precision.
+        
+        To resolve this, try one of:
+        1. Ensure artifacts are available (they should download automatically on first use).
+        2. Set environment variable: SPHEROIDALWAVEFUNCTIONS_LIBRARY_R$(precision === :double ? "8" : "16") = /path/to/lib
+        3. Run: julia> import Pkg; Pkg.build("SpheroidalWaveFunctions")
+        
+        See https://github.com/Brandyn/SpheroidalWaveFunctions.jl/docs/src/backend-overrides.md for details.
+        """)
     end
     return lib
 end
@@ -1459,13 +1477,11 @@ end
 function __init__()
     try
         # Default path for end users: shipped artifacts.
-        configured_from_artifacts = _configure_backends_from_artifacts!()
+        _configure_backends_from_artifacts!()
         # Overrides for CI/power users.
-        configured_from_env = _configure_backends_from_env!()
+        _configure_backends_from_env!()
         # Local generated config remains a final fallback for developer workflows.
-        if !(configured_from_artifacts || configured_from_env)
-            _configure_backends_from_local_config!()
-        end
+        _configure_backends_from_local_config!()
     catch e
         @warn "Failed to configure backend libraries during module initialization: $e" maxlog=1
     end
