@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>API · SpheroidalWaveFunctions.jl</title><meta name="title" content="API · SpheroidalWaveFunctions.jl"/><meta property="og:title" content="API · SpheroidalWaveFunctions.jl"/><meta property="twitter:title" content="API · SpheroidalWaveFunctions.jl"/><meta name="description" content="Documentation for SpheroidalWaveFunctions.jl."/><meta property="og:description" content="Documentation for SpheroidalWaveFunctions.jl."/><meta property="twitter:description" content="Documentation for SpheroidalWaveFunctions.jl."/><script data-outdated-warner src="../assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL=".."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="../assets/documenter.js"></script><script src="../search_index.js"></script><script src="../siteinfo.js"></script><script src="../../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="../assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="../assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href="../">SpheroidalWaveFunctions.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li><a class="tocitem" href="../">Home</a></li><li class="is-active"><a class="tocitem" href>API</a><ul class="internal"><li><a class="tocitem" href="#Core-Evaluation"><span>Core Evaluation</span></a></li><li><a class="tocitem" href="#Analysis-and-Diagnostics"><span>Analysis and Diagnostics</span></a></li><li><a class="tocitem" href="#Jacobians"><span>Jacobians</span></a></li><li><a class="tocitem" href="#Root-Finding"><span>Root Finding</span></a></li></ul></li><li><a class="tocitem" href="../math-and-usage/">Math and Usage</a></li><li><a class="tocitem" href="../backend-overrides/">Backend Overrides</a></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>API</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>API</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/main/docs/src/api.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="API-Reference"><a class="docs-heading-anchor" href="#API-Reference">API Reference</a><a id="API-Reference-1"></a><a class="docs-heading-anchor-permalink" href="#API-Reference" title="Permalink"></a></h1><p>This page renders the function docstrings for the public API.</p><p>For mathematical definitions and worked usage examples, see <a href="../math-and-usage/">Math and Usage</a>.</p><h2 id="Core-Evaluation"><a class="docs-heading-anchor" href="#Core-Evaluation">Core Evaluation</a><a id="Core-Evaluation-1"></a><a class="docs-heading-anchor-permalink" href="#Core-Evaluation" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.smn"><a class="docstring-binding" href="#SpheroidalWaveFunctions.smn"><code>SpheroidalWaveFunctions.smn</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Spheroidal angular wave functions (first kind).
+
+Computes prolate or oblate spheroidal angular wave functions of the first kind,
+Smₙ(η, c), and their derivatives with respect to η.
+
+These are eigenfunction solutions to the angular part of the spheroidal wave equation,
+orthogonal on the interval η ∈ [-1, 1]. They closely resemble associated Legendre
+polynomials when c is small.
+
+**Mathematical Background:**
+- The spheroidal wave equation separates into radial and angular parts
+- Angular functions satisfy: d/dη[(1-η²)dSmₙ/dη] + [λ(c,m,n) - c²(1-η²)]Smₙ = 0
+- Here λ(c,m,n) is the eigenvalue (separation constant)
+- Order m: 0 ≤ m ≤ n
+- Degree n: defines which eigenvalue/eigenfunction to compute
+
+**Parameters:**
+
+    m::Integer
+        Order parameter (must satisfy 0 ≤ m ≤ n)
+    n::Integer  
+        Degree parameter (defines eigenfunction; n ≥ 0)
+    c::Real or Complex
+        Size parameter (prolate: c = kd/2 with k=wavenumber, d=interfocal distance)
+        - Real c: real-valued functions
+        - Complex c: complex-valued functions (advanced applications)
+    η::AbstractVector{&lt;:Real}
+        Evaluation points in [-1, 1]
+        Represents cos(θ) where θ is angle in spherical coordinates
+    
+    Keyword Arguments:
+        spheroid::Symbol = :prolate
+            :prolate or :oblate geometry
+            - :prolate: elongated spheroid (ζ &gt; 0 in ξ,η,ϕ coordinates)
+            - :oblate: flattened spheroid (ζ &lt; 0)
+        
+        precision::Symbol = :double
+            :double (default) or :quad precision
+            - :double: ~15 decimal digits (real*8)
+            - :quad: ~30 decimal digits (real*16, slower)
+        
+        normalize::Bool = false
+            Whether to scale by sqrt((2n+1)/2)
+            - false: Meixner-Schafke normalization (norm → ∞ as m → ∞)
+            - true: Unity normalization (constant norm, convenient for applications)
+
+**Returns:**
+    NamedTuple with fields:
+    - .value::Vector{Real or Complex}
+        Function values Smₙ(η, c) at each η point
+    - .derivative::Vector{Real or Complex}
+        First derivatives dSmₙ/dη at each η point
+
+**Accuracy:**
+    - Double precision: ~14 decimal digits (excellent for most applications)
+    - Quad precision: ~29 decimal digits (for high-precision research)
+
+**Special Cases:**
+    - c = 0 (spherical limit): Returns associated Legendre polynomials P_n^m(η)
+    - c → ∞: Functions oscillate rapidly; use appropriate η resolution
+    - m = 0: Functions are even; m &gt; 0: mixed parity
+
+**Performance:**
+    - Vectorized in Fortran; fast batch evaluation
+    - O(1) cost per evaluation point (amortized over batch)
+    - Typical: 1000 points in ~0.001s
+
+**Examples:**
+    
+    # Basic usage: prolate Smn with c=1.5
+    η = [-0.9, -0.5, 0, 0.5, 0.9]
+    result = smn(1, 2, 1.5, η)
+    println(result.value)         # Function values
+    println(result.derivative)    # Derivatives
+    
+    # Normalized functions (unity norm)
+    result_norm = smn(0, 3, 10.0, η; normalize=true)
+    
+    # Oblate spheroid with higher precision
+    result_quad = smn(2, 4, 5.0, η; spheroid=:oblate, precision=:quad)
+    
+    # Complex parameter (advanced)
+    c_complex = 1.5 + 0.1im
+    result_c = smn(1, 2, c_complex, η)
+
+**Notes:**
+    - Order and degree must satisfy 0 ≤ m ≤ n
+    - All η values must be in [-1, 1]
+    - For spherical limit (c ≈ 0), uses analytic Legendre polynomial fallback
+    - Complex c support requires additional validation for branch cuts
+
+**References:**
+    - DLMF §30.2: https://dlmf.nist.gov/30.2
+    - Van Buren &amp; Boisvert (2004): Accurate calculation of prolate spheroidal wave functions</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L627-L722">source</a></section></details></article><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.rmn"><a class="docstring-binding" href="#SpheroidalWaveFunctions.rmn"><code>SpheroidalWaveFunctions.rmn</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Spheroidal radial wave functions (characteristic-exponent form).
+
+Computes prolate or oblate spheroidal radial wave functions and their derivatives,
+returning values in characteristic-exponent form to avoid overflow/underflow.
+
+These are eigenfunction solutions to the radial part of the spheroidal wave equation,
+defined on the interval x &gt; 1 (for prolate) or x &gt; -1 (for oblate, with |x| &gt; 1).
+Four kinds of radial functions are available.
+
+**Mathematical Background:**
+- Radial functions satisfy: d/dξ[(ξ²-1)dRmₙ/dξ] - [λ(c,m,n)ξ² - m² - c²ξ(ξ²-1)]Rmₙ = 0
+- λ(c,m,n) is the eigenvalue from the angular function problem
+- Functions are related to spherical Bessel and Hankel functions when c→0
+- Characteristic-exponent representation: R = R_characteristic × 10^exponent
+
+**Parameters:**
+
+    m, n, c: See smn() documentation
+    
+    x::AbstractVector{&lt;:Real}
+        Radial evaluation points
+        - For prolate: x &gt; 1 (distance from interfocal axis)
+        - For oblate: |x| &gt; 1
+        - Vectorized computation: all points evaluated in single Fortran call
+    
+    kind::Integer = 1
+        Which radial function kind:
+        
+        1: First kind R₁ (propagating, finite at x→∞)
+           - Regular solution; used for most applications
+           - Analogous to spherical Bessel j_ℓ(kr)
+        
+        2: Second kind R₂ (singular at x→∞)
+           - Complementary solution
+           - Analogous to spherical Bessel y_ℓ(kr)
+        
+        3: Third kind (linear combination) = R₁ + i·R₂
+           - Hankel function analog (outgoing wave)
+        
+        4: Fourth kind (linear combination) = R₁ - i·R₂
+           - Alternate Hankel function analog
+
+**Returns:**
+    NamedTuple with fields:
+    - .value::Vector{ComplexF64}
+        Function values Rmₙ(x, c) (always complex, even for real input)
+        Real part is the physical radial function
+        Imaginary part indicates which kind was computed
+    
+    - .derivative::Vector{ComplexF64}
+        First derivatives dRmₙ/dx
+
+**Accuracy &amp; Overflow Protection:**
+    - Uses characteristic-exponent representation internally
+    - Scales all values to [0.1, 1) × 10^exponent
+    - Automatically reconstructs full-precision values
+    - Maintains accuracy even for very large/small values
+
+**Special Cases:**
+    - c = 0 (spherical limit): Returns Legendre Q functions for kind=2
+    - x = 1 (boundary): kind=2 produces infinite value (singular point)
+    - Large c or x: Rapid oscillation; may need fine resolution
+
+**Examples:**
+    
+    # Basic radial function (kind 1)
+    x = [1.5, 2.0, 3.0, 5.0]
+    r1 = rmn(0, 1, 200, x; kind=1)
+    println(r1.value)
+    
+    # Second kind for same parameter set
+    r2 = rmn(0, 1, 200, x; kind=2)
+    
+    # Hankel-like combinations
+    r3_hankel = rmn(0, 1, 200, x; kind=3)  # Outgoing wave
+    r4_hankel = rmn(0, 1, 200, x; kind=4)  # Incoming wave
+    
+    # Verification: Wronskian should be constant
+    W = r1.value .* r2.derivative - r1.derivative .* r2.value
+    println(W)  # Should be approximately constant
+    
+    # Oblate spheroid
+    r_oblate = rmn(1, 2, 500, x; spheroid=:oblate, kind=1)
+
+**Notes:**
+    - Return values are complex even when c and x are real
+    - For real c, kind=1 has real values; kind=2 has real values; kinds 3,4 are complex
+    - Characteristic-exponent format is internal; reconstructed automatically
+    - Wronskian relation: R₁·R₂&#39; - R₁&#39;·R₂ = constant (diagnostic check)
+
+**Performance:**
+    - Vectorized batch computation in Fortran
+    - Four kinds computed efficiently in single Fortran call
+    - Typical: 1000 points in ~0.001s
+
+**References:**
+    - DLMF §30.3: https://dlmf.nist.gov/30.3
+    - Van Buren &amp; Boisvert (2004): Accurate calculation of prolate spheroidal wave functions</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L740-L839">source</a></section></details></article><h2 id="Analysis-and-Diagnostics"><a class="docs-heading-anchor" href="#Analysis-and-Diagnostics">Analysis and Diagnostics</a><a id="Analysis-and-Diagnostics-1"></a><a class="docs-heading-anchor-permalink" href="#Analysis-and-Diagnostics" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.eigenvalue"><a class="docstring-binding" href="#SpheroidalWaveFunctions.eigenvalue"><code>SpheroidalWaveFunctions.eigenvalue</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Compute the spheroidal separation constant λₘₙ(c).
+
+Returns the eigenvalue associated with order `m`, degree `n`, and size parameter `c`
+for either prolate or oblate spheroidal wave functions.
+
+Args:
+    m, n, c: spheroidal parameters
+    spheroid: `:prolate` or `:oblate`
+    precision: `:double` or `:quad`
+
+Returns:
+    Real value when `c` is real, complex value when `c` is complex.</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L957-L970">source</a></section></details></article><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.accuracy"><a class="docstring-binding" href="#SpheroidalWaveFunctions.accuracy"><code>SpheroidalWaveFunctions.accuracy</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Estimate numerical accuracy of computed spheroidal wave functions.
+
+Returns the number of accurate decimal digits in the computed function values,
+as estimated by the underlying Fortran solver. This provides confidence bounds
+on the results.
+
+**Angular Functions (`smn`):**
+- Returns `naccs`: decimal digits of accuracy for angular functions
+- Estimated from convergence criteria in eigenvalue solver
+
+**Radial Functions (`rmn`):**
+- Returns `naccr`: decimal digits of accuracy for radial functions  
+- Estimated from recurrence relation residuals and function magnitudes
+
+Values near the accuracy limit indicate reliable results.
+Values much below 1 digit suggest potential numerical issues or that
+the chosen precision (:double or :quad) may be insufficient.
+
+Args:
+    m, n, c: spheroidal parameters
+    arg: evaluation points (η ∈ [-1,1] for angular; x-domain depends on spheroid for radial)
+    spheroid: :prolate or :oblate
+    precision: :double or :quad
+    kind: for radial functions, which kind (1-4)
+    target: :radial (default) or :angular
+    normalize: angular normalization flag (used when target=:angular)
+
+Returns:
+    Vector of estimated decimal digit accuracy at each evaluation point
+
+Examples:
+    # Angular function accuracy
+    acc_ang = accuracy(0, 1, 200, [0.5, 0.6, 0.7]; spheroid=:prolate, target=:angular)
+    # → [14, 14, 14]  # All values ~14 decimal digits accurate
+    
+    # Radial function accuracy
+    acc_rad = accuracy(0, 1, 200, [1.5, 2.0]; spheroid=:prolate, target=:radial, kind=1)
+    # → [13, 13]  # All values ~13 decimal digits accurate
+
+    # Complex oblate accuracy at quad precision
+    acc_c = accuracy(0, 1, 200 + 0.1im, [1.2, 1.5];
+                     spheroid=:oblate, precision=:quad, target=:radial, kind=3)
+
+Notes:
+    - Supported for real and complex c
+    - Supported for both :prolate and :oblate spheroids
+    - Supported for both :double and :quad precision backends
+    - For exact spherical limit (c=0), returns theoretical maximum accuracy</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L1399-L1448">source</a></section></details></article><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.radial_wronskian"><a class="docstring-binding" href="#SpheroidalWaveFunctions.radial_wronskian"><code>SpheroidalWaveFunctions.radial_wronskian</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Verify consistency of radial functions via the Wronskian determinant.
+
+Computes the Wronskian W = R₁·R₂&#39; - R₁&#39;·R₂ for pairs of radial functions.
+A fundamental identity of spheroidal wave functions ensures this quantity
+should be approximately constant across all x values if R₁ and R₂ are
+correctly computed.
+
+**Mathematical Basis:**
+    The Wronskian of two linearly independent solutions to a second-order
+    ODE is constant. For spheroidal radial functions:
+    
+        W(R₁, R₂) = R₁(x)·dR₂/dx - dR₁/dx·R₂(x) = constant
+    
+    This constant depends on the normalization convention used by the solver.
+    The key insight is that W should NOT vary significantly across x.
+
+**Purpose:**
+    - **Diagnostic**: Detects solver failures or numerical breakdown
+    - **Validation**: Confirms R₁ and R₂ are consistent eigenfunctions
+    - **Testing**: Verifies implementation correctness
+    - **Confidence**: Deviations suggest precision or domain issues
+
+**Interpretation:**
+    
+    - **Constant W (≤1% variation)**: R₁ and R₂ are accurate and consistent
+    - **Variable W (&gt;10% variation)**: Numerical issues; solver may be struggling
+    - **NaN or Inf**: Severe failure; x likely outside valid domain or c too extreme
+
+**Parameters:**
+
+    m, n, c: spheroidal parameters (see smn/rmn documentation)
+    
+    x::AbstractVector{&lt;:Real}
+        Radial evaluation points (must satisfy |x| &gt; 1 for real c)
+        Best: use multiple points across the domain to verify constancy
+    
+    spheroid::Symbol = :prolate
+        :prolate or :oblate geometry
+    
+    precision::Symbol = :double
+        :double or :quad precision
+
+**Returns:**
+    Vector{ComplexF64} of Wronskian values W(x) at each x point
+    
+    For consistency verification, compute:
+        - W_mean = mean(W)
+        - W_variation = maximum(|W - W_mean|) / W_mean
+    
+    Values &lt;&lt; 1% indicate high confidence in the computation.
+
+**Examples:**
+    
+    # Verify prolate r1/r2 consistency
+    m, n, c = 0, 1, 200
+    x = [1.5, 2.0, 3.0, 5.0]
+    W = radial_wronskian(m, n, c, x)
+    
+    # Check variation
+    W_mean = mean(abs.(real.(W)))
+    W_variation = maximum(abs.(real(W) .- W_mean)) / W_mean * 100
+    println(&quot;Wronskian variation: $(W_variation)%&quot;)
+    
+    # Should print &lt; 1% variation for well-conditioned parameters
+    
+    # Oblate spheroid
+    W_oblate = radial_wronskian(1, 2, 500, [2.0, 3.0]; spheroid=:oblate)
+    
+    # Test at high precision for sensitive regime
+    W_quad = radial_wronskian(0, 1, 200, [1.1, 1.2]; precision=:quad)
+
+**Implementation Notes:**
+    - Computes r1 and r2 for kind=1 and kind=2 respectively
+    - Uses element-wise multiplication: W = r1.value .* r2.derivative - ...
+    - Returns complex even when c is real (due to rmn interface)
+    - Real part is the physically meaningful Wronskian value
+
+**Limitations:**
+    - Does not validate against theoretical Wronskian value (depends on conventions)
+    - Primarily useful for relative consistency checking
+    - Large |W| doesn&#39;t indicate failure; variation does
+    - Best used with quad precision for extreme parameters
+
+**References:**
+    - Mathematical background on Wronskians: ODE theory texts
+    - DLMF §30.3: Spheroidal wave function properties</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L857-L944">source</a></section></details></article><h2 id="Jacobians"><a class="docs-heading-anchor" href="#Jacobians">Jacobians</a><a id="Jacobians-1"></a><a class="docs-heading-anchor-permalink" href="#Jacobians" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.jacobian_eigen"><a class="docstring-binding" href="#SpheroidalWaveFunctions.jacobian_eigen"><code>SpheroidalWaveFunctions.jacobian_eigen</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">    Numerical Jacobian of `eigenvalue` with respect to `c`.
+
+    This function estimates parameter sensitivities of the spheroidal separation
+    constant `lambda_mn(c)` using centered finite differences.
+
+    For real `c`, the return value is a scalar estimate of:
+    - `d(lambda)/dc`
+
+    For complex `c = a + ib`, the return value is a named tuple with:
+    - `d_dcreal = ∂lambda/∂a`
+    - `d_dcimag = ∂lambda/∂b`
+
+    Keyword arguments:
+    - `spheroid`: `:prolate` or `:oblate`
+    - `precision`: `:double` or `:quad`
+    - `h`: finite-difference step (auto-selected if `nothing`)
+    - `with_metadata`: if `true`, returns derivative(s) plus reliability metadata
+    - `adaptive`: if `true`, retries with smaller step in poor-conditioning regimes
+    - `rtol`, `atol`: positive tolerances used for step-halving consistency checks
+
+    Reliability metadata fields (`with_metadata=true`):
+    - `step_used`
+    - `relative_change_when_halving_step`
+    - `finite_flag`
+    - `conditioning_flag` in `(:good, :warning, :poor)`
+    - `suggested_action` in `(:accept, :retry_smaller_h, :use_quad)`
+
+    Returns:
+    - Real `c`, `with_metadata=false`: scalar derivative
+    - Real `c`, `with_metadata=true`: `(derivative=..., metadata=...)`
+    - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
+    - Complex `c`, `with_metadata=true`:
+        `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L988-L1022">source</a></section></details></article><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.jacobian_smn"><a class="docstring-binding" href="#SpheroidalWaveFunctions.jacobian_smn"><code>SpheroidalWaveFunctions.jacobian_smn</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Numerical Jacobian of `smn` outputs with respect to `c`.
+
+For real `c`, returns:
+- `dvalue_dc`
+- `dderivative_dc`
+
+For complex `c = a + ib`, returns:
+- `dvalue_dcreal`, `dvalue_dcimag`
+- `dderivative_dcreal`, `dderivative_dcimag`</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L1067-L1077">source</a></section></details></article><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.jacobian_rmn"><a class="docstring-binding" href="#SpheroidalWaveFunctions.jacobian_rmn"><code>SpheroidalWaveFunctions.jacobian_rmn</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Numerical Jacobian of `rmn` outputs with respect to `c`.
+
+For real `c`, returns:
+- `dvalue_dc`
+- `dderivative_dc`
+
+For complex `c = a + ib`, returns:
+- `dvalue_dcreal`, `dvalue_dcimag`
+- `dderivative_dcreal`, `dderivative_dcimag`</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L1156-L1166">source</a></section></details></article><h2 id="Root-Finding"><a class="docs-heading-anchor" href="#Root-Finding">Root Finding</a><a id="Root-Finding-1"></a><a class="docs-heading-anchor-permalink" href="#Root-Finding" title="Permalink"></a></h2><article><details class="docstring" open="true"><summary id="SpheroidalWaveFunctions.find_c_for_eigenvalue"><a class="docstring-binding" href="#SpheroidalWaveFunctions.find_c_for_eigenvalue"><code>SpheroidalWaveFunctions.find_c_for_eigenvalue</code></a> — <span class="docstring-category">Function</span></summary><section><div><pre><code class="language-julia hljs">Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
+
+Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
+Jacobian-guided acceleration through `jacobian_eigen` when derivative quality is
+acceptable.
+
+Keyword arguments:
+- `bracket`: `(c_lo, c_hi)` with `c_lo &lt; c_hi` and opposite signs of residual
+  `eigenvalue(m,n,c) - lambda_target` at the endpoints.
+- `spheroid`: `:prolate` or `:oblate`.
+- `precision`: `:double` or `:quad`.
+- `atol`, `rtol`: positive absolute and relative tolerances used for both residual
+  and bracket-width stopping criteria.
+- `maxiter`: positive maximum number of iterations.
+- `use_jacobian`: enable derivative-based candidate steps when trusted.
+
+Returns a named tuple with fields:
+- `converged::Bool`
+- `c::Float64`
+- `residual::Float64`
+- `iterations::Int`
+- `bracket::Tuple{Float64,Float64}`
+- `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)</code></pre></div><a class="docs-sourcelink" target="_blank" href="https://github.com/brandynlucca/SpheroidalWaveFunctions.jl/blob/c913af2b51642389828d663e40f7b774a21fc25c/src/SpheroidalWaveFunctions.jl#L1246-L1270">source</a></section></details></article></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../math-and-usage/">Math and Usage »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 24 April 2026 08:39">Friday 24 April 2026</span>. Using Julia version 1.10.11.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
