@@ -2,7 +2,7 @@ module SpheroidalWaveFunctions
 
 using Libdl
 
-export smn, rmn, wronskian_r1r2, accuracy
+export smn, rmn, radial_wronskian, accuracy, eigenvalue, jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
 
 const _backend_libraries = Dict{Symbol,Union{Nothing,String}}(
     :double => nothing,
@@ -10,6 +10,9 @@ const _backend_libraries = Dict{Symbol,Union{Nothing,String}}(
 )
 
 const _backend_handles = Dict{String,Ptr{Cvoid}}()
+
+const _ENV_BACKEND_R8 = "SPHEROIDALWAVEFUNCTIONS_LIBRARY_R8"
+const _ENV_BACKEND_R16 = "SPHEROIDALWAVEFUNCTIONS_LIBRARY_R16"
 
 function _validate_precision(precision::Symbol)
     if precision != :double && precision != :quad
@@ -26,6 +29,51 @@ end
 function backend_library(; precision::Symbol=:double)
     _validate_precision(precision)
     return _backend_libraries[precision]
+end
+
+function _set_backend_from_candidate(path, precision::Symbol, source::AbstractString)
+    if path isa AbstractString
+        candidate = String(path)
+        if isfile(candidate)
+            set_backend_library!(candidate; precision=precision)
+            return true
+        else
+            @warn "Ignoring backend path from $source because file does not exist" precision path=candidate maxlog=1
+        end
+    elseif path !== nothing
+        @warn "Ignoring backend path from $source because value is not a string" precision value=path maxlog=1
+    end
+    return false
+end
+
+function _configure_backends_from_env!()
+    configured_any = false
+    if haskey(ENV, _ENV_BACKEND_R8)
+        configured_any |= _set_backend_from_candidate(ENV[_ENV_BACKEND_R8], :double, "ENV[$_ENV_BACKEND_R8]")
+    end
+    if haskey(ENV, _ENV_BACKEND_R16)
+        configured_any |= _set_backend_from_candidate(ENV[_ENV_BACKEND_R16], :quad, "ENV[$_ENV_BACKEND_R16]")
+    end
+    return configured_any
+end
+
+function _configure_backends_from_local_config!()
+    config_file = joinpath(dirname(@__FILE__), "..", "deps", "library_config.jl")
+    if !isfile(config_file)
+        return false
+    end
+
+    configured_any = false
+    include(config_file)
+    if isdefined(@__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_R8)
+        lib_r8 = Base.invokelatest(getfield, @__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_R8)
+        configured_any |= _set_backend_from_candidate(lib_r8, :double, "local library_config.jl")
+    end
+    if isdefined(@__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_R16)
+        lib_r16 = Base.invokelatest(getfield, @__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_R16)
+        configured_any |= _set_backend_from_candidate(lib_r16, :quad, "local library_config.jl")
+    end
+    return configured_any
 end
 
 function _require_backend_library(precision::Symbol)
@@ -85,6 +133,91 @@ end
 
 function _is_exact_spherical_limit(c::Complex)
     return iszero(real(c)) && iszero(imag(c))
+end
+
+function _default_jacobian_step(c::Real)
+    return sqrt(eps(Float64)) * max(1.0, abs(Float64(c)))
+end
+
+function _default_jacobian_step(c::Complex)
+    return sqrt(eps(Float64)) * max(1.0, abs(real(c)), abs(imag(c)))
+end
+
+function _resolve_jacobian_step(c::Union{Real,Complex}, h)
+    step = h === nothing ? _default_jacobian_step(c) : Float64(h)
+    if !(step > 0)
+        error("h must be positive, got $h")
+    end
+    return step
+end
+
+function _validate_jacobian_tolerances(rtol::Real, atol::Real)
+    if !(rtol > 0)
+        error("rtol must be positive, got $rtol")
+    end
+    if !(atol > 0)
+        error("atol must be positive, got $atol")
+    end
+end
+
+function _all_finite(x)
+    return x isa Number ? isfinite(x) : all(isfinite, x)
+end
+
+function _max_relative_change(dh, dh2; atol::Real)
+    abs_diff = abs.(dh2 .- dh)
+    scale = max.(abs.(dh2), atol)
+    rel = abs_diff ./ scale
+    return rel isa Number ? Float64(rel) : Float64(maximum(rel))
+end
+
+function _jacobian_suggested_action(conditioning_flag::Symbol, finite_flag::Bool, precision::Symbol)
+    if !finite_flag
+        return :retry_smaller_h
+    end
+    if conditioning_flag === :good
+        return :accept
+    elseif conditioning_flag === :warning
+        return precision === :quad ? :accept : :retry_smaller_h
+    else
+        return precision === :quad ? :retry_smaller_h : :use_quad
+    end
+end
+
+function _jacobian_metadata(dh, dh2, step_used::Float64; precision::Symbol, rtol::Real, atol::Real)
+    finite_flag = _all_finite(dh) && _all_finite(dh2)
+    rel_change = _max_relative_change(dh, dh2; atol=atol)
+    conditioning_flag = !finite_flag ? :poor : (rel_change <= 10 * rtol ? :good : (rel_change <= 1000 * rtol ? :warning : :poor))
+    suggested_action = _jacobian_suggested_action(conditioning_flag, finite_flag, precision)
+    return (
+        step_used=step_used,
+        relative_change_when_halving_step=rel_change,
+        finite_flag=finite_flag,
+        conditioning_flag=conditioning_flag,
+        suggested_action=suggested_action,
+    )
+end
+
+function _finite_difference_with_metadata(calc::Function, step::Float64; precision::Symbol, adaptive::Bool, rtol::Real, atol::Real)
+    d_h = calc(step)
+    d_h2 = calc(step / 2)
+    if !adaptive
+        metadata = _jacobian_metadata(d_h, d_h2, step; precision=precision, rtol=rtol, atol=atol)
+        return d_h, metadata
+    end
+
+    best = d_h2
+    step_used = step / 2
+    metadata = _jacobian_metadata(d_h, d_h2, step_used; precision=precision, rtol=rtol, atol=atol)
+
+    if adaptive && metadata.conditioning_flag === :poor
+        d_h4 = calc(step / 4)
+        best = d_h4
+        step_used = step / 4
+        metadata = _jacobian_metadata(d_h2, d_h4, step_used; precision=precision, rtol=rtol, atol=atol)
+    end
+
+    return best, metadata
 end
 
 function _legendre_p(n::Integer, x::Float64)
@@ -384,6 +517,49 @@ function _call_complex_rmn_accuracy(prefix::Symbol, m::Integer, n::Integer, c::C
     return Int.(naccr)
 end
 
+function _call_real_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Real; precision::Symbol=:double)
+    if _is_exact_spherical_limit(c)
+        return Float64(n * (n + 1))
+    end
+
+    lib = _require_backend_library(precision)
+    suffix = _real_suffix(precision)
+    symbol = Symbol(String(prefix) * "_eigenvalue" * suffix)
+    fnptr = _symbol_pointer(lib, symbol)
+
+    eig = Ref{Cdouble}(0.0)
+    status = Ref{Cint}(0)
+
+    ccall(fnptr, Cvoid,
+          (Cint, Cint, Cdouble, Ref{Cdouble}, Ref{Cint}),
+          Cint(m), Cint(n), Cdouble(c), eig, status)
+
+    _check_scalar_status(status[])
+    return eig[]
+end
+
+function _call_complex_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Complex; precision::Symbol=:double)
+    if _is_exact_spherical_limit(c)
+        return complex(Float64(n * (n + 1)), 0.0)
+    end
+
+    lib = _require_backend_library(precision)
+    suffix = _complex_suffix(precision)
+    symbol = Symbol(String(prefix) * "_eigenvalue" * suffix)
+    fnptr = _symbol_pointer(lib, symbol)
+
+    eig_re = Ref{Cdouble}(0.0)
+    eig_im = Ref{Cdouble}(0.0)
+    status = Ref{Cint}(0)
+
+    ccall(fnptr, Cvoid,
+          (Cint, Cint, Cdouble, Cdouble, Ref{Cdouble}, Ref{Cdouble}, Ref{Cint}),
+          Cint(m), Cint(n), Cdouble(real(c)), Cdouble(imag(c)), eig_re, eig_im, status)
+
+    _check_scalar_status(status[])
+    return complex(eig_re[], eig_im[])
+end
+
 function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
              spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false)
     """
@@ -614,8 +790,8 @@ function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<
     end
 end
 
-function wronskian_r1r2(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
-                        spheroid::Symbol=:prolate, precision::Symbol=:double)
+function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
+                          spheroid::Symbol=:prolate, precision::Symbol=:double)
     """
     Verify consistency of radial functions via the Wronskian determinant.
     
@@ -673,7 +849,7 @@ function wronskian_r1r2(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstr
         # Verify prolate r1/r2 consistency
         m, n, c = 0, 1, 200
         x = [1.5, 2.0, 3.0, 5.0]
-        W = wronskian_r1r2(m, n, c, x)
+        W = radial_wronskian(m, n, c, x)
         
         # Check variation
         W_mean = mean(abs.(real.(W)))
@@ -683,10 +859,10 @@ function wronskian_r1r2(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstr
         # Should print < 1% variation for well-conditioned parameters
         
         # Oblate spheroid
-        W_oblate = wronskian_r1r2(1, 2, 500, [2.0, 3.0]; spheroid=:oblate)
+        W_oblate = radial_wronskian(1, 2, 500, [2.0, 3.0]; spheroid=:oblate)
         
         # Test at high precision for sensitive regime
-        W_quad = wronskian_r1r2(0, 1, 200, [1.1, 1.2]; precision=:quad)
+        W_quad = radial_wronskian(0, 1, 200, [1.1, 1.2]; precision=:quad)
     
     **Implementation Notes:**
         - Computes r1 and r2 for kind=1 and kind=2 respectively
@@ -712,6 +888,448 @@ function wronskian_r1r2(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstr
     W = r1.value .* r2.derivative - r1.derivative .* r2.value
     
     return W
+end
+
+function eigenvalue(m::Integer, n::Integer, c::Union{Real,Complex};
+                    spheroid::Symbol=:prolate, precision::Symbol=:double)
+    """
+    Compute the spheroidal separation constant λₘₙ(c).
+
+    Returns the eigenvalue associated with order `m`, degree `n`, and size parameter `c`
+    for either prolate or oblate spheroidal wave functions.
+
+    Args:
+        m, n, c: spheroidal parameters
+        spheroid: `:prolate` or `:oblate`
+        precision: `:double` or `:quad`
+
+    Returns:
+        Real value when `c` is real, complex value when `c` is complex.
+    """
+
+    _validate_precision(precision)
+    if spheroid != :prolate && spheroid != :oblate
+        error("spheroid must be :prolate or :oblate, got :$spheroid")
+    end
+
+    if c isa Real
+        prefix = spheroid === :prolate ? :psms : :oblate
+        return _call_real_eigenvalue(prefix, m, n, c; precision=precision)
+    else
+        prefix = spheroid === :prolate ? :cprolate : :coblate
+        return _call_complex_eigenvalue(prefix, m, n, c; precision=precision)
+    end
+end
+
+function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
+                                                spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
+                                                with_metadata::Bool=false, adaptive::Bool=true,
+                                                rtol::Real=1e-6, atol::Real=1e-10)
+        """
+        Numerical Jacobian of `eigenvalue` with respect to `c`.
+
+        This function estimates parameter sensitivities of the spheroidal separation
+        constant `lambda_mn(c)` using centered finite differences.
+
+        For real `c`, the return value is a scalar estimate of:
+        - `d(lambda)/dc`
+
+        For complex `c = a + ib`, the return value is a named tuple with:
+        - `d_dcreal = ∂lambda/∂a`
+        - `d_dcimag = ∂lambda/∂b`
+
+        Keyword arguments:
+        - `spheroid`: `:prolate` or `:oblate`
+        - `precision`: `:double` or `:quad`
+        - `h`: finite-difference step (auto-selected if `nothing`)
+        - `with_metadata`: if `true`, returns derivative(s) plus reliability metadata
+        - `adaptive`: if `true`, retries with smaller step in poor-conditioning regimes
+        - `rtol`, `atol`: positive tolerances used for step-halving consistency checks
+
+        Reliability metadata fields (`with_metadata=true`):
+        - `step_used`
+        - `relative_change_when_halving_step`
+        - `finite_flag`
+        - `conditioning_flag` in `(:good, :warning, :poor)`
+        - `suggested_action` in `(:accept, :retry_smaller_h, :use_quad)`
+
+        Returns:
+        - Real `c`, `with_metadata=false`: scalar derivative
+        - Real `c`, `with_metadata=true`: `(derivative=..., metadata=...)`
+        - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
+        - Complex `c`, `with_metadata=true`:
+            `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`
+        """
+
+    _validate_precision(precision)
+    _validate_jacobian_tolerances(rtol, atol)
+    step = _resolve_jacobian_step(c, h)
+    if c isa Real
+        calc = s -> begin
+            cp = c + s
+            cm = c - s
+            fp = eigenvalue(m, n, cp; spheroid=spheroid, precision=precision)
+            fm = eigenvalue(m, n, cm; spheroid=spheroid, precision=precision)
+            (fp - fm) / (2 * s)
+        end
+        derivative, metadata = _finite_difference_with_metadata(calc, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        return with_metadata ? (derivative=derivative, metadata=metadata) : derivative
+    else
+        calc_re = s -> begin
+            fp = eigenvalue(m, n, c + s; spheroid=spheroid, precision=precision)
+            fm = eigenvalue(m, n, c - s; spheroid=spheroid, precision=precision)
+            (fp - fm) / (2 * s)
+        end
+        calc_im = s -> begin
+            fp = eigenvalue(m, n, c + s * im; spheroid=spheroid, precision=precision)
+            fm = eigenvalue(m, n, c - s * im; spheroid=spheroid, precision=precision)
+            (fp - fm) / (2 * s)
+        end
+        d_dcreal, metadata_dcreal = _finite_difference_with_metadata(calc_re, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        d_dcimag, metadata_dcimag = _finite_difference_with_metadata(calc_im, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+
+        if with_metadata
+            return (
+                d_dcreal=d_dcreal,
+                d_dcimag=d_dcimag,
+                metadata_dcreal=metadata_dcreal,
+                metadata_dcimag=metadata_dcimag,
+            )
+        end
+        return (d_dcreal=d_dcreal, d_dcimag=d_dcimag)
+    end
+end
+
+function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
+                      spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false, h=nothing,
+                      with_metadata::Bool=false, adaptive::Bool=true,
+                      rtol::Real=1e-6, atol::Real=1e-10)
+    """
+    Numerical Jacobian of `smn` outputs with respect to `c`.
+
+    For real `c`, returns:
+    - `dvalue_dc`
+    - `dderivative_dc`
+
+    For complex `c = a + ib`, returns:
+    - `dvalue_dcreal`, `dvalue_dcimag`
+    - `dderivative_dcreal`, `dderivative_dcimag`
+    """
+
+    _validate_precision(precision)
+    _validate_jacobian_tolerances(rtol, atol)
+    step = _resolve_jacobian_step(c, h)
+    if c isa Real
+        calc_value = s -> begin
+            sp = smn(m, n, c + s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.value .- sm.value) ./ (2 * s)
+        end
+        calc_derivative = s -> begin
+            sp = smn(m, n, c + s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.derivative .- sm.derivative) ./ (2 * s)
+        end
+        dvalue_dc, metadata_value = _finite_difference_with_metadata(calc_value, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dc, metadata_derivative = _finite_difference_with_metadata(calc_derivative, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        if with_metadata
+            return (
+                dvalue_dc=dvalue_dc,
+                dderivative_dc=dderivative_dc,
+                metadata_value=metadata_value,
+                metadata_derivative=metadata_derivative,
+            )
+        end
+        return (dvalue_dc=dvalue_dc, dderivative_dc=dderivative_dc)
+    else
+        calc_value_re = s -> begin
+            sp = smn(m, n, c + s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.value .- sm.value) ./ (2 * s)
+        end
+        calc_value_im = s -> begin
+            sp = smn(m, n, c + s * im, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s * im, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.value .- sm.value) ./ (2 * s)
+        end
+        calc_derivative_re = s -> begin
+            sp = smn(m, n, c + s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.derivative .- sm.derivative) ./ (2 * s)
+        end
+        calc_derivative_im = s -> begin
+            sp = smn(m, n, c + s * im, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            sm = smn(m, n, c - s * im, eta; spheroid=spheroid, precision=precision, normalize=normalize)
+            (sp.derivative .- sm.derivative) ./ (2 * s)
+        end
+
+        dvalue_dcreal, metadata_value_dcreal = _finite_difference_with_metadata(calc_value_re, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dvalue_dcimag, metadata_value_dcimag = _finite_difference_with_metadata(calc_value_im, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dcreal, metadata_derivative_dcreal = _finite_difference_with_metadata(calc_derivative_re, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dcimag, metadata_derivative_dcimag = _finite_difference_with_metadata(calc_derivative_im, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+
+        if with_metadata
+            return (
+                dvalue_dcreal=dvalue_dcreal,
+                dvalue_dcimag=dvalue_dcimag,
+                dderivative_dcreal=dderivative_dcreal,
+                dderivative_dcimag=dderivative_dcimag,
+                metadata_value_dcreal=metadata_value_dcreal,
+                metadata_value_dcimag=metadata_value_dcimag,
+                metadata_derivative_dcreal=metadata_derivative_dcreal,
+                metadata_derivative_dcimag=metadata_derivative_dcimag,
+            )
+        end
+        return (
+            dvalue_dcreal=dvalue_dcreal,
+            dvalue_dcimag=dvalue_dcimag,
+            dderivative_dcreal=dderivative_dcreal,
+            dderivative_dcimag=dderivative_dcimag,
+        )
+    end
+end
+
+function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
+                      spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, h=nothing,
+                      with_metadata::Bool=false, adaptive::Bool=true,
+                      rtol::Real=1e-6, atol::Real=1e-10)
+    """
+    Numerical Jacobian of `rmn` outputs with respect to `c`.
+
+    For real `c`, returns:
+    - `dvalue_dc`
+    - `dderivative_dc`
+
+    For complex `c = a + ib`, returns:
+    - `dvalue_dcreal`, `dvalue_dcimag`
+    - `dderivative_dcreal`, `dderivative_dcimag`
+    """
+
+    _validate_precision(precision)
+    _validate_jacobian_tolerances(rtol, atol)
+    step = _resolve_jacobian_step(c, h)
+    if c isa Real
+        calc_value = s -> begin
+            rp = rmn(m, n, c + s, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.value .- rm.value) ./ (2 * s)
+        end
+        calc_derivative = s -> begin
+            rp = rmn(m, n, c + s, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.derivative .- rm.derivative) ./ (2 * s)
+        end
+        dvalue_dc, metadata_value = _finite_difference_with_metadata(calc_value, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dc, metadata_derivative = _finite_difference_with_metadata(calc_derivative, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+
+        if with_metadata
+            return (
+                dvalue_dc=dvalue_dc,
+                dderivative_dc=dderivative_dc,
+                metadata_value=metadata_value,
+                metadata_derivative=metadata_derivative,
+            )
+        end
+        return (dvalue_dc=dvalue_dc, dderivative_dc=dderivative_dc)
+    else
+        calc_value_re = s -> begin
+            rp = rmn(m, n, c + s, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.value .- rm.value) ./ (2 * s)
+        end
+        calc_value_im = s -> begin
+            rp = rmn(m, n, c + s * im, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s * im, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.value .- rm.value) ./ (2 * s)
+        end
+        calc_derivative_re = s -> begin
+            rp = rmn(m, n, c + s, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.derivative .- rm.derivative) ./ (2 * s)
+        end
+        calc_derivative_im = s -> begin
+            rp = rmn(m, n, c + s * im, x; spheroid=spheroid, precision=precision, kind=kind)
+            rm = rmn(m, n, c - s * im, x; spheroid=spheroid, precision=precision, kind=kind)
+            (rp.derivative .- rm.derivative) ./ (2 * s)
+        end
+
+        dvalue_dcreal, metadata_value_dcreal = _finite_difference_with_metadata(calc_value_re, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dvalue_dcimag, metadata_value_dcimag = _finite_difference_with_metadata(calc_value_im, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dcreal, metadata_derivative_dcreal = _finite_difference_with_metadata(calc_derivative_re, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+        dderivative_dcimag, metadata_derivative_dcimag = _finite_difference_with_metadata(calc_derivative_im, step; precision=precision, adaptive=adaptive, rtol=rtol, atol=atol)
+
+        if with_metadata
+            return (
+                dvalue_dcreal=dvalue_dcreal,
+                dvalue_dcimag=dvalue_dcimag,
+                dderivative_dcreal=dderivative_dcreal,
+                dderivative_dcimag=dderivative_dcimag,
+                metadata_value_dcreal=metadata_value_dcreal,
+                metadata_value_dcimag=metadata_value_dcimag,
+                metadata_derivative_dcreal=metadata_derivative_dcreal,
+                metadata_derivative_dcimag=metadata_derivative_dcimag,
+            )
+        end
+        return (
+            dvalue_dcreal=dvalue_dcreal,
+            dvalue_dcimag=dvalue_dcimag,
+            dderivative_dcreal=dderivative_dcreal,
+            dderivative_dcimag=dderivative_dcimag,
+        )
+    end
+end
+
+function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
+                               bracket::Tuple{<:Real,<:Real},
+                               spheroid::Symbol=:prolate,
+                               precision::Symbol=:double,
+                               atol::Real=1e-10,
+                               rtol::Real=1e-8,
+                               maxiter::Integer=80,
+                               use_jacobian::Bool=true)
+    """
+    Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
+
+    Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
+    Jacobian-guided acceleration through `jacobian_eigen` when derivative quality is
+    acceptable.
+
+    Keyword arguments:
+    - `bracket`: `(c_lo, c_hi)` with `c_lo < c_hi` and opposite signs of residual
+      `eigenvalue(m,n,c) - lambda_target` at the endpoints.
+    - `spheroid`: `:prolate` or `:oblate`.
+    - `precision`: `:double` or `:quad`.
+    - `atol`, `rtol`: positive absolute and relative tolerances used for both residual
+      and bracket-width stopping criteria.
+    - `maxiter`: positive maximum number of iterations.
+    - `use_jacobian`: enable derivative-based candidate steps when trusted.
+
+    Returns a named tuple with fields:
+    - `converged::Bool`
+    - `c::Float64`
+    - `residual::Float64`
+    - `iterations::Int`
+    - `bracket::Tuple{Float64,Float64}`
+    - `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)
+    """
+
+    _validate_precision(precision)
+    if spheroid != :prolate && spheroid != :oblate
+        error("spheroid must be :prolate or :oblate, got :$spheroid")
+    end
+    if !(atol > 0)
+        error("atol must be positive, got $atol")
+    end
+    if !(rtol > 0)
+        error("rtol must be positive, got $rtol")
+    end
+    if maxiter <= 0
+        error("maxiter must be positive, got $maxiter")
+    end
+
+    a = Float64(bracket[1])
+    b = Float64(bracket[2])
+    if !(a < b)
+        error("bracket must satisfy bracket[1] < bracket[2]")
+    end
+
+    f(c) = Float64(eigenvalue(m, n, c; spheroid=spheroid, precision=precision) - lambda_target)
+
+    fa = f(a)
+    fb = f(b)
+    if !isfinite(fa) || !isfinite(fb)
+        error("non-finite residual at bracket endpoints")
+    end
+
+    tol_residual = atol + rtol * max(1.0, abs(Float64(lambda_target)))
+    width_tol() = atol + rtol * max(1.0, abs(a), abs(b))
+
+    if abs(fa) <= tol_residual
+        return (converged=true, c=a, residual=fa, iterations=0, bracket=(a, b), method=:endpoint)
+    end
+    if abs(fb) <= tol_residual
+        return (converged=true, c=b, residual=fb, iterations=0, bracket=(a, b), method=:endpoint)
+    end
+    if signbit(fa) == signbit(fb)
+        error("bracket endpoints must straddle a root for eigenvalue(m,n,c)-lambda_target")
+    end
+
+    method_used = :bisection
+    c_best = (a + b) / 2
+    f_best = f(c_best)
+
+    for iter in 1:maxiter
+        width = b - a
+        mid = (a + b) / 2
+        fmid = f(mid)
+
+        candidate = mid
+        method = :bisection
+
+        if use_jacobian
+            j = jacobian_eigen(m, n, mid; spheroid=spheroid, precision=precision,
+                               with_metadata=true, adaptive=true)
+            d = Float64(j.derivative)
+            md = j.metadata
+            if isfinite(d) && abs(d) > sqrt(eps(Float64)) && md.suggested_action == :accept
+                newton = mid - fmid / d
+                if a < newton < b && isfinite(newton)
+                    candidate = newton
+                    method = :newton
+                end
+            end
+        end
+
+        if method == :bisection
+            denom = fb - fa
+            if isfinite(denom) && abs(denom) > eps(Float64)
+                secant = b - fb * (b - a) / denom
+                if a < secant < b && isfinite(secant)
+                    candidate = secant
+                    method = :secant
+                end
+            end
+        end
+
+        fc = f(candidate)
+        if !isfinite(fc)
+            candidate = mid
+            fc = fmid
+            method = :bisection
+        end
+
+        c_best = candidate
+        f_best = fc
+        method_used = method
+
+        if abs(fc) <= tol_residual || width <= width_tol()
+            return (
+                converged=true,
+                c=candidate,
+                residual=fc,
+                iterations=iter,
+                bracket=(a, b),
+                method=method,
+            )
+        end
+
+        if signbit(fa) == signbit(fc)
+            a = candidate
+            fa = fc
+        else
+            b = candidate
+            fb = fc
+        end
+    end
+
+    return (
+        converged=false,
+        c=c_best,
+        residual=f_best,
+        iterations=maxiter,
+        bracket=(a, b),
+        method=:maxiter,
+    )
 end
 
 function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractVector{<:Real};
@@ -793,19 +1411,15 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
 end
 
 function __init__()
-    config_file = joinpath(dirname(@__FILE__), "..", "deps", "library_config.jl")
-    if isfile(config_file)
-        try
-            include(config_file)
-            if @isdefined(SPHEROIDAL_BATCH_LIBRARY_R8) && isfile(SPHEROIDAL_BATCH_LIBRARY_R8)
-                set_backend_library!(SPHEROIDAL_BATCH_LIBRARY_R8; precision=:double)
-            end
-            if @isdefined(SPHEROIDAL_BATCH_LIBRARY_R16) && isfile(SPHEROIDAL_BATCH_LIBRARY_R16)
-                set_backend_library!(SPHEROIDAL_BATCH_LIBRARY_R16; precision=:quad)
-            end
-        catch e
-            @warn "Failed to load library configuration: $e" maxlog=1
+    try
+        # User/CI env vars are the primary non-code override path.
+        configured_from_env = _configure_backends_from_env!()
+        # Local generated config remains a fallback for developer workflows.
+        if !configured_from_env
+            _configure_backends_from_local_config!()
         end
+    catch e
+        @warn "Failed to configure backend libraries during module initialization: $e" maxlog=1
     end
 end
 

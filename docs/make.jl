@@ -10,6 +10,7 @@ makedocs(
         "Home" => "index.md",
         "API" => "api.md",
         "Math and Usage" => "math-and-usage.md",
+        "Backend Overrides" => "backend-overrides.md",
     ],
 )
 

@@ -31,6 +31,7 @@ SpheroidalWaveFunctions.jl provides high-performance Julia bindings to batch-vec
 
 - Mathematical basis and usage for all public operations: [docs/mathematical-basis-and-usage.md](docs/mathematical-basis-and-usage.md)
 - Low-level Fortran argument mapping: [docs/fortran-api-user-facing.md](docs/fortran-api-user-facing.md)
+- Backend path overrides and precedence: [docs/src/backend-overrides.md](docs/src/backend-overrides.md)
 
 Build the API website locally with Documenter:
 
