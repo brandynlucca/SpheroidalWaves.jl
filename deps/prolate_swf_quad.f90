@@ -1441,8 +1441,10 @@ end if
 270       continue
         end do
 280      continue
+       if(lnum == 1) go to 310
        fajo(2) = -c * fajo(1) / (rm2 - 3.0e0_knd)
        ifajo(2) = ifajo(1)
+       if(lnum == 2) go to 310
         do jl = 3, lnum - 1, 2
         fajo(jl) = fajo(jl - 2) * real((jl + m + m - 1), knd) / (jl - 2)
         ifajo(jl) = ifajo(jl - 2)
@@ -1455,7 +1457,7 @@ end if
         fajo(jl + 1) = fajo(jl + 1) * 1.0e-10_knd
         ifajo(jl + 1) = ifajo(jl + 1) + 10
 300       end do
-       if(2 * (lnum / 2) == lnum .or. lnum == 2) go to 310
+       if(2 * (lnum / 2) == lnum .or. lnum == 2 .or. lnum < 3) go to 310
        fajo(lnum) = fajo(lnum - 2) * real((lnum + m + m - 1), knd) / (lnum - 2)
        ifajo(lnum) = ifajo(lnum - 2)
 310      continue

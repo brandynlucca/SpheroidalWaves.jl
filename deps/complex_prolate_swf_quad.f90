@@ -1021,7 +1021,7 @@ end if
             if(limps1 > maxp - 3) limps1 = maxp - 3
             iopd = 0
             if(iopang == 2) iopd = 1
-            call pleg_cached(m, limps1, maxp, ndec, nex, limcsav, iopd, barg, narg, &
+            call pleg_cached(m, limps1, maxp, limcsav, iopd, ndec, nex, barg, narg, &
                       maxt, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, &
                       beta, gamma, coefa, coefb, coefc, coefd, coefe)
             limcsav = limps1
@@ -1574,7 +1574,7 @@ end if
                 end if
               if(iopint == 2) go to 190
               limint = lnum + 3 * ndec + int(c)
-              if(igau == 0) call gauss_cached(ngau, ndec, xr, wr)
+              if(igau == 0) call gauss_cached(ndec, ngau, xr, wr)
               igau = 1
               if(ipint == 1) go to 190
               ngqs = 10
@@ -1696,7 +1696,7 @@ end if
               if(ioppsum == 0) go to 250
               xin(1) = x
               limpleg = limdr + limdr
-              call pleg_cached(m, limpleg, maxp, ndec, nex, limcsav, iopd, xin, 1, maxt, &
+              call pleg_cached(m, limpleg, maxp, limcsav, iopd, ndec, nex, xin, 1, maxt, &
                         prat, pdrat, pdnorma, ipdnorma, pnorma, ipnorma, &
                         alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
               limcsav = max(limcsav, limpleg)
@@ -1722,8 +1722,10 @@ end if
 270             continue
                 end do
 280           continue
+              if(lnum == 1) go to 310
               fajo(2) = -cc * fajo(1) / (rm2 - 3.0e0_knd)
               ifajo(2) = ifajo(1)
+              if(lnum == 2) go to 310
                 do jl = 3, lnum - 1, 2
                 fajo(jl) = fajo(jl - 2) * (real(jl + m + m - 1, knd) &
                          /real(jl - 2, knd))
@@ -1738,7 +1740,7 @@ end if
                 fajo(jl + 1) = fajo(jl + 1) * 1.0e-10_knd
                 ifajo(jl + 1) = ifajo(jl + 1) + 10
 300             end do
-              if(2 * (lnum / 2) == lnum .or. lnum == 2) go to 310
+              if(2 * (lnum / 2) == lnum .or. lnum == 2 .or. lnum < 3) go to 310
               fajo(lnum) = fajo(lnum - 2) * real(lnum + m + m - 1, knd) / real(lnum - 2, knd)
               ifajo(lnum) = ifajo(lnum - 2)
 310           continue
@@ -2052,7 +2054,7 @@ end if
               jelimsv(jnencur) = jelim
               iopd = 3
               if(limp > maxp - 2) limp = maxp - 2
-              call pleg_cached(m, limp, maxp, ndec, nex, limcsav, iopd, xlninp, &
+              call pleg_cached(m, limp, maxp, limcsav, iopd, ndec, nex, xlninp, &
                         netainp, maxt, prat, pdrat, pdnorma, ipdnorma, pnorma, &
                         ipnorma, alpha, beta, gamma, coefa, coefb, coefc, &
                         coefd, coefe)
@@ -2067,7 +2069,7 @@ end if
               limpd = 2 * (lnum + int(c) + ndec)
               if(limpd > maxp - 2) limpd = maxp - 2
               iopd = 2
-              call pleg_cached(m, limpd, maxp, ndec, nex, limcsav, iopd, etainp, &
+              call pleg_cached(m, limpd, maxp, limcsav, iopd, ndec, nex, etainp, &
                         netainp, maxt, prat, pdrat, pdnorma, ipdnorma, pnorma, &
                         ipnorma, alpha, beta, gamma, coefa, coefb, coefc, &
                         coefd, coefe)
@@ -4105,7 +4107,7 @@ end if
           sr2dpposi = r2dpposi
           jlegpd = j
 120       continue
-            if(int(log10(abs(qsum))) + iscale > itestp .and. iflagp == 0) &
+            if(int(log10(abs(psum))) + iscale > itestp .and. iflagp == 0) &
                 then
             r2c = 0.0e0_knd
             r2dc = 0.0e0_knd
