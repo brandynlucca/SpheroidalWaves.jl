@@ -2804,7 +2804,7 @@ end if
                   ifajo(jl + 1) = ifajo(jl + 1) + 10
                   end if
                 end do
-                if(2 * (lnum / 2) /= lnum .and. lnum >= 4) then
+                if(2 * (lnum / 2) /= lnum .and. lnum >= 3) then
                 fajo(lnum) = fajo(lnum - 2) * (lnum + m + m - 1) / (lnum - 2)
                 ifajo(lnum) = ifajo(lnum - 2)
                 end if
