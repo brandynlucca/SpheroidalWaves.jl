@@ -93,6 +93,8 @@ module prolate_swf
  type(gauss_cache_entry), save :: gauss_cache
  integer, save :: pleg_cache_next = 1
  integer, save :: qleg_cache_next = 1
+!$omp threadprivate(pleg_cache, qleg_cache, gauss_cache)
+!$omp threadprivate(pleg_cache_next, qleg_cache_next)
 
  contains
 
@@ -1993,7 +1995,7 @@ end if
          .and. ndec - jsub > naccr .and. ndec - jsub > naccrp .and. &
          x1 >= 0.00065e0_knd) iopneu = 1
        naccrp = naccr
-        if(ioprad == 2 .and. naccr < 6) then
+        if(warn .and. ioprad == 2 .and. naccr < 6) then
         write(60,*) ' est. acc. = ',naccr, ' digits for x = ', &
              x,' c = ', c,' m = ',m,' l = ',l
         end if

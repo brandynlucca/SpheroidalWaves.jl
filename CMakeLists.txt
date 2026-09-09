@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(SpheroidalWaves Fortran)
 
+find_package(OpenMP REQUIRED COMPONENTS Fortran)
+
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_Fortran_STANDARD 2008)
 
@@ -47,6 +49,7 @@ foreach(src ${DOUBLE_BASE} ${DOUBLE_WRAP} ${QUAD_BASE} ${QUAD_WRAP})
 endforeach()
 
 add_library(spheroidal_batch_double SHARED ${DOUBLE_BASE} ${DOUBLE_WRAP})
+target_link_libraries(spheroidal_batch_double PRIVATE OpenMP::OpenMP_Fortran)
 set_target_properties(spheroidal_batch_double PROPERTIES
   OUTPUT_NAME "spheroidal_batch_double"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"
@@ -59,6 +62,7 @@ if(WIN32)
 endif()
 
 add_library(spheroidal_batch_quad SHARED ${QUAD_BASE} ${QUAD_WRAP})
+target_link_libraries(spheroidal_batch_quad PRIVATE OpenMP::OpenMP_Fortran)
 set_target_properties(spheroidal_batch_quad PROPERTIES
   OUTPUT_NAME "spheroidal_batch_quad"
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib"

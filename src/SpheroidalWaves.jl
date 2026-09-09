@@ -11,11 +11,21 @@ const _backend_libraries = Dict{Symbol,Union{Nothing,String}}(
 )
 
 const _backend_handles = Dict{String,Ptr{Cvoid}}()
+const _backend_registry_lock = ReentrantLock()
 
 const _ENV_BACKEND_DOUBLE = "SPHEROIDALWAVES_LIBRARY_DOUBLE"
 const _ENV_BACKEND_QUAD = "SPHEROIDALWAVES_LIBRARY_QUAD"
 const _ARTIFACT_DOUBLE = "spheroidal_backend_double"
 const _ARTIFACT_QUAD = "spheroidal_backend_quad"
+
+function _with_backend_registry_lock(f::F) where {F}
+    lock(_backend_registry_lock)
+    try
+        return f()
+    finally
+        unlock(_backend_registry_lock)
+    end
+end
 
 function _validate_precision(precision::Symbol)
     if precision != :double && precision != :quad
@@ -25,13 +35,16 @@ end
 
 function set_backend_library!(path::AbstractString; precision::Symbol=:double)
     _validate_precision(precision)
-    _backend_libraries[precision] = String(path)
-    return _backend_libraries[precision]
+    return _with_backend_registry_lock() do
+        _backend_libraries[precision] = String(path)
+    end
 end
 
 function backend_library(; precision::Symbol=:double)
     _validate_precision(precision)
-    return _backend_libraries[precision]
+    return _with_backend_registry_lock() do
+        _backend_libraries[precision]
+    end
 end
 
 function _set_backend_from_candidate(path, precision::Symbol, source::AbstractString)
@@ -80,10 +93,8 @@ function _configure_one_backend_from_artifact!(artifact_name::String, precision:
         return false
     end
 
-    try
-        Artifacts.ensure_artifact_installed(artifact_name, artifacts_toml)
-    catch e
-        @warn "Failed to install artifact $artifact_name" precision exception=e maxlog=1
+    if !Artifacts.artifact_exists(hash)
+        @warn "Backend artifact is bound but not installed" artifact=artifact_name precision maxlog=1
         return false
     end
 
@@ -114,21 +125,23 @@ function _configure_backends_from_artifacts!()
     return configured_any
 end
 
-function _configure_backends_from_local_config!()
-    config_file = joinpath(dirname(@__FILE__), "..", "deps", "library_config.jl")
-    if !isfile(config_file)
-        return false
-    end
-
+function _configure_backends_from_local_build!()
+    build_root = normpath(joinpath(dirname(@__FILE__), "..", "build"))
     configured_any = false
-    include(config_file)
-    if isdefined(@__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_DOUBLE)
-        lib_double = Base.invokelatest(getfield, @__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_DOUBLE)
-        configured_any |= _set_backend_from_candidate(lib_double, :double, "local library_config.jl")
-    end
-    if isdefined(@__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
-        lib_quad = Base.invokelatest(getfield, @__MODULE__, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
-        configured_any |= _set_backend_from_candidate(lib_quad, :quad, "local library_config.jl")
+    for precision in (:double, :quad)
+        backend_library(precision=precision) === nothing || continue
+        stem = "spheroidal_batch_$(precision)"
+        filename = _backend_filename(stem)
+        for path in (
+            joinpath(build_root, "bin", filename),
+            joinpath(build_root, "lib", filename),
+            joinpath(build_root, filename),
+        )
+            if isfile(path)
+                configured_any |= _set_backend_from_candidate(path, precision, "local build directory")
+                break
+            end
+        end
     end
     return configured_any
 end
@@ -137,7 +150,9 @@ end
 
 function _require_backend_library(precision::Symbol)
     _validate_precision(precision)
-    lib = _backend_libraries[precision]
+    lib = _with_backend_registry_lock() do
+        _backend_libraries[precision]
+    end
     if lib === nothing
         error("""
         No backend library configured for precision :$precision.
@@ -154,8 +169,10 @@ function _require_backend_library(precision::Symbol)
 end
 
 function _require_backend_handle(lib::String)
-    return get!(_backend_handles, lib) do
-        Libdl.dlopen(lib)
+    return _with_backend_registry_lock() do
+        get!(_backend_handles, lib) do
+            Libdl.dlopen(lib)
+        end
     end
 end
 
@@ -1649,10 +1666,10 @@ function __init__()
     try
         # Default path for end users: shipped artifacts.
         _configure_backends_from_artifacts!()
+        # Developer fallback when no artifact is available.
+        _configure_backends_from_local_build!()
         # Overrides for CI/power users.
         _configure_backends_from_env!()
-        # Local generated config remains a final fallback for developer workflows.
-        _configure_backends_from_local_config!()
     catch e
         @warn "Failed to configure backend libraries during module initialization: $e" maxlog=1
     end

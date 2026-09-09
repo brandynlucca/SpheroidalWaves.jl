@@ -1,37 +1,226 @@
-name: Update Artifacts
+name: Build and publish backend artifacts
 
 on:
   workflow_dispatch:
     inputs:
-      r8_url:
-        description: "Download URL for r8 backend tarball"
-        required: true
-        type: string
-      r16_url:
-        description: "Download URL for r16 backend tarball"
+      backend_tag:
+        description: "Dedicated backend release tag (for example: backends-v0.3.0-1)"
         required: true
         type: string
 
+concurrency:
+  group: backend-artifacts-${{ inputs.backend_tag }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
-  update-artifacts:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+  build:
+    name: ${{ matrix.triplet }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            triplet: x86_64-linux-gnu
+          - runner: windows-2022
+            triplet: x86_64-w64-mingw32
+          - runner: macos-15-intel
+            triplet: x86_64-apple-darwin
+          - runner: macos-15
+            triplet: aarch64-apple-darwin
+
     steps:
       - uses: actions/checkout@v7
+
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.10'
-      - name: Download artifact tarballs
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
         run: |
-          curl -fL "${{ inputs.r8_url }}" -o r8.tar.gz
-          curl -fL "${{ inputs.r16_url }}" -o r16.tar.gz
-      - name: Update Artifacts.toml
+          sudo apt-get update
+          sudo apt-get install --yes cmake gfortran
+
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-gcc-fortran
+            mingw-w64-x86_64-make
+
+      - name: Add Windows build tools to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content $env:GITHUB_PATH 'C:\msys64\mingw64\bin'
+
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        shell: bash
         run: |
-          julia scripts/update_artifacts.jl Artifacts.toml \
-            "${{ inputs.r8_url }}" r8.tar.gz \
-            "${{ inputs.r16_url }}" r16.tar.gz
-      - name: Show resulting Artifacts.toml
+          set -euo pipefail
+          compiler="$(command -v gfortran || true)"
+          for version in 15 14 13; do
+            [[ -n "$compiler" ]] && break
+            compiler="$(command -v "gfortran-$version" || true)"
+          done
+          [[ -n "$compiler" ]] || {
+            echo "No preinstalled GNU Fortran compiler was found." >&2
+            exit 1
+          }
+          mkdir -p "$RUNNER_TEMP/spheroidal-toolchain"
+          ln -sf "$compiler" "$RUNNER_TEMP/spheroidal-toolchain/gfortran"
+          echo "$RUNNER_TEMP/spheroidal-toolchain" >> "$GITHUB_PATH"
+
+      - name: Build both precision backends
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '12.0' || '' }}
+        run: julia deps/build.jl
+
+      - name: Test the compiled backends
+        env:
+          JULIA_NUM_THREADS: '4'
+        run: julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Package Unix backends
+        if: runner.os != 'Windows'
+        shell: bash
         run: |
-          git diff -- Artifacts.toml || true
+          set -euo pipefail
+          mkdir -p artifact-dist/stage-double artifact-dist/stage-quad
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            cp build/lib/libspheroidal_batch_double.dylib artifact-dist/stage-double/
+            cp build/lib/libspheroidal_batch_quad.dylib artifact-dist/stage-quad/
+          else
+            cp build/lib/libspheroidal_batch_double.so artifact-dist/stage-double/
+            cp build/lib/libspheroidal_batch_quad.so artifact-dist/stage-quad/
+          fi
+          tar -czf "artifact-dist/spheroidal_backend_double-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-double .
+          tar -czf "artifact-dist/spheroidal_backend_quad-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-quad .
+          rm -rf artifact-dist/stage-double artifact-dist/stage-quad
+
+      - name: Package Windows backends
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifact-dist/stage-double | Out-Null
+          New-Item -ItemType Directory -Force artifact-dist/stage-quad | Out-Null
+          Copy-Item build/bin/spheroidal_batch_double.dll artifact-dist/stage-double/
+          Copy-Item build/bin/spheroidal_batch_quad.dll artifact-dist/stage-quad/
+          tar -czf "artifact-dist/spheroidal_backend_double-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-double .
+          tar -czf "artifact-dist/spheroidal_backend_quad-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-quad .
+          Remove-Item -LiteralPath artifact-dist/stage-double -Recurse -Force
+          Remove-Item -LiteralPath artifact-dist/stage-quad -Recurse -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.triplet }}
+          path: artifact-dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release and propose bindings
+    needs: build
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BACKEND_TAG: ${{ inputs.backend_tag }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
+          path: artifact-dist
+          merge-multiple: true
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BACKEND_TAG" =~ ^[A-Za-z0-9._-]+$ ]] || {
+            echo "backend_tag may contain only letters, digits, '.', '_' and '-'" >&2
+            exit 1
+          }
+
+      - name: Create or update backend release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(find artifact-dist -maxdepth 1 -type f -name '*.tar.gz' -print | sort)
+          [[ ${#tarballs[@]} -eq 8 ]] || {
+            echo "Expected eight backend tarballs; found ${#tarballs[@]}" >&2
+            exit 1
+          }
+          if ! gh release view "$BACKEND_TAG" >/dev/null 2>&1; then
+            gh release create "$BACKEND_TAG" --draft --target "$GITHUB_SHA" \
+              --title "SpheroidalWaves native backends $BACKEND_TAG" \
+              --notes "Prebuilt double- and quad-precision backends. Generated by UpdateArtifacts.yml."
+          fi
+          gh release upload "$BACKEND_TAG" "${tarballs[@]}" --clobber
+
+      - name: Generate platform-specific Artifacts.toml bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t tarballs < <(find artifact-dist -maxdepth 1 -type f -name '*.tar.gz' -print | sort)
+          julia scripts/update_artifacts.jl \
+            Artifacts.toml "$GITHUB_REPOSITORY" "$BACKEND_TAG" "${tarballs[@]}"
+          git diff --check
           cat Artifacts.toml
+
+      - name: Publish the backend release
+        run: gh release edit "$BACKEND_TAG" --draft=false
+
+      - name: Validate artifact download and loading
+        env:
+          JULIA_NUM_THREADS: '4'
+        run: |
+          julia --project=. -e '
+            using Pkg
+            Pkg.instantiate()
+            using SpheroidalWaves
+            for precision in (:double, :quad)
+                path = SpheroidalWaves.backend_library(; precision)
+                @assert path !== nothing
+                @assert occursin(joinpath(".julia", "artifacts"), path)
+            end
+            result = SpheroidalWaves.smn(0, 0, 1.0, [0.25]; precision=:double)
+            @assert isfinite(only(result.value))
+          '
+
+      - name: Open artifact-bindings pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Artifacts.toml; then
+            echo "Artifacts.toml already contains these bindings."
+            exit 0
+          fi
+          branch="artifact-bindings-${BACKEND_TAG}-${GITHUB_RUN_ID}"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout -b "$branch"
+          git add Artifacts.toml
+          git commit -m "Update backend artifact bindings for $BACKEND_TAG"
+          git push --set-upstream origin "$branch"
+          gh pr create \
+            --base "$GITHUB_REF_NAME" \
+            --head "$branch" \
+            --title "Update backend artifacts for $BACKEND_TAG" \
+            --body "Built and tested by the backend artifact workflow. Merging this PR makes package installation artifact-first for the listed platforms."

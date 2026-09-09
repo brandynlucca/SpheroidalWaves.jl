@@ -28,6 +28,95 @@ using Test
         @test !(:backend_library in exported)
     end
 
+    @testset "Local Backend Configuration Does Not Evaluate Generated Code" begin
+        @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_DOUBLE)
+        @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
+    end
+
+    @testset "Backend Does Not Create fort.60" begin
+        for precision in (:double, :quad)
+            if !has_backend(precision)
+                @info "Skipping fort.60 regression test: backend library not available." precision
+                continue
+            end
+
+            mktempdir() do dir
+                cd(dir) do
+                    rmn(0, 0, 13.995744383559012, [1.1547005383792515];
+                        spheroid=:prolate, precision=precision, kind=2)
+                end
+                @test !isfile(joinpath(dir, "fort.60"))
+            end
+        end
+    end
+
+    @testset "Concurrent Backend Calls" begin
+        if Threads.nthreads() == 1
+            @info "Skipping concurrent backend regression test: Julia has one thread."
+        else
+            for precision in (:double, :quad)
+                if !has_backend(precision)
+                    @info "Skipping concurrent backend regression test: backend library not available." precision
+                    continue
+                end
+
+                cases = [(
+                    m=mod(i, 2),
+                    n=mod(i, 2) + 2,
+                    c=is_complex ? 2.0 + 0.05im + 0.02i : 2.0 + 0.02i,
+                    eta=[-0.7 + 0.01i, 0.1 + 0.002i, 0.65 - 0.003i],
+                    x=spheroid === :prolate ? [1.1 + 0.001i, 1.3 + 0.002i] : [0.1 + 0.001i, 0.3 + 0.002i],
+                    spheroid=spheroid,
+                    kind=is_complex ? 1 : 2,
+                ) for spheroid in (:prolate, :oblate), is_complex in (false, true), i in 1:4]
+                serial = [
+                    (
+                        angular=smn(case.m, case.n, case.c, case.eta;
+                                    spheroid=case.spheroid, precision=precision),
+                        radial=rmn(case.m, case.n, case.c, case.x;
+                                   spheroid=case.spheroid, precision=precision, kind=case.kind),
+                    )
+                    for case in cases
+                ]
+
+                for _ in 1:4
+                    tasks = [
+                        Threads.@spawn begin
+                            angular = smn(case.m, case.n, case.c, case.eta;
+                                          spheroid=case.spheroid, precision=precision)
+                            radial = rmn(case.m, case.n, case.c, case.x;
+                                         spheroid=case.spheroid, precision=precision, kind=case.kind)
+                            (; angular, radial)
+                        end
+                        for case in cases
+                    ]
+                    concurrent = fetch.(tasks)
+
+                    for (actual, expected) in zip(concurrent, serial)
+                        @test actual.angular.value == expected.angular.value
+                        @test actual.angular.derivative == expected.angular.derivative
+                        @test actual.radial.value == expected.radial.value
+                        @test actual.radial.derivative == expected.radial.derivative
+                    end
+                end
+            end
+        end
+    end
+
+    @testset "Fortran Caches Are Thread-Private" begin
+        source_dir = normpath(joinpath(@__DIR__, "..", "deps"))
+        for filename in (
+            "prolate_swf.f90", "prolate_swf_quad.f90",
+            "oblate_swf.f90", "oblate_swf_quad.f90",
+            "complex_prolate_swf.f90", "complex_prolate_swf_quad.f90",
+            "complex_oblate_swf.f90", "complex_oblate_swf_quad.f90",
+        )
+            source = read(joinpath(source_dir, filename), String)
+            @test occursin(raw"!$omp threadprivate(pleg_cache, qleg_cache, gauss_cache)", source)
+            @test occursin(raw"!$omp threadprivate(pleg_cache_next, qleg_cache_next)", source)
+        end
+    end
+
     @testset "Argument Validation" begin
         @test_throws ErrorException smn(0, 0, 1.0, [0.0]; precision=:bad)
         @test_throws ErrorException rmn(0, 0, 1.0, [1.1]; precision=:bad)
@@ -508,4 +597,3 @@ using Test
         end
     end
 end
-

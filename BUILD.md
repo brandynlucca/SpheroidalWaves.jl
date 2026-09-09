@@ -14,8 +14,7 @@ deps/
   ├── oblate_batch_fortran.f90      # Batch wrapper for oblate (iso_c_binding)
   ├── complex_prolate_batch_fortran.f90    # Batch wrapper for complex prolate
   ├── complex_oblate_batch_fortran.f90     # Batch wrapper for complex oblate
-  ├── build.jl                      # Julia build script (runs during pkg install)
-  └── library_config.jl             # Generated at build time (library path config)
+  └── build.jl                      # Julia build script (runs during pkg install)
 
 src/
   └── SpheroidalWaves.jl     # Julia FFI layer (ccall wrappers)
@@ -104,29 +103,33 @@ The current build system compiles with **double precision (knd=8)** by default. 
 ### 3. Julia 1.10+
 - SpheroidalWaves requires Julia 1.10 or later
 
-## Build Methods
+## Installation and Build Methods
 
-### Method 1: Automatic Build (Recommended)
+### Method 1: Prebuilt Artifacts (Recommended)
 
-When you install the package using Julia's package manager, the build script runs automatically:
+When you install the package using Julia's package manager, `Pkg` downloads matching native artifacts. The package build script verifies that both precision backends are installed and exits without invoking CMake or a Fortran compiler:
 
 ```julia
 julia> import Pkg; Pkg.add("SpheroidalWaves")
 ```
 
-Or if you have a local development copy:
+No build-tool installation is required on a platform listed in `Artifacts.toml`.
+
+### Method 2: Automatic Local Fallback
+
+If no complete artifact pair exists for the current platform, the build script performs the local build described below. For a local development copy:
 
 ```julia
 julia> import Pkg; Pkg.develop("path/to/SpheroidalWaves")
 ```
 
-The build process will:
+The fallback build process will:
 1. Detect your system (Windows/Linux/macOS)
 2. Find an available Fortran compiler
 3. Run CMake to configure the build
 4. Compile all 8 Fortran source files
 5. Create a shared library (`.so`, `.dll`, or `.dylib`)
-6. Register the library path for Julia
+6. Leave the libraries in the package's known `build/bin` or `build/lib` directory
 
 **Expected output**:
 ```
@@ -276,9 +279,9 @@ cmake .. -DFORTRAN_PRECISION=16
 
 After build, Julia discovers the library via:
 
-1. **Automatic (via `library_config.jl`)**:
-   - File created by build script at `deps/library_config.jl`
-   - Loaded at module initialization (`__init__()` in `src/SpheroidalWaves.jl`)
+1. **Automatic local-build discovery**:
+   - The module probes the known `build/bin`, `build/lib`, and `build` output directories.
+   - No runtime configuration file is generated or evaluated.
    - Path automatically set via `set_backend_library!(path)`
 
 2. **Manual override**:
@@ -329,6 +332,8 @@ build/
 - Batch operations: O(n) where n is number of evaluation points
 - No per-call overhead (Fortran directly called via ccall)
 - Characteristic-exponent reconstruction adds minimal cost
+- Solver calls can run concurrently on Julia threads.
+- Legendre and quadrature memoization is retained in independent per-thread caches.
 
 ## Development Workflow
 

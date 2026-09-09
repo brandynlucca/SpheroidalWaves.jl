@@ -1,5 +1,5 @@
-# Artifact bindings for prebuilt backends.
-# Populate these entries with actual hashes/URLs when release binaries are published.
+# Artifact bindings for prebuilt backends. UpdateArtifacts.yml replaces these
+# comments with platform-specific bindings when backend binaries are published.
 # Runtime resolution expects each artifact to contain one of these layouts:
 #   <artifact-root>/spheroidal_batch_double(.dll|.so|.dylib)
 #   <artifact-root>/lib/spheroidal_batch_double(...)

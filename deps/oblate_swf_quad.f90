@@ -83,6 +83,8 @@ module oblate_swf
  type(gauss_cache_entry), save :: gauss_cache
  integer, save :: pleg_cache_next = 1
  integer, save :: qleg_cache_next = 1
+!$omp threadprivate(pleg_cache, qleg_cache, gauss_cache)
+!$omp threadprivate(pleg_cache_next, qleg_cache_next)
 
  contains
 
