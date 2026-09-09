@@ -1,330 +1,74 @@
 # SpheroidalWaves.jl
 
-[![Documentation](https://img.shields.io/badge/Latest_Documentation-blue)](https://brandynlucca.github.io/SpheroidalWaves.jl)
-[![Branch Status](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=Branch%20Status)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/brandynlucca/SpheroidalWaves.jl/blob/main/LICENSE) 
-[![DOI: Latest](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
+[![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://brandynlucca.github.io/SpheroidalWaves.jl)
+[![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=CI)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
 
-Fast, vectorized computation of spheroidal wave functions with native Fortran kernels.
+Fast, vectorized computation of prolate and oblate spheroidal wave functions using native Fortran kernels.
 
-## Upstream Attribution
-
-This package builds on spheroidal-wave-function implementations originally developed by Arnie Lee Van Buren and Jeffrey Boisvert.
-
-Original upstream solver projects:
-- Prolate solver: https://github.com/MathieuandSpheroidalWaveFunctions/Prolate_swf
-- Oblate solver: https://github.com/MathieuandSpheroidalWaveFunctions/Oblate_swf
-- Complex prolate solver: https://github.com/MathieuandSpheroidalWaveFunctions/complex_prolate_swf
-- Complex oblate solver: https://github.com/MathieuandSpheroidalWaveFunctions/complex_oblate_swf
-
-This Julia package adds batch-oriented wrappers, C-ABI interfaces, precision routing, and Julia integration on top of those original numerical kernels.
-
-## Overview
-
-SpheroidalWaves.jl provides high-performance Julia bindings to batch-vectorized Fortran implementations of spheroidal wave function solvers. The package supports:
-
-- **Prolate spheroidal wave functions** (real and complex)
-- **Oblate spheroidal wave functions** (real and complex)
-- **Angular functions (Smn)** and **Radial functions (Rmn)**
-- **Batch evaluation** for multiple function parameters
-- **True vectorization** with no per-element Julia loops
-
-## Documentation
-
-- Mathematical basis and usage for all public operations: [docs/mathematical-basis-and-usage.md](docs/mathematical-basis-and-usage.md)
-- Low-level Fortran argument mapping: [docs/fortran-api-user-facing.md](docs/fortran-api-user-facing.md)
-- Backend path overrides and precedence: [docs/src/backend-overrides.md](docs/src/backend-overrides.md)
-
-Build the API website locally with Documenter:
-
-```julia
-julia --project=docs -e 'using Pkg; Pkg.develop(PackageSpec(path=".")); Pkg.instantiate()'
-julia --project=docs docs/make.jl
-```
-
-## Key Features
-
-### 1. Core Evaluation Entry Points
-- `smn(m, n, c, η; spheroid=:prolate, normalize=false)` — Angular functions
-- `rmn(m, n, c, x; spheroid=:prolate, kind=1)` — Radial functions
-
-Additional public analysis operations:
-
-- `eigenvalue(m, n, c; spheroid=:prolate, precision=:double)`
-- `accuracy(m, n, c, arg; spheroid=:prolate, precision=:double, target=:radial|:angular)`
-- `radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double)`
-- `jacobian_eigen(m, n, c; ...)`
-- `jacobian_smn(m, n, c, eta; ...)`
-- `jacobian_rmn(m, n, c, x; ...)`
-- `find_c_for_eigenvalue(m, n, lambda_target; bracket=(c_lo,c_hi), ...)`
-
-Each function intelligently dispatches to the correct solver based on:
-- `c` type: Real → double-precision; Complex → complex-valued
-- `spheroid` parameter: `:prolate` or `:oblate` geometry
-
-### 2. True Vectorization
-```julia
-# Fast: batch evaluation in Fortran
-vals = smn(1, 2, 1.5, 1:1000)  # ~0.001s
-
-# Slow: don't do this
-[smn(1, 2, 1.5, [e]).value[1] for e in 1:1000]  # ~0.1s
-```
-
-Speedup: **100x** for batch operations.
-
-### 3. Flexible Parameter Types
-- Batch kernels written in Fortran 2008 with iso_c_binding C-ABI
-- Compiled to shared library (.so/.dll/.dylib)
-- No intermediate language overhead; direct Julia ↔ Fortran ccall
-- Leverages compiler vectorization and optimization
-
-### 4. Flexible Precision
-- Double precision (default, knd=8)
-- Quad precision (knd=16) — extended accuracy for sensitive computations
-- Compile-time backend selection
+The package supports real and complex spheroidal parameters, double and quad precision, angular and radial functions, eigenvalues, accuracy estimates, derivatives, and inverse eigenvalue calculations.
 
 ## Installation
 
 ```julia
-julia> import Pkg
-julia> Pkg.add("SpheroidalWaves")
+import Pkg
+Pkg.add("SpheroidalWaves")
 ```
 
-Runtime backend selection is artifact-first. If matching artifacts are available, users can run without local compiler setup.
+Prebuilt backends are downloaded automatically on supported platforms. See [BUILD.md](BUILD.md) if a local backend build is required.
 
-If artifacts are unavailable for the platform, the build script fallback will:
-1. Detect your system and Fortran compiler
-2. Compile Fortran batch kernels
-3. Create shared libraries
-4. Leave them in the package's known local build directory
-
-`Pkg.build()` first checks for both prebuilt precision artifacts and exits without invoking CMake when they are installed. Local compilation is attempted only on platforms without a complete artifact pair.
-
-**Build fallback prerequisites**: CMake 3.15+, Fortran compiler (gfortran or Intel Fortran)
-
-See [BUILD.md](BUILD.md) for detailed build instructions and troubleshooting.
-
-### Maintainer: Publish Backend Artifacts
-
-Run `.github/workflows/UpdateArtifacts.yml` with a dedicated tag such as `backends-v0.3.0-1`. The workflow:
-
-- builds and tests double and quad backends on Linux x86-64, Windows x86-64, and macOS x86-64/ARM64;
-- publishes the tarballs on a GitHub backend release;
-- computes the archive and artifact-tree hashes;
-- validates a clean artifact download; and
-- opens a pull request containing the platform-specific `Artifacts.toml` bindings.
-
-Merge that generated pull request before publishing the corresponding Julia package release. `Artifacts.toml` is Julia's standard artifact manifest; no runtime configuration file is generated or executed.
-
-For an offline/manual manifest update, pass the same release information and named tarballs to `scripts/update_artifacts.jl`; running it without enough arguments prints the exact command format.
-
-## Quick Start
+## Quick start
 
 ```julia
 using SpheroidalWaves
 
-# Angular function (real prolate, double precision)
-vals = smn(1, 2, 1.5, [0.5, 0.6, 0.7])
-# → NamedTuple with .value and .derivative fields
+# Angular function and derivative at several points
+angular = smn(1, 2, 1.5, [-0.5, 0.0, 0.5])
+angular.value
+angular.derivative
 
-# Radial function (real prolate, returns complex)
-vals = rmn(1, 2, 1.5, [1.1, 1.2, 1.3])
-# → NamedTuple with .value (Complex) and .derivative (Complex)
-
-# Complex parameter (prolate)
-vals = smn(1, 2, 1.5 + 0.5im, [0.5, 0.6])
+# Radial function of the first kind
+radial = rmn(1, 2, 1.5, [1.1, 1.2, 1.3]; kind=1)
 
 # Oblate geometry
-vals = smn(1, 2, 1.5, [0.5, 0.6]; spheroid=:oblate)
+oblate = smn(1, 2, 1.5, [-0.5, 0.0, 0.5]; spheroid=:oblate)
 
-# Quad precision (requires library built with quad support)
-vals = smn(1, 2, 1.5, [0.5, 0.6]; precision=:quad)
+# Complex spheroidal parameter
+complex_result = smn(1, 2, 1.5 + 0.5im, [-0.5, 0.0, 0.5])
 
-# Different radial kinds
-vals = rmn(1, 2, 1.5, [1.1, 1.2]; kind=3)
+# Quad-precision backend
+quad_result = rmn(1, 2, 1.5, [1.1, 1.2]; precision=:quad)
+
+# Characteristic value
+lambda = eigenvalue(1, 2, 1.5)
 ```
 
-## API Reference
+Pass arrays to `smn` and `rmn` to use the batch-oriented backend. Independent calls may also be scheduled concurrently with Julia threads.
 
-For complete mathematical definitions and usage patterns for every public operation, see [docs/mathematical-basis-and-usage.md](docs/mathematical-basis-and-usage.md).
+## Main API
 
-### Angular Functions
+- `smn`: angular function and derivative
+- `rmn`: radial function and derivative
+- `eigenvalue` and `eigenvalue_sweep`: characteristic values
+- `accuracy`: estimated numerical accuracy
+- `radial_wronskian`: radial Wronskian
+- `jacobian_eigen`, `jacobian_smn`, and `jacobian_rmn`: derivatives with respect to parameters
+- `find_c_for_eigenvalue`: inverse characteristic-value calculation
 
-```julia
-smn(m, n, c, η; spheroid=:prolate, precision=:double, normalize=false)
-```
+The main options are `spheroid=:prolate` or `:oblate`, `precision=:double` or `:quad`, and radial `kind=1:4`.
 
-Compute spheroidal angular functions (Smn) at a batch of points.
+See the [documentation](https://brandynlucca.github.io/SpheroidalWaves.jl) for definitions, argument restrictions, normalization, and complete examples.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `m` | `Integer` | Mode index (≥ 0) |
-| `n` | `Integer` | Degree index (≥ m) |
-| `c` | `Real` or `Complex` | Spheroidal parameter |
-| `η` | `AbstractVector{Real}` | Evaluation points (batch) |
-| `spheroid` | `Symbol` | `:prolate` (default) or `:oblate` |
-| `precision` | `Symbol` | `:double` (default) or `:quad` |
-| `normalize` | `Bool` | Apply normalization (default false) |
+## Attribution
 
-**Returns:**
-```julia
-(value=Array, derivative=Array)
-```
-- For real `c`: value is `Float64` array
-- For complex `c`: value is `ComplexF64` array
+The numerical kernels are based on the spheroidal-wave-function implementations by Arnie Lee Van Buren and Jeffrey Boisvert:
 
-### Radial Functions
+- [Prolate](https://github.com/MathieuandSpheroidalWaveFunctions/Prolate_swf)
+- [Oblate](https://github.com/MathieuandSpheroidalWaveFunctions/Oblate_swf)
+- [Complex prolate](https://github.com/MathieuandSpheroidalWaveFunctions/complex_prolate_swf)
+- [Complex oblate](https://github.com/MathieuandSpheroidalWaveFunctions/complex_oblate_swf)
 
-```julia
-rmn(m, n, c, x; spheroid=:prolate, precision=:double, kind=1)
-```
+## Citation and license
 
-Compute spheroidal radial functions (Rmn) at a batch of points.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `m` | `Integer` | Mode index (≥ 0) |
-| `n` | `Integer` | Degree index (≥ m) |
-| `c` | `Real` or `Complex` | Spheroidal parameter |
-| `x` | `AbstractVector{Real}` | Evaluation points (radial argument) |
-| `spheroid` | `Symbol` | `:prolate` (default) or `:oblate` |
-| `precision` | `Symbol` | `:double` (default) or `:quad` |
-| `kind` | `Integer` | Radial type: 1–4 (Bessel-like, Hankel-like; default 1) |
-
-**Returns:**
-```julia
-(value=Array{ComplexF64}, derivative=Array{ComplexF64})
-```
-- Output is always complex, even for real `c`
-
-## Precision Selection
-
-Precision is selected at **runtime** via the `precision` keyword argument:
-
-```julia
-# Double precision (default, knd=8)
-vals = smn(1, 2, 1.5, [0.5, 0.6])
-vals = smn(1, 2, 1.5, [0.5, 0.6]; precision=:double)  # Explicit
-
-# Quad precision (knd=16) — requires special library build
-vals = smn(1, 2, 1.5, [0.5, 0.6]; precision=:quad)
-```
-
-### Building with Quad Precision Support
-
-The default library is built with double-precision (knd=8) base solvers. To enable quad-precision support:
-
-1. **Modify the base solver modules** to compile with `knd=16`
-2. **Recompile the library**:
-   ```bash
-   cd /path/to/SpheroidalWaves
-   rm -rf build && mkdir build && cd build
-   # Special build flag or environment modification for knd=16 (future)
-   cmake ..
-   cmake --build . --config Release
-   ```
-3. **Rebuild Julia package**:
-   ```julia
-   julia> import Pkg; Pkg.build("SpheroidalWaves")
-   ```
-
-**Status**: Quad-precision support is in development. Currently, only double precision is available. The API is ready for both precisions; the backend needs to support simultaneous compilation of both `knd=8` and `knd=16` solvers.
-
-## Architecture
-
-```
-Fortran Batch Kernels (deps/)
-          ↓
-Shared Library (build/lib/*.so|.dll|.dylib)
-          ↓
-Julia FFI Layer (src/SpheroidalWaves.jl)
-          ↓
-User API (prolate_smn_batch, etc.)
-```
-
-- **Fortran**: Pure Fortran 2008 with iso_c_binding (no Eigen/Boost/external deps)
-- **Build**: CMake cross-platform automation (Windows/macOS/Linux)
-- **Julia**: Thin ccall wrappers with error handling and type conversion
-
-## Troubleshooting
-
-### Build Fails
-- Ensure CMake 3.15+ is installed
-- Ensure Fortran compiler (gfortran or Intel) is installed
-- See [BUILD.md](BUILD.md) for platform-specific instructions
-
-### Library Not Found
-```julia
-julia> using SpheroidalWaves
-julia> SpheroidalWaves.backend_library()  # Should show path
-```
-If empty, rebuild:
-```julia
-julia> import Pkg; Pkg.build("SpheroidalWaves")
-```
-
-### Function Call Fails
-- Check input validity (m, n, c values)
-- Try with known good inputs first: `prolate_smn_batch(1, 2, 1.0, [1.0])`
-- Ensure consistent precision (double/quad) across all calls
-
-## Performance
-
-Batch operations are significantly faster than per-element evaluation:
-
-```julia
-# 100 evaluation points
-eta = LinRange(0.1, 1.0, 100)
-
-# Batch (vectorized) — preferred
-@time vals = smn(1, 2, 1.5, eta)  # ~0.001s
-
-# Manual loop (not recommended, for comparison only)
-@time vals = [smn(1, 2, 1.5, [e]).value[1] for e in eta]  # ~0.1s
-```
-
-Speedup: **100x** for batch vs. per-element (typical).
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
-
-## Citation
-
-If you use SpheroidalWaves.jl in research, please cite:
-
-```bibtex
-@software{lucca2026spheroidal,
-  author = {Lucca, Brandyn},
-  title = {SpheroidalWaves.jl: Fast Vectorized Spheroidal Wave Function Computation},
-  year = {2026},
-  version = {0.2.0},
-  doi = {10.5281/zenodo.19728040},
-  url = {https://github.com/brandynlucca/SpheroidalWaves.jl}
-}
-```
-
-## References
-
-- Abramowitz and Stegun, *Handbook of Mathematical Functions*, Chapter 28
-- Flammer, C., *Spheroidal Wave Functions*, Stanford University Press, 1957
-- Stratton, Morse, Chu, Little & Corbató, *Spheroidal Wave Functions*, Wiley, 1956
-
-## Contact
-
-For questions or issues, please open an issue on [GitHub](https://github.com/Brandyn/SpheroidalWaves.jl/issues).
-
----
-
-**Status**: Alpha (API may change). Build system under development. Pre-compiled binaries coming soon.
-
+Use the [Zenodo record](https://doi.org/10.5281/zenodo.19728040) to cite SpheroidalWaves.jl. The package is available under the [MIT License](LICENSE).
