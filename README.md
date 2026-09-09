@@ -97,27 +97,27 @@ If artifacts are unavailable for the platform, the build script fallback will:
 1. Detect your system and Fortran compiler
 2. Compile Fortran batch kernels
 3. Create shared libraries
-4. Register local paths for Julia to use
+4. Leave them in the package's known local build directory
 
-This fallback is invoked during package installation via `Pkg.build()`, so users do not need to run manual build commands.
+`Pkg.build()` first checks for both prebuilt precision artifacts and exits without invoking CMake when they are installed. Local compilation is attempted only on platforms without a complete artifact pair.
 
 **Build fallback prerequisites**: CMake 3.15+, Fortran compiler (gfortran or Intel Fortran)
 
 See [BUILD.md](BUILD.md) for detailed build instructions and troubleshooting.
 
-### Maintainer: Update Artifact Bindings
+### Maintainer: Publish Backend Artifacts
 
-When new backend binaries are published, update `Artifacts.toml` with:
+Run `.github/workflows/UpdateArtifacts.yml` with a dedicated tag such as `backends-v0.3.0-1`. The workflow:
 
-```julia
-julia scripts/update_artifacts.jl Artifacts.toml \
-   <double_url> <double_tarball_path> \
-   <quad_url> <quad_tarball_path>
-```
+- builds and tests double and quad backends on Linux x86-64, Windows x86-64, and macOS x86-64/ARM64;
+- publishes the tarballs on a GitHub backend release;
+- computes the archive and artifact-tree hashes;
+- validates a clean artifact download; and
+- opens a pull request containing the platform-specific `Artifacts.toml` bindings.
 
-Or use the manual GitHub workflow:
+Merge that generated pull request before publishing the corresponding Julia package release. `Artifacts.toml` is Julia's standard artifact manifest; no runtime configuration file is generated or executed.
 
-- `.github/workflows/UpdateArtifacts.yml`
+For an offline/manual manifest update, pass the same release information and named tarballs to `scripts/update_artifacts.jl`; running it without enough arguments prints the exact command format.
 
 ## Quick Start
 

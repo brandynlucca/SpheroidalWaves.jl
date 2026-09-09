@@ -3,6 +3,7 @@
 # Julia package build script: compiles Fortran batch modules into shared library
 # Runs automatically during package installation
 
+using Artifacts
 using Libdl
 
 # ============================================================================
@@ -12,6 +13,7 @@ const SCRIPT_DIR = dirname(@__FILE__)
 const PROJECT_DIR = dirname(SCRIPT_DIR)
 const BUILD_DIR = joinpath(PROJECT_DIR, "build")
 const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
+const ARTIFACTS_TOML = joinpath(PROJECT_DIR, "Artifacts.toml")
 const SELECTED_FORTRAN = Ref{Union{Nothing,String}}(nothing)
 
 function detect_library_dir()
@@ -317,34 +319,48 @@ function verify_libraries_built()
 end
 
 # ============================================================================
-# Step 6: Create Library Path Configuration
+# Step 6: Report Library Paths
 # ============================================================================
-function configure_library_paths()
+function report_library_paths()
     lib_dir = detect_library_dir()
     lib_double_path = _find_built_library(lib_dir, "spheroidal_batch_double")
     lib_quad_path = _find_built_library(lib_dir, "spheroidal_batch_quad")
     if lib_double_path === nothing || lib_quad_path === nothing
-        error_msg("Cannot write library config because one or more built libraries were not found.")
+        error_msg("Cannot report library paths because one or more built libraries were not found.")
         return false
     end
-    lib_double = replace(lib_double_path, '\\' => '/')
-    lib_quad = replace(lib_quad_path, '\\' => '/')
-
-    config_script = """
-    # Auto-generated: library path configuration
-    # Set on package load in src/SpheroidalWaves.jl
-
-    const SPHEROIDAL_BATCH_LIBRARY_DOUBLE = "$lib_double"
-    const SPHEROIDAL_BATCH_LIBRARY_QUAD = "$lib_quad"
-    """
-
-    config_file = joinpath(SCRIPT_DIR, "library_config.jl")
-    write(config_file, config_script)
-
-    info_msg("Library path configuration written to: $config_file")
-    info_msg("double library path: $lib_double")
-    info_msg("quad library path: $lib_quad")
+    info_msg("double library path: $lib_double_path")
+    info_msg("quad library path: $lib_quad_path")
     return true
+end
+
+function _find_library_in_root(root::String, stem::String)
+    for dir in (root, joinpath(root, "lib"), joinpath(root, "bin"))
+        path = _find_built_library(dir, stem)
+        path === nothing || return path
+    end
+    return nothing
+end
+
+function _artifact_library(name::String, stem::String)
+    isfile(ARTIFACTS_TOML) || return nothing
+    hash = Artifacts.artifact_hash(name, ARTIFACTS_TOML)
+    hash === nothing && return nothing
+    Artifacts.artifact_exists(hash) || return nothing
+    return _find_library_in_root(Artifacts.artifact_path(hash), stem)
+end
+
+function use_prebuilt_artifacts()
+    double = _artifact_library("spheroidal_backend_double", "spheroidal_batch_double")
+    quad = _artifact_library("spheroidal_backend_quad", "spheroidal_batch_quad")
+    if double !== nothing && quad !== nothing
+        info_msg("Using prebuilt backend artifacts for this platform.")
+        info_msg("double artifact library: $double")
+        info_msg("quad artifact library: $quad")
+        info_msg("Local CMake/Fortran compilation is not required.")
+        return true
+    end
+    return false
 end
 
 # ============================================================================
@@ -352,6 +368,13 @@ end
 # ============================================================================
 function main()
     info_msg("SpheroidalWaves Fortran batch build starting...")
+
+    # Pkg installs non-lazy artifacts before running this build script. Avoid
+    # compiling locally when both precision backends are already available.
+    if use_prebuilt_artifacts()
+        return true
+    end
+
     info_msg("Building dual precision backends (double and quad)")
     info_msg("Build directory: $BUILD_DIR")
     
@@ -378,8 +401,8 @@ function main()
         return false
     end
     
-    # Configure Julia to find library
-    if !configure_library_paths()
+    # Report the library locations. The module probes these known build paths.
+    if !report_library_paths()
         return false
     end
     

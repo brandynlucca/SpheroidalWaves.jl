@@ -7,8 +7,8 @@ This page describes how backend library paths are selected and how users can ove
 At module initialization, backend libraries are resolved in this order:
 
 1. Package artifacts from `Artifacts.toml` (default user path)
-2. Environment variables
-3. Local generated config file `deps/library_config.jl` (developer fallback)
+2. Local libraries in the package's `build/bin`, `build/lib`, or `build` directory (developer fallback)
+3. Environment variables (explicit override)
 
 At runtime, explicit API calls always take precedence over automatic initialization:
 
@@ -58,9 +58,13 @@ backend_library(precision=:quad)
 
 ## Notes
 
-- Artifact entries must be populated for true out-of-box backend loading on fresh systems.
-- If artifacts are missing for a platform, package import attempts a one-time local build automatically.
-- `deps/library_config.jl` is generated locally by build tooling and is intentionally gitignored.
+- Released artifact entries provide out-of-box backend loading on supported platforms.
+- If artifacts are missing for a platform, the package build step can compile local backends which are discovered on the next package load.
+- When both precision artifacts are installed, the build step exits before checking for CMake or a Fortran compiler.
+- Local builds are discovered directly; no generated runtime configuration file is needed.
+- `Artifacts.toml` is the standard Julia package artifact manifest, not executable runtime configuration.
+- Shared Fortran memoization is retained but made thread-private, so each Julia thread has independent caches.
+- A small Julia lock protects only backend path and dynamic-library handle management; it is not held during numerical calls.
 - If a configured path does not exist, it is ignored and a warning is emitted.
 - If no backend is configured for a requested precision, calls fail with a clear error message.
 
