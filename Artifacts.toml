@@ -1,19 +1,67 @@
-# Artifact bindings for prebuilt backends. UpdateArtifacts.yml replaces these
-# comments with platform-specific bindings when backend binaries are published.
-# Runtime resolution expects each artifact to contain one of these layouts:
-#   <artifact-root>/spheroidal_batch_double(.dll|.so|.dylib)
-#   <artifact-root>/lib/spheroidal_batch_double(...)
-#   <artifact-root>/bin/spheroidal_batch_double(...)
-# and similarly for quad.
+[[spheroidal_backend_double]]
+arch = "aarch64"
+git-tree-sha1 = "62bc9c03c3ed629de8d3ce9b5616ab1af26cf384"
+os = "macos"
 
-# [spheroidal_backend_double]
-# git-tree-sha1 = "<fill-me>"
-# [[spheroidal_backend_double.download]]
-# url = "https://..."
-# sha256 = "<fill-me>"
+    [[spheroidal_backend_double.download]]
+    sha256 = "0ab1513c7c78ec3151dc0662495776e0790d917ada2b2dbff215f727d99f502e"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_double-aarch64-apple-darwin.tar.gz"
+[[spheroidal_backend_double]]
+arch = "x86_64"
+git-tree-sha1 = "12a4910866644e53cb6c116e04275e293c1a854a"
+os = "macos"
 
-# [spheroidal_backend_quad]
-# git-tree-sha1 = "<fill-me>"
-# [[spheroidal_backend_quad.download]]
-# url = "https://..."
-# sha256 = "<fill-me>"
+    [[spheroidal_backend_double.download]]
+    sha256 = "cb173f25890e8e36285b17b74e70408034063ebc318cb4f44de050fb63261ecd"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_double-x86_64-apple-darwin.tar.gz"
+[[spheroidal_backend_double]]
+arch = "x86_64"
+git-tree-sha1 = "35404d3676a0b36c6306bb6e0c58de50be73133c"
+libc = "glibc"
+os = "linux"
+
+    [[spheroidal_backend_double.download]]
+    sha256 = "7725f31debb2bdfd6727b6657da8b8a72a8a3135918ce78b266142e0bcfa047f"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_double-x86_64-linux-gnu.tar.gz"
+[[spheroidal_backend_double]]
+arch = "x86_64"
+git-tree-sha1 = "c7fb0b22441311f2ff10dea47ce5f8fb9b2f1782"
+os = "windows"
+
+    [[spheroidal_backend_double.download]]
+    sha256 = "8bb6d302b181526039b2fd3d38380e4129288baad49c0c6fabf517256acf2f91"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_double-x86_64-w64-mingw32.tar.gz"
+
+[[spheroidal_backend_quad]]
+arch = "aarch64"
+git-tree-sha1 = "f5200469e4c83e56a7bffe5ca5c63821c43900ef"
+os = "macos"
+
+    [[spheroidal_backend_quad.download]]
+    sha256 = "8e417a83d2bb5c4e5fde2d2efc7f46e81a24b8189fce5184ad417ed2ab4a7721"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_quad-aarch64-apple-darwin.tar.gz"
+[[spheroidal_backend_quad]]
+arch = "x86_64"
+git-tree-sha1 = "5d4394efb1931ea316b04f7d5935d592ec357691"
+os = "macos"
+
+    [[spheroidal_backend_quad.download]]
+    sha256 = "94eb10246b9480dbb2ac1c65eab71e0f0bdd9d5f29ab6dc50940e8653fb1b336"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_quad-x86_64-apple-darwin.tar.gz"
+[[spheroidal_backend_quad]]
+arch = "x86_64"
+git-tree-sha1 = "413521220584dabc941eec3683a9f4a7b45e392b"
+libc = "glibc"
+os = "linux"
+
+    [[spheroidal_backend_quad.download]]
+    sha256 = "5bbdfe70c6eb02f524c473f3920fedf3ba0f7785bb536eb8902b140f52c9533f"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_quad-x86_64-linux-gnu.tar.gz"
+[[spheroidal_backend_quad]]
+arch = "x86_64"
+git-tree-sha1 = "af516c197048e216252f28586e20be5f65f07c71"
+os = "windows"
+
+    [[spheroidal_backend_quad.download]]
+    sha256 = "5a907ddd437f15331e860adc026a64c702e1b208d60d238e9981fdb23d94c51e"
+    url = "https://github.com/brandynlucca/SpheroidalWaves.jl/releases/download/backends-v0.4.0-1/spheroidal_backend_quad-x86_64-w64-mingw32.tar.gz"
