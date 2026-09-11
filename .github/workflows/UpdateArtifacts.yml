@@ -120,7 +120,7 @@ jobs:
           Remove-Item -LiteralPath artifact-dist/stage-double -Recurse -Force
           Remove-Item -LiteralPath artifact-dist/stage-quad -Recurse -Force
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.triplet }}
           path: artifact-dist/*.tar.gz
