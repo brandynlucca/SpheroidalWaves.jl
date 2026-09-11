@@ -597,3 +597,5 @@ using Test
         end
     end
 end
+
+include("degree_ranges.jl")
