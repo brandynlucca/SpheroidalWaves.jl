@@ -897,4 +897,158 @@ contains
     call split_wk_to_double_pair(eig_w, eig_hi, eig_lo)
   end subroutine psms_eigenvalue_quad_fullsplit
 
+  subroutine psms_smn_degrees_quad_text(m, n_min, n, n_eta, normalize, c_text, str_len, eta_text, value_text, value_exp, derivative_text, derivative_exp, status) bind(C, name="psms_smn_degrees_quad_text")
+    integer(c_int), value, intent(in) :: m, n_min, n, n_eta, normalize, str_len
+    character(c_char), intent(in) :: c_text(*), eta_text(*)
+    character(c_char), intent(out) :: value_text(*), derivative_text(*)
+    integer(c_int), intent(out) :: value_exp(*), derivative_exp(*)
+    integer(c_int), intent(out) :: status
+
+    integer(c_int) :: i, j, idx, idx0, lnum
+    integer(c_int) :: ioprad, iopang, iopnorm, narg
+    integer(c_int) :: off
+    real(wk) :: x1
+    real(wk) :: c_w
+    real(wk) :: eta_w, value_wk, derivative_wk
+    logical :: ok
+
+    real(wk), allocatable :: arg(:)
+    real(wk), allocatable :: r1c(:), r1dc(:), r2c(:), r2dc(:)
+    real(wk), allocatable :: s1c(:,:), s1dc(:,:)
+    integer(c_int), allocatable :: ir1e(:), ir1de(:), ir2e(:), ir2de(:), naccr(:)
+    integer(c_int), allocatable :: is1e(:,:), is1de(:,:), naccs(:,:)
+    real(wk), allocatable :: eigout(:)
+
+    status = 0_c_int
+    if (n_eta < 1_c_int) then
+      status = -4_c_int
+      return
+    end if
+    if (n < 0_c_int) then
+      status = -1_c_int
+      return
+    end if
+    if (m < 0 .or. n_min < m .or. n < n_min) then
+      status = -2_c_int
+      return
+    end if
+
+    call decode_real_text(c_text, 1_c_int, str_len, c_w, ok)
+    if (.not. ok) then
+      status = -5_c_int
+      return
+    end if
+
+    do i = 1, n_eta
+      off = (i - 1_c_int) * str_len + 1_c_int
+      call decode_real_text(eta_text, off, str_len, eta_w, ok)
+      if (.not. ok) then
+        status = -5_c_int
+        return
+      end if
+      if (abs(eta_w) > 1.0_wk .or. .not. is_finite_quad(real(eta_w, rk))) then
+        status = -3_c_int
+        return
+      end if
+    end do
+
+    lnum = n - m + 1_c_int
+    narg = n_eta
+    idx0 = n - m + 1_c_int
+
+    ioprad = 0_c_int
+    iopang = 2_c_int
+    iopnorm = 0_c_int
+    if (normalize /= 0_c_int) iopnorm = 1_c_int
+    x1 = 1.0_wk
+
+    allocate(arg(narg))
+    do i = 1, narg
+      off = (i - 1_c_int) * str_len + 1_c_int
+      call decode_real_text(eta_text, off, str_len, arg(i), ok)
+    end do
+
+    allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
+    allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    allocate(s1c(lnum, narg), s1dc(lnum, narg))
+    allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
+    allocate(eigout(lnum))
+
+    call profcn(c_w, m, lnum, ioprad, x1, iopang, iopnorm, narg, arg, &
+                r1c, ir1e, r1dc, ir1de, r2c, ir2e, r2dc, ir2de, naccr, &
+                s1c, is1e, s1dc, is1de, naccs, eigout)
+
+    do j = n_min-m+1, lnum
+      do i = 1, n_eta
+        idx = (j-(n_min-m+1))*n_eta+i
+        off = (idx-1)*str_len+1
+        call encode_real_text(value_text, off, str_len, s1c(j,i))
+        call encode_real_text(derivative_text, off, str_len, s1dc(j,i))
+        value_exp(idx) = is1e(j,i)
+        derivative_exp(idx) = is1de(j,i)
+      end do
+    end do
+  end subroutine psms_smn_degrees_quad_text
+
+  ! Degree-range radial evaluation. Layout: four real channels per point,
+  ! then points, then degrees. Preserve quad mantissas and exponents.
+  subroutine psms_rmn_degrees_quad_text(m, n_min, n_max, kind, c_text, n_x, x_text, str_len, output, exponents, status) bind(C, name="psms_rmn_degrees_quad_text")
+    integer(c_int), value, intent(in) :: m, n_min, n_max, kind, n_x, str_len
+    character(c_char), intent(in) :: c_text(*), x_text(*)
+    character(c_char), intent(out) :: output(*)
+    integer(c_int), intent(out) :: exponents(*), status
+    integer(c_int) :: lnum, li, j, idx, ioprad
+    real(wk) :: c_w, x_w
+    logical :: ok
+    real(wk), allocatable :: arg(:), r1(:), dr1(:), r2(:), dr2(:), angular(:,:), dangular(:,:), eig(:)
+    integer(c_int), allocatable :: er1(:), edr1(:), er2(:), edr2(:), ar(:), ea(:,:), eda(:,:), aa(:,:)
+    status = 0
+    if (m < 0 .or. n_min < m .or. n_max < n_min .or. n_x < 1 .or. kind < 1 .or. kind > 4 .or. str_len < 70) then
+      status = -1
+      return
+    end if
+    call decode_real_text(c_text, 1_c_int, str_len, c_w, ok)
+    if (.not. ok .or. .not. (c_w > 0.0_wk)) then
+      status = -2
+      return
+    end if
+    lnum = n_max-m+1
+    allocate(arg(1), r1(lnum), dr1(lnum), r2(lnum), dr2(lnum), eig(lnum))
+    allocate(er1(lnum), edr1(lnum), er2(lnum), edr2(lnum), ar(lnum))
+    allocate(angular(lnum,1), dangular(lnum,1), ea(lnum,1), eda(lnum,1), aa(lnum,1))
+    arg = 0.0_wk
+    ioprad = 2
+    if (kind == 1) ioprad = 1
+    do j = 1, n_x
+      call decode_real_text(x_text, (j-1)*str_len+1, str_len, x_w, ok)
+      if (.not. ok .or. .not. (x_w > 1.0_wk)) then
+        status = -3
+        return
+      end if
+      call profcn(c_w, m, lnum, ioprad, x_w-1.0_wk, 0_c_int, 0_c_int, 1_c_int, arg, &
+                  r1, er1, dr1, edr1, r2, er2, dr2, edr2, ar, &
+                  angular, ea, dangular, eda, aa, eig)
+      if (kind == 1) then
+        r2 = 0.0_wk
+        dr2 = 0.0_wk
+        er2 = 0
+        edr2 = 0
+      end if
+      do li = n_min-m+1, lnum
+        idx = ((li-(n_min-m+1))*n_x+j-1)*4+1
+        call encode_real_text(output, (idx-1)*str_len+1, str_len, r1(li))
+        exponents(idx) = er1(li)
+        idx = idx+1
+        call encode_real_text(output, (idx-1)*str_len+1, str_len, dr1(li))
+        exponents(idx) = edr1(li)
+        idx = idx+1
+        call encode_real_text(output, (idx-1)*str_len+1, str_len, r2(li))
+        exponents(idx) = er2(li)
+        idx = idx+1
+        call encode_real_text(output, (idx-1)*str_len+1, str_len, dr2(li))
+        exponents(idx) = edr2(li)
+      end do
+    end do
+  end subroutine psms_rmn_degrees_quad_text
+
 end module psms_batch_fortran
