@@ -291,7 +291,7 @@ function _decode_scaled_real_text_vector(buf::Vector{UInt8}, exponents::Vector{C
         off = (i - 1) * width + 1
         s = strip(String(buf[off:(off + width - 1)]))
         mant = BigFloat(s)
-        out[i] = mant * (big(10) ^ Int(exponents[i]))
+        out[i] = iszero(exponents[i]) ? mant : mant * (BigFloat(10) ^ Int(exponents[i]))
     end
     return out
 end
@@ -1661,6 +1661,8 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
         end
     end
 end
+
+include("degree_ranges.jl")
 
 function __init__()
     try
