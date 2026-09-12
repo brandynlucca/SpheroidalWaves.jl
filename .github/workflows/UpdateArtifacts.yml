@@ -80,6 +80,11 @@ jobs:
           ln -sf "$compiler" "$RUNNER_TEMP/spheroidal-toolchain/gfortran"
           echo "$RUNNER_TEMP/spheroidal-toolchain" >> "$GITHUB_PATH"
 
+      # This checkout builds a new release; existing bindings would make Pkg
+      # download and test the previous release instead of the new libraries.
+      - name: Clear previous artifact bindings in the build checkout
+        run: julia -e 'write("Artifacts.toml", "")'
+
       - name: Build both precision backends
         env:
           MACOSX_DEPLOYMENT_TARGET: ${{ runner.os == 'macOS' && '12.0' || '' }}
@@ -88,7 +93,16 @@ jobs:
       - name: Test the compiled backends
         env:
           JULIA_NUM_THREADS: '4'
-        run: julia --project=. -e 'using Pkg; Pkg.test()'
+        run: |
+          julia --project=. -e '
+            using Pkg, SpheroidalWaves
+            for precision in (:double, :quad)
+                filename = SpheroidalWaves._backend_filename("spheroidal_batch_$precision")
+                expected = abspath("build", Sys.iswindows() ? "bin" : "lib", filename)
+                @assert SpheroidalWaves.backend_library(; precision) == expected
+            end
+            Pkg.test()
+          '
 
       - name: Package Unix backends
         if: runner.os != 'Windows'
@@ -109,16 +123,27 @@ jobs:
 
       - name: Package Windows backends
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: msys2 {0}
         run: |
-          New-Item -ItemType Directory -Force artifact-dist/stage-double | Out-Null
-          New-Item -ItemType Directory -Force artifact-dist/stage-quad | Out-Null
-          Copy-Item build/bin/spheroidal_batch_double.dll artifact-dist/stage-double/
-          Copy-Item build/bin/spheroidal_batch_quad.dll artifact-dist/stage-quad/
-          tar -czf "artifact-dist/spheroidal_backend_double-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-double .
-          tar -czf "artifact-dist/spheroidal_backend_quad-${{ matrix.triplet }}.tar.gz" -C artifact-dist/stage-quad .
-          Remove-Item -LiteralPath artifact-dist/stage-double -Recurse -Force
-          Remove-Item -LiteralPath artifact-dist/stage-quad -Recurse -Force
+          set -euo pipefail
+          for precision in double quad; do
+            stage="artifact-dist/stage-$precision"
+            mkdir -p "$stage"
+            cp "build/bin/spheroidal_batch_$precision.dll" "$stage/"
+            # Ship the compiler/OpenMP runtimes alongside each backend.
+            for runtime in libgcc_s_seh-1 libgfortran-5 libquadmath-0 libgomp-1 libwinpthread-1; do
+              cp "$MINGW_PREFIX/bin/$runtime.dll" "$stage/"
+            done
+            # Windows tar writes DLLs as 0666. Julia preserves the missing
+            # execute permission when installing them, so dlopen is denied.
+            tar --mode=755 -czf "artifact-dist/spheroidal_backend_$precision-${{ matrix.triplet }}.tar.gz" -C "$stage" .
+            rm -rf "$stage"
+          done
+
+      - name: Test the packaged artifacts
+        env:
+          JULIA_NUM_THREADS: '4'
+        run: julia --project=. scripts/test_artifacts.jl artifact-dist ${{ matrix.triplet }}
 
       - uses: actions/upload-artifact@v7
         with:
