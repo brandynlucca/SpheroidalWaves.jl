@@ -49,9 +49,15 @@ end
 @testset "Degree ranges with older backend" begin
     original = SpheroidalWaves.backend_library(precision=:quad)
     artifacts = joinpath(dirname(@__DIR__), "Artifacts.toml")
-    artifact = artifact_path(artifact_hash("spheroidal_backend_quad", artifacts))
+    hash = artifact_hash("spheroidal_backend_quad", artifacts)
+    # Source-only builds (including artifact release jobs) have no old binding.
+    artifact = hash !== nothing && artifact_exists(hash) ? artifact_path(hash) : nothing
     filename = SpheroidalWaves._backend_filename("spheroidal_batch_quad")
-    candidates = (joinpath(artifact,"lib",filename), joinpath(artifact,filename), joinpath(artifact,"bin",filename))
+    candidates = artifact === nothing ? () : (
+        joinpath(artifact, "lib", filename),
+        joinpath(artifact, filename),
+        joinpath(artifact, "bin", filename),
+    )
     old = findfirst(isfile, candidates)
     if old !== nothing && Libdl.dlsym_e(Libdl.dlopen(candidates[old]), :psms_smn_degrees_quad_text) == C_NULL
         try
