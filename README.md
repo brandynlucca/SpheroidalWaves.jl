@@ -1,7 +1,7 @@
 # SpheroidalWaves.jl
 
 <p align="center">
-  <img src="docs/src/assets/logo.svg" alt="SpheroidalWaves.jl logo" width="400">
+  <img src="docs/src/assets/logo.svg" alt="SpheroidalWaves.jl logo" width="240" height="240">
 </p>
 
 [![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://brandynlucca.github.io/SpheroidalWaves.jl)
