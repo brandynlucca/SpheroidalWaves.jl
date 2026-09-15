@@ -1,5 +1,9 @@
 # SpheroidalWaves.jl
 
+```@raw html
+<img class="home-logo" src="assets/logo.svg" alt="SpheroidalWaves.jl logo" width="224" height="224">
+```
+
 SpheroidalWaves.jl provides fast Julia bindings to native Fortran kernels for spheroidal wave computations.
 
 ## Public API

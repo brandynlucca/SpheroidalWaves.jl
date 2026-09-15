@@ -1,5 +1,9 @@
 # SpheroidalWaves.jl
 
+<p align="center">
+  <img src="docs/src/assets/logo.svg" alt="SpheroidalWaves.jl logo" width="400">
+</p>
+
 [![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://brandynlucca.github.io/SpheroidalWaves.jl)
 [![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=CI)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
@@ -71,4 +75,4 @@ The numerical kernels are based on the spheroidal-wave-function implementations 
 
 ## Citation and license
 
-Use the [Zenodo record](https://doi.org/10.5281/zenodo.19728040) to cite SpheroidalWaves.jl. The package is available under the [MIT License](LICENSE).
+Use the [Zenodo record](https://doi.org/10.5281/zenodo.19728040) to cite SpheroidalWaves.jl. The package is available under the [GPL-3.0 License](LICENSE). The [logo artwork](docs/src/assets/LICENSE) incorporates Julia's dots and is licensed separately under CC BY-NC-SA 4.0.

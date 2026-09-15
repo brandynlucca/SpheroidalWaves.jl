@@ -10,6 +10,7 @@ makedocs(
         prettyurls = get(ENV, "CI", "false") == "true",
         repolink = "https://github.com/brandynlucca/SpheroidalWaves.jl",
         edit_link = "main",
+        assets = ["assets/branding.css"],
     ),
     pages = [
         "Home" => "index.md",
