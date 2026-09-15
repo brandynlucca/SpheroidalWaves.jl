@@ -6,7 +6,7 @@
 
 [![Documentation](https://img.shields.io/badge/docs-latest-blue)](https://brandynlucca.github.io/SpheroidalWaves.jl)
 [![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=CI)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-gpl-green.svg)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
 
 Fast, vectorized computation of prolate and oblate spheroidal wave functions using native Fortran kernels.
