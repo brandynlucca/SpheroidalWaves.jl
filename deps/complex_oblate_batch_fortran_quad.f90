@@ -1,6 +1,6 @@
 module complex_oblate_batch_fortran
   use, intrinsic :: iso_c_binding
-  use param, only: knd
+  use complex_oblate_parameters, only: knd
   use complex_oblate_swf, only: coblfcn, quad_solver => coblfcn
   implicit none
 

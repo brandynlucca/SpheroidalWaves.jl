@@ -9,7 +9,7 @@
 !   https://github.com/MathieuandSpheroidalWaveFunctions/complex_prolate_swf
 !
 ! Local modifications in this copy:
-!   1) Added local `param` module defaults with debug/warn/output disabled.
+!   1) Added local `complex_prolate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`cprofcn`) for integration use.
 !   3) Added extensive caching subsystem for Legendre polynomials (pleg_cache),
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
@@ -25,17 +25,17 @@
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 
-module param
+module complex_prolate_parameters
         integer, parameter :: knd = selected_real_kind(33)
         integer, parameter :: knd1 = selected_real_kind(33)
     logical, parameter :: debug = .false.
     logical, parameter :: warn = .false.
     logical, parameter :: output = .false.
     logical, parameter :: suffix = .false.
-end module param
+end module complex_prolate_parameters
 
 module complex_prolate_swf
-      use param
+      use complex_prolate_parameters
 
  integer, parameter :: pleg_cache_slots = 48
  integer, parameter :: qleg_cache_slots = 48
@@ -832,7 +832,7 @@ end if
 !                        narg estimated accuracy values for the first derivatives
 !                        of the angular functions for each of the lnum values of
 !
-        use param
+        use complex_prolate_parameters
 !
 !  scalars
         real(knd) aj1, aj2, ang, apcoef, apcoefn, c, coefme, coefmo, &
@@ -2556,7 +2556,7 @@ end if
 !                         subtraction error incurred in calculating
 !                         dmsnorm
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) adec, aj, aj2, dcon, dec, factor, fterm, rm2, rm2m1, rm2m3, &
@@ -2935,7 +2935,7 @@ end if
 !               nsubr1a: maximum number of digits of subtraction error
 !                        in calculating r1 and r1d using this subroutine
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) and complex*16 scalars and arrays
         real(knd) con, dec, factor, r1rp, r1ip, r1drp, r1dip, rj, teste, testeo, &
@@ -3216,7 +3216,7 @@ end if
 !               nsubr1b: maximum number of digits of subtraction error
 !                        in calculating r1 and r1d using this subroutine
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dcon, dec, dnewi, dnewr, dnewdi, dnewdr, pcoefn, rm, rm2, &
@@ -3461,7 +3461,7 @@ end if
 !                        coefn because this is the first call to r2int;
 !                        set equal to one after calculating coefn
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) coefa, coefme, coefmo, coefn, dec, ri, rm, rm2, r2dposi, &
@@ -3795,7 +3795,7 @@ end if
 !                         to allow accurate results. Set equal to unity
 !                         when this first does not occur.
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dconp, dconq, dconqn, dec, dec1, qdml, qml, rm, ten, &
@@ -4425,7 +4425,7 @@ end if
 !                        achieved for r2 or for r2d, whichever term is
 !                        larger
 !
-        use param
+        use complex_prolate_parameters
 !
 !
 !  real(knd) and complex(knd) scalars and arrays
@@ -4812,7 +4812,7 @@ end if
 !                         r2d
 !
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) and complex(knd) scalars and arrays
         real(knd) ca, dcon, dconi, dec, eta, etas, pcoefn, pdcoefn, &
@@ -5301,7 +5301,7 @@ end if
 !               maxe  : dimension of matrix elements
 !     output:   eigst : array of eigenvalue estimates
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and complex(knd) scalars and arrays
         complex(knd) c, c2, c4, d(maxe), e(maxe), f(maxe), eigst(lnum), g(maxe)
@@ -5392,7 +5392,7 @@ end if
 !
 !     output:   d  : eigenvalues
 !
-        use param
+        use complex_prolate_parameters
 !
         real(knd) machep, eps, temp, t0, t1, zero, half, one, two
         complex(knd) d(maxe), e(maxe), b, c, f, g, p, r, s, w, czero, cone
@@ -5515,7 +5515,7 @@ end if
 !     output:   f     : array of ordered even eigenvalue estimates
 !               g     : array of ordered odd eigenvalue estimates
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) and complex(knd) scalars and arrays
         complex(knd) c, c2, f(np), g(np), fm(np), gm(np), fs(np), gs(np), p, &
@@ -5729,7 +5729,7 @@ end if
 !                       set equal to 2 when running cprofcn where knd = knd1.
 !
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and complex(knd) scalars and arrays
         real(knd) dec, eigdec, eigtest, eigtests
@@ -6103,7 +6103,7 @@ end if
 !               nsubf   : number of decimal digits of subtraction error
 !                         incurred in calculating dfnorm
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and complex(knd) scalars and array
         real(knd) aj, arr, dec, ea, rm2, sgn, ten, teste, testeo, tmax
@@ -6280,7 +6280,7 @@ end if
 !               nsdneg  : subtaction error in calculating dneg
 !               nsdrho  : subtraction error in calculating drhor(1)
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) r, rm, rn, t, ten, teste, testeo, uterm, wterm
@@ -6461,7 +6461,7 @@ end if
 !     output:   x   : coordinate values for quadrature
 !               w   : weighting factors
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) delta, der, pi, s, t, test, u, v, z
@@ -6595,7 +6595,7 @@ end if
 !                        relating the derivative ratios pdr to the
 !                        function ratios pr
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, den, rm, &
@@ -6852,7 +6852,7 @@ end if
 !                        in subroutine r2leg
 !               itermpq: exponent corresponding to termpq
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) ajm, dec, qdml, qlow, qml, qupp, q00, q11, rin, rm, &
@@ -7145,7 +7145,7 @@ end if
 !
 !  real(knd) scalars and arrays and complex(knd) scalars and arrays
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) ak, amo2, an, argb, arn, bn, coef, coefme, coefmo, coefo, dec, &
@@ -7507,7 +7507,7 @@ end if
 !               sbesdr : ratios of first derivatives of spherical Bessel
 !                        functions to the corresponding spherical functions
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars
         real(knd) adj, ci, cm, cr, rn, ten, x
@@ -7665,7 +7665,7 @@ end if
 !                        Neumann functions to the corresponding
 !                        function
 !
-        use param
+        use complex_prolate_parameters
 !
 !  real(knd) scalars
         real(knd) adj, ci, cr, rn, rnn, test, x

@@ -1,6 +1,6 @@
 module complex_prolate_batch_fortran
   use, intrinsic :: iso_c_binding
-  use param, only: knd
+  use complex_prolate_parameters, only: knd
   use complex_prolate_swf, only: cprofcn, quad_solver => cprofcn
   implicit none
 

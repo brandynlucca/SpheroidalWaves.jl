@@ -1,9 +1,9 @@
-! Compiled separately with each backend's param module. Transfer native
+! Compiled separately with each backend's precision. Transfer native
 ! mantissas and integer decimal exponents without reconstructing large values.
 module scaled_batch
   use, intrinsic :: iso_c_binding
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
-  use param, only: knd
+  use prolate_parameters, only: knd
   use prolate_swf, only: profcn
   use oblate_swf, only: oblfcn
   use complex_prolate_swf, only: cprofcn

@@ -1,6 +1,6 @@
 module psms_batch_fortran
   use, intrinsic :: iso_c_binding
-  use param, only: knd
+  use prolate_parameters, only: knd
   use prolate_swf, only: profcn
   implicit none
 

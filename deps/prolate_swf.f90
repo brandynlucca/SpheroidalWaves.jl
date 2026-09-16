@@ -11,7 +11,7 @@
 !
 ! Modified by: Brandyn M. Lucca; March 2026
 ! Local modifications in this copy:
-!   1) Added local `param` module defaults with debug/warn/output disabled.
+!   1) Added local `prolate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`profcn`) for integration use.
 !   3) Added extensive caching subsystem for Legendre polynomials (pleg_cache),
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
@@ -29,15 +29,15 @@
 ! Note: This file is NOT a pristine upstream copy.
 ! -----------------------------------------------------------------------------
 
-module param
+module prolate_parameters
     integer, parameter :: knd = selected_real_kind(8)
     logical, parameter :: debug = .false.
     logical, parameter :: warn = .false.
     logical, parameter :: output = .false.
-end module param
+end module prolate_parameters
 
 module prolate_swf
- use param
+ use prolate_parameters
 
 ! ---------------------------------------------------------------------------
  ! Lightweight caches for repeated Legendre- and quadrature-related work.
@@ -826,7 +826,7 @@ module prolate_swf
 !                        estimated accuracy values for the narg angular
 !                        function values for each of the lnum values of l
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars
     real(knd) aj1, aj2, ang, apcoef, apcoefn, c, c2, c4, coefn, &
@@ -2158,7 +2158,7 @@ end if
 !                        sum for r1 and r1d, i.e., the highest enr(j)
 !                        used
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) adec, aj, c, dcon, dec, dnew, dmlms, dmlms1, dnewd, dold, &
@@ -2459,7 +2459,7 @@ end if
 !                        given l is used to obtain the value for the
 !                        next l.
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, con, dec, dfnorm, dnew, dnewd, dold, doldd, d01, factor, &
@@ -2723,7 +2723,7 @@ end if
 !                        used for all values of l
 !               icoefn : exponent for coefn
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, coefa, coefl, coefme, coefmo, coefn, dec, dcon, dnew, &
@@ -2994,7 +2994,7 @@ end if
 !                         to allow accurate results. Set equal to unity
 !                         when this first does not occur.
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dconp, dconq, dconqn, dec, dec1, dfnorm, dmfnorm, dneg, &
@@ -3488,7 +3488,7 @@ end if
 !                        achieved for r2 or for r2d, whichever term is
 !                        larger
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dconb, dconf, dconi, dmfnorm, dnew, dnewd, dold, doldd, &
@@ -3777,7 +3777,7 @@ end if
 !                         (input) and including the curent r2eta
 !                         calculation (output)
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dcon, dconi, dec, denom, dnew, dnewd1, dnewd2, dnewsum, &
@@ -4166,7 +4166,7 @@ end if
 !
 !     output:   eigval   : estimate of the eigenvalue
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars
     real(knd) c, csq, eigval, eig2, eig3, eig4, eig5, lam1, lam2, &
@@ -4289,7 +4289,7 @@ end if
 !                       in computing first term in the denominator
 !                       of the eigenvalue correction
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cll, clu, cora, corb, csq, de, dec, dl, eig1, eig3, eig4, &
@@ -4489,7 +4489,7 @@ end if
 !               jsub    : number of decimal digits of subtraction error
 !                         incurred in calculating dmfnorm
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and array
     real(knd) aj, arr, c, coef, csq, dec, dmfnorm, dmsnorm, dmlmf, &
@@ -4688,7 +4688,7 @@ end if
 !               nsdrho  : maximum subtraction error in calculating
 !                         the drhor array
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars
     real(knd) c, dneg, eigval, r, rm, rn, t, ten, teste, testeo, uterm, &
@@ -4866,7 +4866,7 @@ end if
 !     output:   x   : coordinate values for quadrature
 !               w   : weighting factors
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) delta, der, pi, s, t, test, u, v, z
@@ -5000,7 +5000,7 @@ end if
 !                        relating the derivative ratios pdr to the
 !                        function ratios pr
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, den, rm, &
@@ -5257,7 +5257,7 @@ end if
 !                        in subroutine r2leg
 !               itermpq: exponent corresponding to termpq
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) ajm, dec, qdml, qlow, qml, qupp, q00, q11, rin, rm, &
@@ -5545,7 +5545,7 @@ end if
 !               coefmo : coefficient for the expression for r2 and r2d
 !                        using the integration method (l-m odd)
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) ak, amo2, an, arg, argb, arn, bn, c, coef, coefme, &
@@ -5785,7 +5785,7 @@ end if
 !                        functions to the corresponding spherical
 !                        spherical functions
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cx, rn, stemp0, stemp1, x
@@ -5914,7 +5914,7 @@ end if
 !                        Neumann functions to the corresponding
 !                        function
 !
-    use param
+    use prolate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cx, rn, rnn, stemp0, stemp1, x

@@ -9,7 +9,7 @@
 !   https://github.com/MathieuandSpheroidalWaveFunctions/complex_oblate_swf
 !
 ! Local modifications in this copy:
-!   1) Added local `param` module defaults with debug/warn/output disabled.
+!   1) Added local `complex_oblate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`coblfcn`) for integration use.
 !   3) Added extensive caching subsystem for Legendre polynomials (pleg_cache),
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
@@ -24,17 +24,17 @@
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 
-module param
+module complex_oblate_parameters
     integer, parameter :: knd = selected_real_kind(8)
     integer, parameter :: knd1 = selected_real_kind(8)
     logical, parameter :: debug = .false.
     logical, parameter :: warn = .false.
     logical, parameter :: output = .false.
     logical, parameter :: suffix = .false.
-end module param
+end module complex_oblate_parameters
 
 module complex_oblate_swf
-  use param
+  use complex_oblate_parameters
 
  integer, parameter :: pleg_cache_slots = 48
  integer, parameter :: qleg_cache_slots = 48
@@ -971,7 +971,7 @@ end if
 !                        narg estimated accuracy values for the first derivatives
 !                        of the angular functions for each of the lnum values of l
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) and complex(knd) scalars
         real(knd) aj1, aj2, apcoef, apcoefn, api, c, coefn, coefme, coefmo, dec, &
@@ -3868,7 +3868,7 @@ end if
 !                         norm
 !               idmlms1e: exponent associated with dmlms1
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) adec, aj, dcon, dec, factor, fterm, rm2, rm2m1, rm2m3, &
@@ -4228,7 +4228,7 @@ end if
 !               nsub   : subtraction error in calculating r1
 !               ndsub  : subtraction error in calculating r1d
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dec, em, pcoefn, r1dcoef, sposr, sposi, sposar, sposai, &
@@ -4607,7 +4607,7 @@ end if
 !               jeta    : maximum number of terms taken in the numerator
 !                         and denominator sums for r1 and r1d
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dec, eta, etas, pcoefn, pdcoefn, r1dcoef1, rm, rm2, &
@@ -4972,7 +4972,7 @@ end if
 !               isubd  : larger of the subtraction error in the real
 !                        and imaginary parts of r2d
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd)  coefa, coefn, coefme, coefmo, dec, dcon, ri, rm, rm2, &
@@ -5326,7 +5326,7 @@ end if
 !               nacccor : subtraction error in forming Wronskian
 !                         using r2 and r2d obtained in r2leg
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dconp, dconq, dconqn, dec, pdsumpi, pdsumpr, psumpi, psumpr, &
@@ -5979,7 +5979,7 @@ end if
 !                         the oblate radial function of second kind
 !               jleg1   : number of terms taken in the series
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) dec, em, qm0, qdm0, ten, term, x, xx, qr(maxq), qdr(maxq)
@@ -6160,7 +6160,7 @@ end if
 !               nsub0  : larger of the subtraction errors in the series
 !                        for r2 and r2d
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars
         real(knd) con, dconb, dconf, dconi, dec, rj1, rj2, rm, r2est, sumpi, &
@@ -6479,7 +6479,7 @@ end if
 !                         r2eta calculations (input) and including the
 !                         curent r2eta calculation (output)
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) c, dcon, dconi, dec, eta, etas, pcoefn, pdcoefn, rm, rm2, &
@@ -6779,7 +6779,7 @@ end if
 !     output:   d  : eigenvalues
 !
 
-        use param
+        use complex_oblate_parameters
 !
         real(knd) machep, eps, temp, t0, t1, zero, half, one, two
         complex(knd) d(maxe), e(maxe), b, c, f, g, p, r, s, w, czero, cone
@@ -6915,7 +6915,7 @@ end if
 !                       eigenvalue or the first non-paired eigenvalue
 !                       if there are no prolate-like eigenvalues
 !
-        use param
+        use complex_oblate_parameters
         real(knd) testpr, testpi
         complex(knd) c, cp, eigst(np2), f(np), g(np), fp(np), gp(np), p, testp, &
                      temp
@@ -7188,7 +7188,7 @@ end if
 !                       equal to zero or two when it is run in knd = 8
 !                       arithmetic.
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars
         real(knd) c, dec, eigdec, ten
@@ -7588,7 +7588,7 @@ end if
 !               jsubms  : effective number of decimal digits of subtraction
 !                         error incurred in calculating dmsnorm
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars
         real(knd) aj, arr, c, dec, ea, fterm, rm2, rm2m1, rm2m3, rm2p1, sgn, sumpr, &
@@ -7891,7 +7891,7 @@ end if
 !                         drhor(1) from drhor(2)
 !               nsdrho  : subtraction error in calculating drhor(1)
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) r, rm, rn, t, ten, teste, testeo, uterm, wterm
@@ -8074,7 +8074,7 @@ end if
 !     output:   x   : coordinate values for quadrature
 !               w   : weighting factors
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) delta, der, pi, ri, s, t, ten, test, u, v, z
@@ -8220,7 +8220,7 @@ end if
 !                        relating the derivative ratios pdr to the
 !                        function ratios pr
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, coef, &
@@ -8525,7 +8525,7 @@ end if
 !                                       -m/2
 !                        (2m-1)!!(x*x+1)
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) ajm, dec, qdm1, qlow, qlow0, qlow1, qmid, qmid0, qmid1, qm1, &
@@ -9005,7 +9005,7 @@ end if
 !               coefmo : coefficient used to multiply r2 to get one of
 !                        the two contributions to r2d when l-m is odd
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars and arrays
         real(knd) amo2, an, argb, arn, bn, coef, coefme, coefmo, coefo, dec, &
@@ -9381,7 +9381,7 @@ end if
 !                        functions to the corresponding spherical
 !                        spherical functions
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars
         real(knd) adj, ci, cm, cr, rn, ten, x
@@ -9539,7 +9539,7 @@ end if
 !                        Neumann functions to the corresponding
 !                        function
 !
-        use param
+        use complex_oblate_parameters
 !
 !  real(knd) scalars
         real(knd) adj, ci, cr, rn, rnn, test, x

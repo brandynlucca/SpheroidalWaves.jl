@@ -1,6 +1,6 @@
 module oblate_batch_fortran
   use, intrinsic :: iso_c_binding
-  use param, only: knd
+  use oblate_parameters, only: knd
   use oblate_swf, only: oblfcn
   implicit none
 

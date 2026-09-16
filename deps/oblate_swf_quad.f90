@@ -9,7 +9,7 @@
 !   https://github.com/MathieuandSpheroidalWaveFunctions/oblate_swf
 !
 ! Local modifications in this copy:
-!   1) Added local `param` module defaults with debug/warn/output disabled.
+!   1) Added local `oblate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`oblfcn`) for integration use.
 !   3) Added extensive caching subsystem for Legendre polynomials (pleg_cache),
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
@@ -23,16 +23,16 @@
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 
-module param
+module oblate_parameters
     integer, parameter :: knd = selected_real_kind(33)
     logical, parameter :: debug = .false.
     logical, parameter :: warn = .false.
     logical, parameter :: output = .false.
     logical, parameter :: suffix = .false.
-end module param
+end module oblate_parameters
 
 module oblate_swf
- use param
+ use oblate_parameters
 
  integer, parameter :: pleg_cache_slots = 48
  integer, parameter :: qleg_cache_slots = 48
@@ -930,7 +930,7 @@ end if
 !                        narg estimated accuracy values for the angular functions
 !                        for each of the lnum values of l
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars
     real(knd) aj1, aj2, apcoef, apcoefn, api, c, c2, c4, coefn, coefme, &
@@ -3107,7 +3107,7 @@ end if
 !                         norm
 !               idmlms1e: exponent associated with dmlms1
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) adec, aj, c, dcon, dec, dmlms, dmlms1, dnew, dnewd, dold, &
@@ -3465,7 +3465,7 @@ end if
 !               nsub   : subtraction error in calculating r1
 !               ndsub  : subtraction error in calculating r1d
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, coef, dec, dmfnorm, dnew, dnewd, dold, doldd, em, pcoefn, &
@@ -3768,7 +3768,7 @@ end if
 !               jeta    : maximum number of terms taken in the numerator
 !                         and denominator sums for r1 and r1d
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dec, denom, dnew, dnewd, dnewd1, dnewd2, dold, doldd1, &
@@ -4073,7 +4073,7 @@ end if
 !                        used for all values of l
 !               icoefn : exponent for coefn
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, coefa, coefl, coefme, coefmo, coefn, dec, dcon, dnew, dnewd, &
@@ -4377,7 +4377,7 @@ end if
 !               nsubdleg: subtraction error in decimal digits
 !                         in the calculation of r2dc
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dconp, dconq, dconqn, dec, dfnorm, dmfnorm, dneg, dnegjf, &
@@ -4893,7 +4893,7 @@ end if
 !                         the oblate radial function of second kind
 !               jleg1   : number of terms taken in the series
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars
     real(knd) arg, c, dec, eigval, em, ea, e3, qm0, qdm0, ra, r1c, r1, r2, r2c, &
@@ -5069,7 +5069,7 @@ end if
 !               jtest  : smaller of the number of digits of convergence
 !                        of the forward sums for r2 and r2d
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, con, dconb, dconf, dconi, dec, dfnorm, dnew, dnewd, dold, &
@@ -5351,7 +5351,7 @@ end if
 !                         r2eta calculations (input) and including the
 !                         curent r2eta calculation (output)
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dcon, dconi, dec, denom, dnew, dnewd, dnewd1, dnewd2, &
@@ -5595,7 +5595,7 @@ end if
 !
 !     output:   d  : eigenvalues in ascending value.
 !
-    use param
+    use oblate_parameters
 !
     real(knd) b, c, f, g, p, r, s
     real(knd) d(np), e(np)
@@ -5704,7 +5704,7 @@ end if
 !               itestm: number of matching digits for the forward and
 !                       backward recursion for d coefficient ratios
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cora, corb, de, dec, dl, eigdec, eigstart, eigval, enrc, ten
@@ -5934,7 +5934,7 @@ end if
 !               ksub    : number of decimal digits of subtraction error
 !                         incurred in calculating dmfnorm
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and array
     real(knd) aj, aj2, arr, c, coef, csq, dec, dfnorm, dmlf, dmfnorm, dmlmf, &
@@ -6194,7 +6194,7 @@ end if
 !               nsdrhor1: subtraction error in calculating drhor(1)
 !                         from drhor(2)
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, dneg, eigval, r, rm, rn, t, ten, teste, testeo, uterm, vterm, &
@@ -6347,7 +6347,7 @@ end if
 !     output:   x  : coordinate values for quadrature
 !               w  : weighting factors
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) delta, der, pi, ri, s, t, ten, test, u, v, z
@@ -6493,7 +6493,7 @@ end if
 !                        relating the derivative ratios pdr to the
 !                        function ratios pr
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, coef, &
@@ -6795,7 +6795,7 @@ end if
 !                                       -m/2
 !                        (2m-1)!!(x*x+1)
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) ajm, dec, qdm1, qlow, qlow0, qlow1, qmid, qmid0, qmid1, qm1, &
@@ -7268,7 +7268,7 @@ end if
 !               coefmo : coefficient used to multiply r2 to get one of
 !                        the two contributions to r2d when l-m is odd
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) amo2, an, arg, argb, arn, bn, c, coef, coefme, coefmo, coefo, &
@@ -7577,7 +7577,7 @@ end if
 !                        functions to the corresponding spherical
 !                        spherical functions
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cx, rn, stemp0, stemp1, ten, x
@@ -7707,7 +7707,7 @@ end if
 !                        Neumann functions to the corresponding
 !                        function
 !
-    use param
+    use oblate_parameters
 !
 !  real(knd) scalars and arrays
     real(knd) c, cx, rn, rnn, stemp0, stemp1, ten, x
