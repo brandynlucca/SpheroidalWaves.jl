@@ -1,7 +1,7 @@
 using BinaryBuilder
 
 name = "SpheroidalWaves"
-version = v"0.4.1"
+version = v"0.5.0"
 
 # For a local BinaryBuilder trial, point this at the source checkout. For the
 # Yggdrasil submission, replace this selection with a GitSource pinned to the
