@@ -6,11 +6,11 @@ makedocs(
     modules = [SpheroidalWaves],
     checkdocs = :exports,
     authors = "SpheroidalWaves contributors",
-    repo = "https://github.com/brandynlucca/SpheroidalWaves.jl/blob/{commit}{path}#{line}",
+    remotes = nothing,
     format = Documenter.HTML(
         prettyurls = get(ENV, "CI", "false") == "true",
-        repolink = "https://github.com/brandynlucca/SpheroidalWaves.jl",
-        edit_link = "main",
+        repolink = nothing,
+        edit_link = nothing,
         assets = ["assets/branding.css"],
     ),
     pages = [
