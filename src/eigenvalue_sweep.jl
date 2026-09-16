@@ -18,10 +18,13 @@ Keyword arguments:
   diagnostics are not acceptable.
 
 Returns a named tuple with fields:
-- `c::Vector{Float64}`
-- `lambda::Vector{Float64}`
+- `c::Vector{T}`
+- `lambda::Vector{T}`
 - `selected_n::Vector{Int}`
 - `switched_branch::Vector{Bool}`
+
+`T` is `Float64` for double precision and `BigFloat` for quad precision.
+Grid coordinates, predictors, and candidate comparisons retain this precision.
 """
 function eigenvalue_sweep(m::Integer,
                           n::Integer,
@@ -44,7 +47,9 @@ function eigenvalue_sweep(m::Integer,
         error("branch_window must be nonnegative, got $branch_window")
     end
 
-    cvals = Float64.(c_grid)
+    T = precision === :quad ? BigFloat : Float64
+    cvals = T.(c_grid)
+    all(isfinite, cvals) || error("c_grid must be finite")
     if length(cvals) > 1
         diffs = diff(cvals)
         if !all(isfinite.(diffs)) || all(d -> d == 0.0, diffs)
@@ -58,15 +63,15 @@ function eigenvalue_sweep(m::Integer,
     end
 
     npts = length(cvals)
-    lambdas = Vector{Float64}(undef, npts)
+    lambdas = Vector{T}(undef, npts)
     selected_n = Vector{Int}(undef, npts)
     switched_branch = falses(npts)
 
     lambda0 = evaluator(m, n, cvals[1])
-    if !(lambda0 isa Real) || !isfinite(Float64(lambda0))
+    if !(lambda0 isa Real) || !isfinite(T(lambda0))
         error("evaluator returned non-finite or non-real eigenvalue at first grid point")
     end
-    lambdas[1] = Float64(lambda0)
+    lambdas[1] = T(lambda0)
     selected_n[1] = Int(n)
 
     if npts == 1
@@ -86,7 +91,7 @@ function eigenvalue_sweep(m::Integer,
                                          precision=precision,
                                          with_metadata=true,
                                          adaptive=true)
-                    dlambda = Float64(jac.derivative)
+                    dlambda = T(jac.derivative)
                     if isfinite(dlambda) && jac.metadata.suggested_action == :accept
                         lambdas[i - 1] + dlambda * dc
                     else
@@ -114,22 +119,22 @@ function eigenvalue_sweep(m::Integer,
         end
 
         best_n = Int(n)
-        best_lambda = NaN
-        best_score = Inf
+        best_lambda = T(NaN)
+        best_score = T(Inf)
 
         for n_candidate in candidate_n_values
             lambda_candidate = evaluator(m, n_candidate, ci)
             if !(lambda_candidate isa Real)
                 continue
             end
-            lambda_float = Float64(lambda_candidate)
-            if !isfinite(lambda_float)
+            lambda_value = T(lambda_candidate)
+            if !isfinite(lambda_value)
                 continue
             end
-            score = abs(lambda_float - lambda_pred)
+            score = abs(lambda_value - lambda_pred)
             if score < best_score
                 best_score = score
-                best_lambda = lambda_float
+                best_lambda = lambda_value
                 best_n = n_candidate
             end
         end
@@ -144,5 +149,62 @@ function eigenvalue_sweep(m::Integer,
     end
 
     return (c=cvals, lambda=lambdas, selected_n=selected_n, switched_branch=switched_branch)
+end
+
+"""
+    eigenvalue_sweep(m, n, c_grid::AbstractVector{<:Complex};
+                    spheroid=:prolate, precision=:double,
+                    branch_lock=true, branch_window=1)
+
+Continue an eigenvalue along the ordered, piecewise-linear complex path
+`c_grid`. Initialize degree `n` by continuation from `real(first(c_grid))`
+to the first point, as in scalar `eigenvalue`. Subsequent points continue from
+the preceding state, with adaptive subdivision and angular-profile matching.
+Repeated points and closed paths are allowed.
+
+Only native degrees of the same parity can be selected. `branch_window` counts
+neighbors in that parity class (one means degrees `n-2` and `n+2`). The returned
+`selected_n` contains native labels; a label change need not be a discontinuity
+of the continued eigenvalue. `switched_branch` marks those label changes.
+`c` and `lambda` are complex vectors at the requested precision.
+
+With `branch_lock=false`, evaluate the original native label independently at
+each point. Complex continuation uses profiles, not the real sweep's Jacobian
+predictor or custom eigenvalue-only evaluator. Unresolved paths raise an error.
+Paths around branch points can return a different eigenvalue at their starting
+coordinate; this function does not impose a globally single-valued branch.
+"""
+function eigenvalue_sweep(m::Integer,n::Integer,c_grid::AbstractVector{<:Complex};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,
+        branch_lock::Bool=true,branch_window::Integer=1,
+        use_jacobian_predictor::Bool=true,evaluator=nothing)
+    _validate_precision(precision)
+    spheroid in (:prolate,:oblate) || error("spheroid must be :prolate or :oblate")
+    0 <= m <= n || error("require 0 <= m <= n")
+    isempty(c_grid) && error("c_grid must be non-empty")
+    branch_window >= 0 || error("branch_window must be nonnegative")
+    evaluator === nothing || throw(ArgumentError("complex continuation requires native angular profiles; custom eigenvalue-only evaluators are unsupported"))
+    T = precision === :quad ? BigFloat : Float64
+    cvals = Complex{T}.(c_grid)
+    all(isfinite,cvals) || error("c_grid must be finite at the requested precision")
+    prefix = spheroid === :prolate ? :cprolate : :coblate
+    lambdas = similar(cvals)
+    selected_n = fill(Int(n),length(cvals))
+    switched_branch = falses(length(cvals))
+    if !branch_lock
+        for i in eachindex(cvals)
+            lambdas[i] = _call_complex_eigenvalue(prefix,m,n,cvals[i];precision)
+        end
+    else
+        evaluate = _angular_phase_evaluator(prefix,m,n,precision)
+        state = _initial_angular_phase(evaluate,m,n,first(cvals);branch_window)
+        lambdas[1],selected_n[1] = state.lambda,state.n
+        for i in 2:length(cvals)
+            state = _transport_angular_phase(evaluate,cvals[i-1],state,cvals[i];branch_window)
+            lambdas[i],selected_n[i] = state.lambda,state.n
+            switched_branch[i] = selected_n[i] != selected_n[i-1]
+        end
+    end
+    return (;c=cvals,lambda=lambdas,selected_n,switched_branch)
 end
 
