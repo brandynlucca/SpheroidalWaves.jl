@@ -182,12 +182,12 @@ jobs:
           owner="${YGGDRASIL_FORK%%/*}"
           branch="spheroidalwaves-v${BACKEND_VERSION}-${GITHUB_SHA:0:12}"
           gh auth setup-git
-          gh repo clone "$YGGDRASIL_FORK" yggdrasil -- --filter=blob:none --no-checkout
+          git clone --filter=blob:none --no-checkout --depth=1 --no-tags "https://github.com/$YGGDRASIL_FORK.git" yggdrasil
           cd yggdrasil
           git remote add upstream https://github.com/JuliaPackaging/Yggdrasil.git
-          git fetch upstream master --depth=1
+          git fetch upstream master --depth=1 --no-tags
           if gh api "repos/$YGGDRASIL_FORK/git/ref/heads/$branch" >/dev/null 2>&1; then
-            git fetch origin "$branch" --depth=1
+            git fetch origin "$branch" --depth=1 --no-tags
             git checkout -b "$branch" FETCH_HEAD
           else
             git checkout -b "$branch" upstream/master
