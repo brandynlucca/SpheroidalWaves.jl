@@ -4,6 +4,7 @@ using SpheroidalWaves
 makedocs(
     sitename = "SpheroidalWaves.jl",
     modules = [SpheroidalWaves],
+    checkdocs = :exports,
     authors = "SpheroidalWaves contributors",
     repo = "https://github.com/brandynlucca/SpheroidalWaves.jl/blob/{commit}{path}#{line}",
     format = Documenter.HTML(
@@ -16,7 +17,7 @@ makedocs(
         "Home" => "index.md",
         "API" => "api.md",
         "Math and Usage" => "math-and-usage.md",
-        "Backend Overrides" => "backend-overrides.md",
+        "Mathematical Tools" => "mathematical-tools.md",
     ],
 )
 

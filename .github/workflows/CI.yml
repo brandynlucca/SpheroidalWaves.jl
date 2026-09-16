@@ -47,3 +47,54 @@ jobs:
       - uses: julia-actions/cache@v2
       - uses: julia-actions/julia-buildpkg@v1
       - uses: julia-actions/julia-runtest@v1
+        timeout-minutes: 5
+
+  installed-backends:
+    name: Installed backends - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            arch: x64
+          - os: windows-2022
+            arch: x64
+          - os: macos-15-intel
+            arch: x64
+          - os: macos-15
+            arch: aarch64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+          arch: ${{ matrix.arch }}
+      # No build action or compiler installation: exercise what users download.
+      - name: Install and check released backend libraries
+        shell: bash
+        run: |
+          julia --startup-file=no --project=. -e '
+            using Pkg
+            Pkg.instantiate()
+            using Artifacts, SpheroidalWaves
+            @assert !isdir("build") "Consumer checks must not use a local build"
+            for precision in (:double, :quad)
+                path = SpheroidalWaves.backend_library(; precision)
+                @assert path !== nothing
+                root = artifact_path(artifact_hash("spheroidal_backend_$precision", "Artifacts.toml"))
+                @assert dirname(realpath(path)) == realpath(root)
+                if Sys.isapple()
+                    for line in split(read(`otool -L $path`, String), "\n")[2:end]
+                        isempty(strip(line)) && continue
+                        dependency = first(split(strip(line), " ("))
+                        @assert any(prefix -> startswith(dependency,prefix), ("@rpath/", "@loader_path/", "/usr/lib/", "/System/Library/")) dependency
+                    end
+                end
+                for spheroid in (:prolate, :oblate)
+                    @assert only(smn(1,1,0.3,0; spheroid,precision).value) < 0
+                    @assert only(radial_wronskian(0,1,1.0,2; spheroid,precision,form=:error)) < 1e-12
+                end
+            end
+          '

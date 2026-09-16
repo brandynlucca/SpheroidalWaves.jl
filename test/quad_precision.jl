@@ -1,5 +1,32 @@
 using SpheroidalWaves, Test
 
+@testset "Quad calculations accept ordinary numeric inputs" begin
+    lib = SpheroidalWaves.backend_library(;precision=:quad)
+    if lib !== nothing && isfile(lib)
+        # Exactly representable inputs isolate calculation precision from input
+        # rounding. An independent reference checks R1 for m=0, n=1, c=1, x=2.
+        expected = big"0.45603690333332372100494242600202824193682868459324"
+        r = rmn(0,1,1.0,2.0;precision=:quad,kind=1)
+        @test eltype(r.value) === Complex{BigFloat}
+        @test only(r.value) ≈ expected rtol=big"1e-28"
+        @test abs(only(r.value)-expected) < abs(BigFloat(Float64(expected))-expected)/big"1e10"
+        s = smn(1,1,0.0,0.5;precision=:quad)
+        @test only(s.value) ≈ -sqrt(big"0.75") rtol=big"1e-30"
+
+        # Ordinary arrays must preserve the same quad values, derivatives, and
+        # scaling exponents as explicitly widened versions of those inputs.
+        for spheroid in (:prolate,:oblate)
+            x = [1.5,2.0]
+            ordinary = rmn(1,1:2,1.25,x;precision=:quad,spheroid,kind=3,scaled=true)
+            widened = rmn(1,1:2,big(1.25),BigFloat.(x);precision=:quad,spheroid,kind=3,scaled=true)
+            @test eltype(ordinary.value.mantissa) === Complex{BigFloat}
+            @test ordinary == widened
+        end
+    else
+        @info "Skipping ordinary-input quad checks: quad backend unavailable"
+    end
+end
+
 @testset "Quad inputs accept higher BigFloat precision" begin
     lib = SpheroidalWaves.backend_library(;precision=:quad)
     if lib !== nothing && isfile(lib)

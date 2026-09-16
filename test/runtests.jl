@@ -179,7 +179,7 @@ using Test
     end
 
     @testset "Inline angular and radial references" begin
-            wolfram_smn_cases = [
+            angular_reference_cases = [
                 ((0, 0, 0.0, 0.3), 1.0, 0.0),
                 ((0, 1, 0.0, 0.3), 0.3, 1.0),
                 ((1, 1, 0.3, 0.0), -1.001795214382128, 0.0),
@@ -188,8 +188,8 @@ using Test
                 ((2, 3, 1.0, 0.5), 5.65036805385163, 3.4543263211124438),
                 ((2, 5, 10.0, 0.6), 13.831303334796436, 21.40430253808833),
             ]
-            for ((m, n, c, eta_wa), expected_value, expected_derivative) in wolfram_smn_cases
-                result = smn(m, n, c, eta_wa; spheroid=:prolate, precision=:double)
+            for ((m, n, c, eta), expected_value, expected_derivative) in angular_reference_cases
+                result = smn(m, n, c, eta; spheroid=:prolate, precision=:double)
                 @test isapprox(result.value[1], expected_value; atol=1e-11, rtol=1e-11)
                 @test isapprox(result.derivative[1], expected_derivative; atol=1e-11, rtol=1e-11)
             end
@@ -227,23 +227,23 @@ using Test
             assert_allclose(real.(rp2_l1.derivative), prolate_r2d_l1; atol=1e-12)
             assert_allclose(imag.(rp2_l1.derivative), [0.0]; atol=1e-12)
 
-            # Direct Wolfram|Alpha radial benchmarks.
-            wolfram_rmn_kind1_cases = [
+            # Independent radial reference values.
+            radial_kind1_reference_cases = [
                 ((0, 0, 0.5, 1.5), 0.9355129525869241),
                 ((0, 1, 1.0, 2.0), 0.45603690333332372100494242600202824193682868459324),
                 ((2, 3, 2.0, 1.8), 0.1681696391119482),
             ]
-            for ((m, n, c, x_wa), expected_value) in wolfram_rmn_kind1_cases
-                result = rmn(m, n, c, [x_wa]; spheroid=:prolate, precision=:double, kind=1)
+            for ((m, n, c, x), expected_value) in radial_kind1_reference_cases
+                result = rmn(m, n, c, [x]; spheroid=:prolate, precision=:double, kind=1)
                 @test isapprox(real(result.value[1]), expected_value; atol=1e-11, rtol=1e-11)
                 @test isapprox(imag(result.value[1]), 0.0; atol=1e-12, rtol=0.0)
             end
 
-            wolfram_rmn_kind2_cases = [
+            radial_kind2_reference_cases = [
                 ((1, 2, 0.5, 1.3), -24.89681123745018),
             ]
-            for ((m, n, c, x_wa), expected_value) in wolfram_rmn_kind2_cases
-                result = rmn(m, n, c, [x_wa]; spheroid=:prolate, precision=:double, kind=2)
+            for ((m, n, c, x), expected_value) in radial_kind2_reference_cases
+                result = rmn(m, n, c, [x]; spheroid=:prolate, precision=:double, kind=2)
                 @test isapprox(real(result.value[1]), expected_value; atol=1e-10, rtol=1e-11)
                 @test isapprox(imag(result.value[1]), 0.0; atol=1e-12, rtol=0.0)
             end

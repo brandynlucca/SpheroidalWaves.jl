@@ -30,7 +30,7 @@ using SpheroidalWaves, Test
 end
 
 @testset "Small nonzero radial parameters remain supported" begin
-    # Signed Wolfram values supplied by the user, with decimal inputs preserved
+    # Independent signed reference values, with decimal inputs preserved
     # for the high-precision second-kind comparisons.
     for precision in (:double, :quad)
         lib = SpheroidalWaves.backend_library(; precision)

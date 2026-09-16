@@ -168,7 +168,6 @@ function _require_backend_library(precision::Symbol)
         2. Set environment variable: SPHEROIDALWAVES_LIBRARY_$(uppercase(String(precision))) = /path/to/lib
         3. Run: julia> import Pkg; Pkg.build("SpheroidalWaves")
         
-        See https://github.com/Brandyn/SpheroidalWaves.jl/docs/src/backend-overrides.md for details.
         """)
     end
     return lib
@@ -928,15 +927,14 @@ polynomials when c is small.
     c_complex = 1.5 + 0.1im
     result_c = smn(1, 2, c_complex, η)
 
-    # Second kind, with quad inputs and outputs
-    qs = smn(1, 2, big"1.25", big"0.3"; kind=2, precision=:quad)
+    # Second kind, with quad precision
+    qs = smn(1, 2, 1.25, 0.3; kind=2, precision=:quad)
 
 **Notes:**
     - Order and degree must satisfy 0 ≤ m ≤ n
     - All η values must be in [-1, 1]
-    - With kind=1, real prolate c and normalize=false, follows Wolfram SpheroidalPS[n,m,c,η]
-    - Odd-m values and derivatives change sign relative to versions through 0.4.1;
-      remove any manual (-1)^m conversion previously used to match Wolfram
+    - With kind=1 and normalize=false, uses Meixner–Schäfke normalization
+    - Angular values and derivatives include the Condon–Shortley phase (-1)^m
     - Complex c continues the eigenmode and normalization sign vertically from
       real(c), matching neighboring native labels of the same parity when needed.
       Unresolved continuation paths raise an error. See `eigenvalue_sweep` for

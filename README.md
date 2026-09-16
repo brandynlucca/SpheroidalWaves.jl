@@ -20,7 +20,7 @@ import Pkg
 Pkg.add("SpheroidalWaves")
 ```
 
-Prebuilt backends are downloaded automatically on supported platforms. See [BUILD.md](BUILD.md) if a local backend build is required.
+Prebuilt backends are downloaded automatically on supported platforms.
 
 ## Quick start
 

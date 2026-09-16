@@ -9,7 +9,7 @@ using SpheroidalWaves, Test
 
         # Independent spectral value, embedded here so CI need not reconstruct
         # a high-precision reference or execute the extensive path matrices.
-        c = Complex{T}(2+3im)
+        c = 2.0+3.0im
         expected_lambda = complex(big"1.8526077784286968122645450083859036836748134683954",
                                   big"3.1017112824466201071716399658076138048679053435607")
         expected_s = complex(big"1.4672095477135660718169187632852425554599094354553",

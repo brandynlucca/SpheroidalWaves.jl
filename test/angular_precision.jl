@@ -6,7 +6,7 @@ using SpheroidalWaves, Test
         @info "Skipping quad angular precision references: backend unavailable"
     else
     setprecision(BigFloat,256) do
-        # Direct user-supplied Wolfram values, embedded in this test.
+        # Independent numerical reference values, embedded in this test.
         cases = (
             (1,1,big"0.99999999999999999999",big"-2.301112706215036020011242122509447123295245283917268939039451127926383217315674733290126393090031802081648396300088965e-11"),
             (0,2,big"0",big"-0.427292880720811382968058194313112037521173128267084567891239976"),

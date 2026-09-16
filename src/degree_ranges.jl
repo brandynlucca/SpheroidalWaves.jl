@@ -114,11 +114,7 @@ Evaluate angular wave functions with `n` given as a unit range of degrees. The `
 to `n`. Normalization, precision, and spheroid keywords match the
 single-degree method; a scalar `eta` gives one row.
 
-Positive real parameters in either geometry and precision share a native
-degree expansion on updated backends. Scaled output and optional derivatives
-retain this sharing. Degrees requiring refined angular expansions and endpoint
-evaluations retain the individual-degree algorithms. Older backends preserve
-their supported fast paths or evaluate individual degrees.
+Use `precision=:quad` to request quad precision with the same numeric arguments.
 """
 function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
         eta::AbstractVector{<:Real}; spheroid::Symbol=:prolate,
@@ -171,14 +167,9 @@ smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}, eta::Re
 
 Evaluate radial wave functions with `n` given as a unit range of degrees. The `value` and
 `derivative` matrices have rows corresponding to `x` and columns corresponding
-to `n`. All four radial kinds and the existing spheroid and precision
-keywords are supported. Single-degree calls retain their existing return shape.
-
-Positive real parameters in both geometries and precisions share a native
-degree expansion per coordinate on updated backends, including scaled output.
-Prolate endpoints and cases requiring analytic radial evaluation retain their
-individual-degree algorithms. Older libraries retain their existing fallbacks.
-Quad native transfer preserves mantissas and exponents without Float64 conversion.
+to `n`. All four radial kinds and the spheroid and precision keywords are
+supported. A scalar `x` gives one row. Use `precision=:quad` to request quad
+precision with the same numeric arguments.
 """
 function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
         x::AbstractVector{<:Real}; spheroid::Symbol=:prolate,

@@ -4,6 +4,9 @@
 
 This document describes the mathematical model behind every public API operation in `SpheroidalWaves.jl` and shows practical usage patterns.
 
+See the [Mathematical Tools guide](src/mathematical-tools.md) for normalized
+Wronskian errors, scaled outputs, and logarithmic and second derivatives.
+
 Public operations covered:
 
 - `smn`
@@ -36,8 +39,20 @@ For real `c`, the library computes real-family spheroidal functions. For complex
 `smn` computes angular spheroidal functions of the first kind and their first derivatives with respect to `eta`:
 
 $$
-\frac{d}{d\eta}\left[(1-\eta^2)\frac{dS_{mn}}{d\eta}\right] + \left(\lambda_{mn}(c) - c^2(1-\eta^2) - \frac{m^2}{1-\eta^2}\right)S_{mn} = 0.
+\frac{d}{d\eta}\left[(1-\eta^2)\frac{dS_{mn}}{d\eta}\right] + \left(\lambda_{mn}(c) - \sigma c^2\eta^2 - \frac{m^2}{1-\eta^2}\right)S_{mn} = 0.
 $$
+
+Here `sigma=1` for prolate and `sigma=-1` for oblate functions. Angular values,
+coordinate derivatives, and parameter Jacobians include the Condon–Shortley
+phase `(-1)^m`. With `normalize=false`, the functions use Meixner–Schäfke
+normalization. For complex parameters, the eigenmode and normalization continue
+vertically from the real axis. Parameter Jacobians preserve the local branch.
+
+At exactly `c=0`, both geometries use the associated Legendre limit for all
+`0 <= m <= n`, with analytic endpoint derivatives. Unity normalization multiplies
+the result by `sqrt((2n+1)(n-m)! / (2(n+m)!))`. See the
+[angular convention notes](src/math-and-usage.md#angular-phase-and-spherical-limit)
+for examples and endpoint behavior.
 
 Returned values:
 
@@ -59,11 +74,23 @@ s = smn(0, 2, 20.0, eta; spheroid=:prolate, precision=:double)
 
 `rmn` computes radial spheroidal functions and first derivatives with respect to `x`.
 
-A radial equation form is:
+For real prolate calls at `x=1`, kinds 2–4 return `NaN` for the undefined
+value and derivative; `accuracy` reports `-1` there.
+
+Radial `c=0` calls throw `DomainError` in both geometries and precisions, for
+all four kinds. The same restriction applies to radial accuracy, Wronskians,
+and parameter derivatives. The former real prolate `m=0` Legendre substitution
+has been removed because it changed the radial normalization at exactly zero.
+Angular functions and eigenvalues continue to support `c=0`.
+
+A prolate radial equation form is:
 
 $$
-\frac{d}{dx}\left[(x^2-1)\frac{dR_{mn}}{dx}\right] + \left(\lambda_{mn}(c) - c^2x^2 - \frac{m^2}{x^2-1}\right)R_{mn} = 0.
+\frac{d}{dx}\left[(x^2-1)\frac{dR_{mn}}{dx}\right] + \left(c^2x^2 - \lambda_{mn}(c) - \frac{m^2}{x^2-1}\right)R_{mn} = 0.
 $$
+
+For oblate functions the radial equation is
+`((x^2+1)*R′)′ + (c^2*x^2-lambda+m^2/(x^2+1))*R = 0`.
 
 The `kind` selector chooses the radial family:
 
@@ -90,7 +117,12 @@ $$
 \mathscr{W}(x) = R_1(x)R_2'(x) - R_1'(x)R_2(x).
 $$
 
-For a correctly computed solution pair under fixed normalization, $\mathscr{W}(x)$ should be approximately constant in $x$. This is a consistency diagnostic for numerical stability.
+For real `c > 0`, standard radial normalization gives
+`W(x) = 1 / (c * (x^2 - 1))` for prolate functions and
+`W(x) = 1 / (c * (x^2 + 1))` for oblate functions.
+The corresponding scaled quantity `c * (x^2 - 1) * W(x)` or
+`c * (x^2 + 1) * W(x)` should be approximately one; the raw Wronskian is
+not constant. Exactly zero is outside the supported radial domain.
 
 ### Usage
 
@@ -124,18 +156,24 @@ lambda_complex = eigenvalue(0, 2, 20.0 + 0.2im; spheroid=:oblate, precision=:dou
 
 ### Mathematical Basis
 
-`accuracy` returns backend-estimated decimal digits of reliability at each evaluation point.
+`accuracy` returns integer diagnostics at each evaluation point: `-1` means no
+estimate is available, `0` means no reliable decimal digits are reported, and
+positive values are backend estimates. These are neither rigorous error bounds
+nor statistical confidence intervals, and do not certify coordinate derivatives.
 
-- `target=:angular` reports angular accuracy estimates
-- `target=:radial` reports radial accuracy estimates
-
-This is not a strict interval bound; it is a solver quality estimate useful for gating downstream workflows.
+Angular `c=0` calls evaluate the recurrence and return `-1`. Radial `c=0` calls
+throw `DomainError`. Input validation is shared with `smn` and `rmn`.
+For nonzero radial calls, only `kind=2` reports the native second-kind estimate;
+kinds `1`, `3`, and `4` are evaluated and return `-1`. Nonfinite values and invalid
+native estimates also return `-1`. Quad diagnostics preserve the same input
+precision as function evaluation. Check sensitive results against independent
+references, identities, or precision comparisons.
 
 ### Usage
 
 ```julia
 acc_s = accuracy(0, 2, 20.0, [-0.3, 0.0, 0.3]; target=:angular)
-acc_r = accuracy(0, 2, 20.0, [1.1, 1.3]; target=:radial, kind=1)
+acc_r = accuracy(0, 2, 20.0, [1.1, 1.3]; target=:radial, kind=2)
 ```
 
 ## Jacobian APIs
@@ -287,7 +325,7 @@ s = smn(m, n, c, eta; spheroid=:prolate, precision=:double)
 r = rmn(m, n, c, x; spheroid=:prolate, precision=:double, kind=1)
 lambda = eigenvalue(m, n, c; spheroid=:prolate, precision=:double)
 acc_s = accuracy(m, n, c, eta; target=:angular)
-acc_r = accuracy(m, n, c, x; target=:radial, kind=1)
+acc_r = accuracy(m, n, c, x; target=:radial, kind=2)
 W = radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double)
 
 j_lambda = jacobian_eigen(m, n, c; with_metadata=true)

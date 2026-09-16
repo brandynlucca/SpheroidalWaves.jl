@@ -71,7 +71,7 @@ end
             @info "Skipping native angular phase tests: backend unavailable." precision
             continue
         end
-        # Unmodified Wolfram reference supplied for SpheroidalPS[1,1,0.3,0].
+        # Independent reference for m=1, n=1, c=0.3, eta=0.
         value = only(smn(1, 1, 0.3, 0.0; precision).value)
         @test value ≈ -1.001795214382128 rtol=1e-14
 
