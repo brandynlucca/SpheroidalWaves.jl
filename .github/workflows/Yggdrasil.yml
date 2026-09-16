@@ -1,0 +1,207 @@
+name: Validate and update Yggdrasil
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: Open a Yggdrasil pull request after validation
+        type: boolean
+        default: true
+      fork:
+        description: Your Yggdrasil fork (owner/Yggdrasil)
+        type: string
+        default: brandynlucca/Yggdrasil
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yggdrasil-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: BinaryBuilder builds and audits for all supported targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+    outputs:
+      version: ${{ steps.recipe.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+      - name: Select the source commit and version
+        id: recipe
+        shell: julia --color=yes {0}
+        run: |
+          using TOML
+          version = VersionNumber(TOML.parsefile("Project.toml")["version"])
+          revision = ENV["GITHUB_SHA"]
+          @assert occursin(r"^[0-9a-f]{40}$", revision)
+          path = "contrib/yggdrasil/build_tarballs.jl"
+          recipe = read(path, String)
+          @assert length(collect(eachmatch(r"(?m)^version = v\"[^\"]+\"$", recipe))) == 1
+          @assert length(collect(eachmatch(r"\"[0-9a-f]{40}\"", recipe))) == 1
+          recipe = replace(recipe, r"(?m)^version = v\"[^\"]+\"$" => "version = v\"$version\"")
+          recipe = replace(recipe, r"\"[0-9a-f]{40}\"" => "\"$revision\"")
+          write(path, recipe)
+          open(ENV["GITHUB_OUTPUT"], "a") do io
+              println(io, "version=$version")
+          end
+      - name: Install BinaryBuilder
+        run: julia --project=@binarybuilder -e 'using Pkg; Pkg.add("BinaryBuilder")'
+      - name: Build and audit both precision libraries
+        run: >-
+          julia --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
+          --verbose --deploy=local
+      - name: Collect the generated JLL and recipe
+        run: |
+          cp -R "$HOME/.julia/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
+          cp contrib/yggdrasil/build_tarballs.jl products/build_tarballs.jl
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: yggdrasil-build
+          path: products/
+          if-no-files-found: ignore
+
+  runtime:
+    name: JLL runtime and accuracy - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
+    needs: build
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        julia: ['1.10', '1']
+        platform:
+          - os: ubuntu-latest
+            arch: x64
+          - os: windows-latest
+            arch: x64
+          - os: macos-latest
+            arch: aarch64
+          - os: macos-26-intel
+            arch: x64
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.julia }}
+          arch: ${{ matrix.platform.arch }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: yggdrasil-build
+          path: binarybuilder-products
+      - name: Point the generated JLL at the downloaded tarball
+        shell: julia --color=yes {0}
+        run: |
+          using TOML
+          path = "binarybuilder-products/SpheroidalWaves_jll/Artifacts.toml"
+          artifacts = TOML.parsefile(path)
+          for entry in artifacts["SpheroidalWaves"], download in entry["download"]
+              archive = abspath("binarybuilder-products", basename(download["url"]))
+              @assert isfile(archive) archive
+              archive = replace(archive, '\\' => '/')
+              archive = replace(archive, "%" => "%25", " " => "%20", "#" => "%23")
+              download["url"] = (Sys.iswindows() ? "file:///" : "file://") * archive
+          end
+          open(io -> TOML.print(io, artifacts), path, "w")
+      - name: Load JLL runtimes and test the cross-built libraries
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          unset LD_LIBRARY_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
+          julia --startup-file=no - <<'JULIA'
+          using Pkg, Libdl, Test
+          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
+          Pkg.activate(;temp=true)
+          Pkg.develop(path="binarybuilder-products/SpheroidalWaves_jll")
+          using SpheroidalWaves_jll
+          ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
+          ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
+          push!(LOAD_PATH, pwd())
+          using SpheroidalWaves
+          @testset "JLL libraries and runtime dependencies" begin
+              @test !isdir("build")
+              for precision in (:double,:quad)
+                  library = SpheroidalWaves.backend_library(;precision)
+                  @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]
+                  @test occursin("/artifacts/", replace(library, '\\' => '/'))
+                  if Sys.isapple()
+                      for line in split(read(`otool -L $library`, String), '\n')[2:end]
+                          isempty(strip(line)) && continue
+                          dependency = first(split(strip(line), " ("))
+                          @test any(prefix -> startswith(dependency,prefix), ("@rpath/","@loader_path/","/usr/lib/","/System/Library/"))
+                      end
+                  end
+              end
+              julia_root = lowercase(replace(normpath(joinpath(Sys.BINDIR,"..")), '\\' => '/')) * "/"
+              for library in Libdl.dllist()
+                  path = lowercase(replace(library, '\\' => '/'))
+                  @test !occursin("/opt/homebrew/", path)
+                  @test !occursin("/usr/local/cellar/", path)
+                  if occursin(r"^(lib)?(gfortran|gomp|quadmath|gcc_s)", basename(path))
+                      @test occursin("/artifacts/", path) || startswith(path, julia_root)
+                  end
+              end
+          end
+          include("test/quad_precision.jl")
+          include("test/numerical_regressions.jl")
+          JULIA
+
+  submit:
+    name: Open Yggdrasil update
+    if: github.event_name == 'workflow_dispatch' && inputs.submit
+    needs: [build, runtime]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.YGGDRASIL_TOKEN }}
+      YGGDRASIL_FORK: ${{ inputs.fork }}
+      BACKEND_VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: yggdrasil-build
+          path: validated
+      - name: Update the fork and open a pull request
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_TOKEN" ]] || { echo 'Set the YGGDRASIL_TOKEN repository secret to a token with write access to your Yggdrasil fork.' >&2; exit 1; }
+          [[ "$YGGDRASIL_FORK" =~ ^[A-Za-z0-9-]+/Yggdrasil$ ]] || { echo 'Expected owner/Yggdrasil.' >&2; exit 1; }
+          owner="${YGGDRASIL_FORK%%/*}"
+          branch="spheroidalwaves-v${BACKEND_VERSION}-${GITHUB_SHA:0:12}"
+          gh auth setup-git
+          gh repo clone "$YGGDRASIL_FORK" yggdrasil -- --filter=blob:none --no-checkout
+          cd yggdrasil
+          git remote add upstream https://github.com/JuliaPackaging/Yggdrasil.git
+          git fetch upstream master --depth=1
+          if gh api "repos/$YGGDRASIL_FORK/git/ref/heads/$branch" >/dev/null 2>&1; then
+            git fetch origin "$branch" --depth=1
+            git checkout -b "$branch" FETCH_HEAD
+          else
+            git checkout -b "$branch" upstream/master
+          fi
+          mkdir -p S/SpheroidalWaves
+          cp ../validated/build_tarballs.jl S/SpheroidalWaves/build_tarballs.jl
+          git add S/SpheroidalWaves/build_tarballs.jl
+          if ! git diff --cached --quiet; then
+            git -c user.name=github-actions\[bot\] -c user.email=41898282+github-actions\[bot\]@users.noreply.github.com commit -m "[SpheroidalWaves] Build v$BACKEND_VERSION"
+            git push origin "$branch"
+          fi
+          existing="$(gh pr list --repo JuliaPackaging/Yggdrasil --head "$owner:$branch" --json url --jq '.[0].url // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "$existing" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all four targets. Native double/quad checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
+              "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/yggdrasil-pr.md"
+            gh pr create --repo JuliaPackaging/Yggdrasil --base master --head "$owner:$branch" \
+              --title "[SpheroidalWaves] Build v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
