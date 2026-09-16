@@ -1,30 +1,44 @@
 """
-Track `lambda_mn(c)` over a real monotone `c` grid using continuation with branch lock.
+    eigenvalue_sweep(m, n, c_grid; spheroid=:prolate, precision=:double,
+                    branch_lock=true, branch_window=1, use_jacobian_predictor=true)
 
-This API is intended for stable parameter sweeps where accidental mode-hopping can
-occur in challenging regimes. At each new `c` point, a predictor value is formed
-from previous continuation states and the selected branch is corrected by choosing
-the candidate closest to that predictor from a local degree window.
+Track the separation constant over a nonempty, finite real grid `c_grid`.
+The grid must be strictly increasing or decreasing; a single point is allowed.
+`m` and the starting degree `n` are integers with `0 <= m <= n`.
 
-Keyword arguments:
-- `spheroid`: `:prolate` or `:oblate`.
-- `precision`: `:double` or `:quad`.
-- `branch_lock`: if `true`, enables local branch selection around the previous
-  degree index using predictor proximity.
-- `branch_window`: nonnegative integer defining the half-width of the local degree
-  search window around the previous selected degree.
-- `use_jacobian_predictor`: if `true`, uses `jacobian_eigen` for first-step
-  predictor initialization and falls back to a zeroth-order predictor when Jacobian
-  diagnostics are not acceptable.
+### Keywords
 
-Returns a named tuple with fields:
-- `c::Vector{T}`
-- `lambda::Vector{T}`
-- `selected_n::Vector{Int}`
-- `switched_branch::Vector{Bool}`
+- `spheroid=:prolate`: geometry, either `:prolate` or `:oblate`.
+- `precision=:double`: `:double` or `:quad`; selects `Float64` or `BigFloat`.
+- `branch_lock=true`: choose the candidate eigenvalue closest to the predicted
+  value. With `false`, evaluate the original degree `n` at every point.
+- `branch_window=1`: nonnegative number of degrees to search on each side of the
+  previously selected degree `k`: `max(m,k-branch_window):k+branch_window`.
+  Zero keeps that degree fixed; larger windows evaluate more candidates.
+  Has no effect when `branch_lock=false`.
+- `use_jacobian_predictor=true`: predict the second grid value using
+  `lambda[1] + jacobian_eigen(m,n,c_grid[1]) * (c_grid[2]-c_grid[1])`.
+  If disabled or the derivative is unavailable/unreliable, use `lambda[1]`.
+  Later steps use the slope between the two preceding results. This option
+  affects branch selection only, not the eigenvalue evaluation itself.
+- `evaluator`: optional function `(m,n,c) -> real_eigenvalue`, defaulting to
+  [`eigenvalue`](@ref) with the requested geometry and precision. With a custom
+  evaluator, set `use_jacobian_predictor=false` unless its derivative agrees
+  with `jacobian_eigen`.
 
-`T` is `Float64` for double precision and `BigFloat` for quad precision.
-Grid coordinates, predictors, and candidate comparisons retain this precision.
+### Returns
+
+A named tuple with one entry per grid point:
+
+- `c`: grid coordinates at the requested precision.
+- `lambda`: selected eigenvalues at the requested precision.
+- `selected_n`: integer degree selected at each point.
+- `switched_branch`: `true` where the selected degree differs from the preceding
+  point; the first entry is always `false`.
+
+!!! note "Grid spacing"
+    Predictor proximity does not guarantee the intended branch on a coarse grid.
+    Inspect `selected_n` and refine the grid near rapid eigenvalue changes.
 """
 function eigenvalue_sweep(m::Integer,
                           n::Integer,
@@ -163,7 +177,8 @@ the preceding state, with adaptive subdivision and angular-profile matching.
 Repeated points and closed paths are allowed.
 
 Only native degrees of the same parity can be selected. `branch_window` counts
-neighbors in that parity class (one means degrees `n-2` and `n+2`). The returned
+neighbors in that parity class (one means the current degree and its valid
+neighbors `n-2` and `n+2`; zero keeps the label fixed). The returned
 `selected_n` contains native labels; a label change need not be a discontinuity
 of the continued eigenvalue. `switched_branch` marks those label changes.
 `c` and `lambda` are complex vectors at the requested precision.
@@ -171,6 +186,9 @@ of the continued eigenvalue. `switched_branch` marks those label changes.
 With `branch_lock=false`, evaluate the original native label independently at
 each point. Complex continuation uses profiles, not the real sweep's Jacobian
 predictor or custom eigenvalue-only evaluator. Unresolved paths raise an error.
+`use_jacobian_predictor` is accepted but has no effect for complex grids;
+`evaluator` must be `nothing`. Other keywords and return fields follow the real
+method, with `ComplexF64` or `Complex{BigFloat}` for `c` and `lambda`.
 Paths around branch points can return a different eigenvalue at their starting
 coordinate; this function does not impose a globally single-valued branch.
 """

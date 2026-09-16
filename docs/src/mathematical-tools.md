@@ -128,6 +128,21 @@ root.converged
 root.residual
 ~~~
 
+`bracket=(c_lo,c_hi)` is required: finite endpoints with `c_lo<c_hi` whose
+eigenvalues enclose the target. Concentration inversion also requires `c_lo>=0`.
+An endpoint matching within tolerance is returned immediately.
+`maxiter=160` limits iterations; `use_jacobian=true` permits Newton steps.
+With `false`, separation inversion uses secant/bisection and concentration uses bisection.
+
+| Result field | Meaning |
+|:--|:--|
+| `c` | Estimated bandwidth |
+| `converged` | Whether the stopping criteria were met |
+| `residual` | Computed eigenvalue minus target, in the requested form |
+| `iterations` | Iterations performed, not evaluation count; zero for an endpoint match |
+| `bracket` | Remaining search interval at termination |
+| `method` | Final step: `:newton`, `:secant`, or `:bisection`; `:endpoint` for an endpoint match; `:maxiter` when the iteration limit is reached |
+
 For concentration, `form` defines the target:
 
 | Form | Target | Allowed range |
@@ -141,6 +156,8 @@ For concentration, `form` defines the target:
     Unit concentration has no finite bandwidth. Zero concentration requires a bracket
     containing zero. Fourier inversion is unsupported.
     Set `atol` and `rtol` explicitly for tighter separation-constant inversion.
+
+See [`find_c_for_eigenvalue`](@ref) for tolerance defaults and stopping criteria.
 
 ## Eigenvalue sweeps
 
@@ -157,6 +174,17 @@ Sweeps track separation constants only. Real grids must be monotone; complex
 grids specify an ordered piecewise-linear path.
 `selected_n` records degree labels and `switched_branch` flags label changes.
 `branch_lock=false` evaluates the native label independently at each point.
+
+| Keyword | Effect |
+|:--|:--|
+| `branch_lock=true` | Continue by choosing among nearby degree labels; `false` keeps the original label |
+| `branch_window=1` | Search half-width around the previously selected degree `k`; real grids search `max(m,k-w):k+w`, complex paths search same-parity neighbors `k-2w, …, k+2w`, clipped below at the lowest valid degree of that parity |
+| `use_jacobian_predictor=true` | Real grids only: predict the second point with `dλ/dc`; if disabled or unreliable, use the preceding value. Later points use the slope between the previous two results |
+
+`branch_window` must be nonnegative; zero fixes the degree label.
+It has no effect with `branch_lock=false`. `use_jacobian_predictor` has no effect
+for complex paths, which use angular-profile matching.
+Both geometries and `precision=:double`/`:quad` are supported.
 
 !!! warning "Complex branches"
     A closed path can exchange eigenmodes. Its final value need not equal its initial value.
@@ -233,7 +261,7 @@ Both options also work with scaled outputs and degree ranges.
     Undefined prolate radial kinds 2–4 at `x=1` return `NaN`;
     complex prolate calls require `x>1`.
 
-## Wronskians and accuracy
+## Radial Wronskians
 
 For real `c>0` and nonsingular radial coordinates:
 
@@ -249,20 +277,57 @@ W=R_1R_2'-R_1'R_2,\qquad
 | `:normalized` | `Ŵ` |
 | `:error` | `ε_W` |
 
+`radial_wronskian(m,n,c,x; spheroid=:prolate, precision=:double, form=:raw)`
+uses radial kinds 1 and 2 and their coordinate derivatives.
+`m,n` are integer order and degree with `0≤m≤n`; `c` is finite and nonzero.
+`x` is a real scalar or nonempty vector: use prolate `x>1` or oblate `x≥0`.
+`spheroid=:oblate` selects `σ=-1`; `precision=:quad` selects quad precision.
+There is no `kind` or normalization option: the pair is fixed.
+
+Every form returns a vector, including for scalar `x`. Raw and normalized
+entries are complex; error entries are real. Normalized forms preserve scaling
+in intermediate products. Complex `c` is accepted under the same conventions as
+`rmn`; the unit-normalization check stated above is for real `c>0`.
+
 ~~~julia
 radial_wronskian(1, 2, 1.25, [1.5, 2.0, 4.0];
     precision=:quad, form=:error)
-accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
-accuracy(0, 2, 0.0, [0.3]; target=:angular)
 ~~~
 
 The prolate identity is [DLMF 30.11.7](https://dlmf.nist.gov/30.11#E7);
 the oblate factor follows its radial equation and normalization.
 
-`accuracy` returns estimated decimal digits for function values:
-`-1` means unavailable, `0` means no reliable digits reported.
-Only radial `kind=2` has a digit estimate where available.
-Angular `c=0` and `kind=2` return `-1`.
+## Accuracy estimates
+
+`accuracy(m,n,c,arg; target=:radial, spheroid=:prolate, precision=:double,
+kind=1, normalize=false)` returns one integer per coordinate, in input order.
+
+| Argument / keyword | Meaning |
+|:--|:--|
+| `m`, `n` | Integer order and degree, `0≤m≤n` |
+| `c` | Finite real or complex parameter; radial calls require `c≠0` |
+| `arg` | Nonempty real coordinate vector: angular `[-1,1]`, prolate radial `[1,∞)`, oblate radial `[0,∞)`; use `[x]` for one point |
+| `target=:radial` | `:radial` estimates `rmn` values; `:angular` estimates `smn` values |
+| `spheroid=:prolate` | `:prolate` or `:oblate` geometry |
+| `precision=:double` | `:double` or `:quad` evaluation; results remain integer digit counts |
+| `kind=1` | Angular `1` or `2`; radial `1:4` |
+| `normalize=false` | Default angular normalization; `true` selects unit normalization for real first-kind angular functions and its analytic continuation for complex `c`. Invalid for angular kind 2; ignored for radial calls |
+
+Positive entries estimate decimal digits; `0` reports no reliable digits and
+`-1` means no estimate is available. Invalid inputs raise the corresponding
+wave-function errors; nonfinite values receive `-1` when evaluation returns them.
+
+!!! note "Available estimates"
+    Only radial `kind=2` has a radial estimator, so the default radial call
+    (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter
+    (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion
+    evaluations also have no calibrated digit estimates. See [`accuracy`](@ref).
+
+~~~julia
+accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
+accuracy(0, 2, 1.0, [0.3]; target=:angular, normalize=true, precision=:quad)
+accuracy(0, 2, 0.0, [0.3]; target=:angular) # [-1]
+~~~
 
 !!! warning "Diagnostics are not error bounds"
     A small Wronskian error checks consistency of the solution pair.

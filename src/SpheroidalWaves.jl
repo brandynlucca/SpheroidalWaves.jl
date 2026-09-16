@@ -1137,30 +1137,49 @@ rmn(m::Integer,n::Integer,c::Union{Real,Complex},x::Real;kwargs...) = rmn(m,n,c,
     radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double, form=:raw)
 
 Return `W = R1 .* R2′ - R1′ .* R2` at the radial coordinates `x`.
-The result uses the same complex element type as `rmn`.
+Here `R1` and `R2` are [`rmn`](@ref) kinds 1 and 2, and primes denote
+coordinate derivatives. This function always uses that pair; it has no `kind`
+or `normalize` keyword.
+
+### Arguments and keywords
+
+- `m`, `n`: integer order and degree, `0 <= m <= n`.
+- `c`: finite, nonzero real or complex parameter, with the same domain as `rmn`.
+- `x`: real scalar or nonempty vector of radial coordinates. Use `x>1` for
+  prolate and `x>=0` for oblate geometry. The prolate endpoint `x=1` is singular
+  for the second-kind solution, so it cannot give a finite Wronskian check.
+- `spheroid=:prolate`: geometry, `:prolate` or `:oblate`.
+- `precision=:double`: `:double` or `:quad`, selecting `Float64` or `BigFloat`
+  components in the result.
+- `form=:raw`: return `W`. `:normalized` returns `c*(x^2-σ)*W` and `:error`
+  returns `abs(c*(x^2-σ)*W - 1)`, with `σ=1` for prolate and `σ=-1` for oblate.
+
+### Returns
+
+A vector with one entry per coordinate (length one for scalar `x`).
+`:raw` and `:normalized` return `ComplexF64` or `Complex{BigFloat}` entries;
+`:error` returns real `Float64` or `BigFloat` entries.
 
 For real `c > 0`, the standard normalization gives `W(x) = 1/(c*(x^2-1))`
 for prolate functions and `W(x) = 1/(c*(x^2+1))` for oblate functions.
 The raw Wronskian therefore varies with position. At `c=0`, this function
 throws `DomainError`, as does `rmn`.
 
-Use the scaled Wronskian to check consistency:
+Use the normalized Wronskian error to check consistency:
 
 ```julia
-c = 200.0
-x = [1.5, 2.0, 3.0, 5.0]
-W = radial_wronskian(0, 1, c, x)
-scaled_W = c .* (x.^2 .- 1) .* W
-maximum(abs.(scaled_W .- 1))  # Small for an accurate prolate solution pair
+errors = radial_wronskian(0, 1, 2.0, [1.5, 2.0, 3.0];
+    precision=:quad, form=:error)
+maximum(errors)
 ```
 
-For oblate functions, replace `x.^2 .- 1` by `x.^2 .+ 1`.
-This is a consistency check, not an independent proof of accuracy: correlated
-errors in the two functions can preserve the Wronskian. Precision loss can also
-occur when its two product terms nearly cancel. `form=:raw` is the default;
-`form=:normalized` returns `c*(x^2∓1)*W` and `form=:error` returns its absolute
-difference from one. Normalized forms keep native scaling during intermediate
-products. No form supplies a rigorous accuracy bound.
+Normalized forms preserve scaling during intermediate products.
+
+!!! warning "Consistency, not an error bound"
+    Correlated errors in the two solutions can preserve the Wronskian.
+    Cancellation between the two products can also lose precision.
+    The unit-normalization check above applies to real `c>0`; accepting complex
+    inputs does not independently validate their branch normalization.
 
 """
 function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
@@ -1254,55 +1273,65 @@ end
 include("eigenvalue_sweep.jl")
 
 """
-    Numerical Jacobian of `eigenvalue` with respect to `c`.
+    jacobian_eigen(m, n, c; spheroid=:prolate, precision=:double,
+                   operator=:separation, form=:value, h=nothing,
+                   with_metadata=false, adaptive=true, rtol=1e-6, atol=1e-10)
 
-    By default, differentiate the refined Legendre coefficient eigenproblem.
-    Supplying `h` explicitly selects centered finite differences for comparison.
+Differentiate [`eigenvalue`](@ref) with respect to `c`. Order and degree satisfy
+`0 <= m <= n`. The default uses analytic differentiation; an explicit `h`
+selects finite differences.
 
-    `operator=:concentration` or `:fourier` differentiates the corresponding
-    integral eigenvalue for real prolate `m=0`, `c>=0`. Concentration also
-    accepts `form=:log` or `:complement`: these differentiate `log(Λ)` or `1-Λ`.
-    The default analytic calculation retains small tails before output rounding.
-    Integral results are `Float64`/`BigFloat` for concentration and
-    `ComplexF64`/`Complex{BigFloat}` for Fourier, selected by `precision`.
-    At zero, return right-hand limits: Λ₀′=2/pi, Λₙ′=0 for n>0;
-    μ₁′=-2im/3 and all other μₙ′=0. The logarithmic derivative limit is `Inf`.
-    Integral metadata uses `method=:integral_identity` or `:right_limit`;
-    a divergent limit has `conditioning_flag=:singular`.
-    An explicit `h` must be smaller than positive `c`; at zero it uses a
-    forward stencil. The singular log derivative at zero requires `h=nothing`.
+### Keywords
 
-    For real `c`, the return value is a scalar estimate of:
-    - `d(lambda)/dc`
+- `spheroid=:prolate`: `:prolate` or `:oblate`.
+- `precision=:double`: `:double` or `:quad`, with `Float64` or `BigFloat`
+  components in the result.
+- `operator=:separation`: differentiate the separation constant.
+  `:concentration` and `:fourier` require real `c >= 0`, `m=0`, and `:prolate`.
+- `form=:value`: differentiate the selected eigenvalue. Concentration also
+  accepts `:log` and `:complement`, giving derivatives of `log(Λ)` and `1-Λ`.
+- `h=nothing`: analytic differentiation. A positive finite step selects centered
+  differences; integral operators require `h<c` when `c>0` and use forward
+  differences at zero.
+- `with_metadata=false`: include diagnostic fields when `true`; see below.
+- `adaptive=true`: allow smaller finite-difference steps when consistency is poor.
+  Has no effect on the default analytic calculation.
+- `rtol=1e-6`, `atol=1e-10`: positive finite relative and absolute tolerances
+  for finite-difference step-halving checks; not requested accuracy bounds.
 
-    For complex `c = a + ib`, the return value is a named tuple with:
-    - `d_dcreal = ∂lambda/∂a`
-    - `d_dcimag = ∂lambda/∂b`
+### Returns
 
-    Keyword arguments:
-    - `spheroid`: `:prolate` or `:oblate`
-    - `precision`: `:double` or `:quad`
-    - `h`: explicit finite-difference step; `nothing` uses coefficient sensitivities
-    - `with_metadata`: if `true`, returns derivative(s) plus reliability metadata
-    - `adaptive`: if `true`, retries with smaller step in poor-conditioning regimes
-    - `rtol`, `atol`: positive tolerances used for step-halving consistency checks
+For real `c`, return a scalar derivative, or `(derivative, metadata)` when
+`with_metadata=true`. Concentration results are real; Fourier results are complex.
 
-    Reliability metadata (`with_metadata=true`) identifies the `method`.
-    Coefficient sensitivities report expansion refinement, tail size, and
-    eigenproblem/sensitivity residuals. Their `step_used` and
-    `relative_change_when_halving_step` are `nothing`. Finite differences report:
-    - `step_used`
-    - `relative_change_when_halving_step`
-    - `finite_flag`
-    - `conditioning_flag` in `(:good, :warning, :poor)`
-    - `suggested_action` in `(:accept, :retry_smaller_h, :use_quad)`
+For complex `c=a+ib`, return `(d_dcreal, d_dcimag)`, containing `∂λ/∂a` and `∂λ/∂b`.
+With metadata, append `metadata_dcreal` and `metadata_dcimag`.
+On a local analytic branch, `d_dcimag = im*d_dcreal`.
 
-    Returns:
-    - Real `c`, `with_metadata=false`: scalar derivative
-    - Real `c`, `with_metadata=true`: `(derivative=..., metadata=...)`
-    - Complex `c`, `with_metadata=false`: `(d_dcreal=..., d_dcimag=...)`
-    - Complex `c`, `with_metadata=true`:
-        `(d_dcreal=..., d_dcimag=..., metadata_dcreal=..., metadata_dcimag=...)`
+### Diagnostics
+
+Metadata includes `method`, `finite_flag`, `conditioning_flag`, and
+`suggested_action`. Coefficient differentiation reports expansion refinement,
+tail size, eigenvalue conditioning, and eigenproblem/sensitivity residuals;
+`step_used` and `relative_change_when_halving_step` are `nothing`.
+Finite differences populate those two step fields, with conditioning
+`:good`, `:warning`, or `:poor` and action `:accept`, `:retry_smaller_h`, or `:use_quad`.
+Integral identities use `method=:integral_identity` or `:right_limit`.
+
+!!! note "Zero bandwidth"
+    Integral derivatives use right-hand limits: `Λ₀′=2/π`, `Λₙ′=0` for `n>0`,
+    `μ₁′=-2im/3`, and all other Fourier derivatives vanish.
+    The logarithmic concentration derivative is `Inf`, with
+    `conditioning_flag=:singular`, and requires `h=nothing` at zero.
+
+!!! warning "Reliability"
+    Metadata supplies diagnostics, not error bounds. Near coalescing complex
+    eigenvalues, parameter derivatives can be ill-conditioned.
+
+```julia
+jacobian_eigen(1, 2, 1.25; precision=:quad)
+jacobian_eigen(0, 2, 1.0; operator=:concentration, with_metadata=true)
+```
 """
 function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
                                                 spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
@@ -1591,7 +1620,14 @@ function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstrac
 end
 
 """
+    find_c_for_eigenvalue(m, n, lambda_target; bracket,
+                          spheroid=:prolate, precision=:double,
+                          operator=:separation, form=:value,
+                          atol=nothing, rtol=nothing, maxiter=160, use_jacobian=true)
+
 Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
+`m` and `n` are integer order and degree with `0 <= m <= n`;
+`lambda_target` is the real target in the selected `operator` and `form`.
 
 With `operator=:concentration`, solve for real prolate bandwidth with `m=0`.
 `form=:value` interprets the target as Λ in [0,1); `:complement` as 1-Λ in
@@ -1605,26 +1641,44 @@ Uses a bracketed hybrid strategy with guaranteed bisection fallback and optional
 Jacobian-guided acceleration through `jacobian_eigen` when derivative quality is
 acceptable.
 
-Keyword arguments:
-- `bracket`: `(c_lo, c_hi)` with `c_lo < c_hi` and opposite signs of residual
-  `eigenvalue(m,n,c) - lambda_target` at the endpoints.
-- `spheroid`: `:prolate` or `:oblate`.
-- `precision`: `:double` or `:quad`.
+### Keywords
+
+- `bracket`: required finite interval `(c_lo, c_hi)`, with `c_lo < c_hi`.
+  Its endpoint eigenvalues must enclose the target; an endpoint already within
+  tolerance is returned immediately. Concentration requires `c_lo >= 0`.
+- `operator=:separation`: invert the separation constant; `:concentration`
+  inverts the concentration eigenvalue. `:fourier` is unsupported.
+- `form=:value`: target convention; concentration also accepts `:log` and `:complement`.
+- `spheroid=:prolate`: `:prolate` or `:oblate`; concentration requires `:prolate`.
+- `precision=:double`: `:double` or `:quad`.
 - `atol`, `rtol`: positive finite tolerances. Separation defaults are 1e-10 and
   1e-8, used for residual and bracket-width checks. Concentration defaults are
   1e-12/1e-10 (double), 1e-30/1e-28 (quad); the coordinate tolerance is
   `atol+rtol*abs(c)`. Concentration additionally requires the residual in
   `log(Λ/(1-Λ))` to be at most `rtol`, avoiding false convergence in either tail.
-- `maxiter`: positive maximum number of iterations.
-- `use_jacobian`: enable derivative-based candidate steps when trusted.
+- `maxiter=160`: positive maximum number of iterations.
+- `use_jacobian=true`: permit Newton steps using parameter derivatives.
+  With `false`, separation inversion uses secant/bisection steps and concentration
+  inversion uses bisection.
 
-Returns a named tuple with fields:
-- `converged::Bool`
-- `c::T`
-- `residual::T`
-- `iterations::Int`
-- `bracket::Tuple{T,T}`
-- `method::Symbol` (`:endpoint`, `:newton`, `:secant`, `:bisection`, `:maxiter`)
+### Returns
+
+A named tuple with fields:
+
+| Field | Meaning |
+|:--|:--|
+| `converged::Bool` | Whether the stopping criteria were met; check before using `c`. |
+| `c::T` | Returned bandwidth estimate. |
+| `residual::T` | Computed eigenvalue minus target in the requested form. |
+| `iterations::Int` | Iterations performed, not function evaluations; zero for an endpoint match. |
+| `bracket::Tuple{T,T}` | Remaining search interval at termination, not the original input interval in general. |
+| `method::Symbol` | Final step or termination reason, as listed below. |
+
+`method=:endpoint` means an input endpoint met tolerance; `:newton` means a
+derivative-based step; `:secant` means interpolation between bracket endpoints;
+`:bisection` means interval halving. `:maxiter` means the iteration limit was
+reached and `converged=false`. The method may change during the solve;
+this field records only the final step or termination reason.
 
 `T` is `Float64` for double precision and `BigFloat` for quad precision.
 """
@@ -1774,12 +1828,37 @@ Return a vector of backend-estimated decimal digits for the requested function
 values. These are solver diagnostics, not rigorous error bounds or statistical
 confidence intervals, and do not certify the returned coordinate derivatives.
 
+### Arguments and keywords
+
+- `m`, `n`: integer order and degree with `0 <= m <= n`.
+- `c`: finite real or complex spheroidal parameter. Radial evaluation requires
+  `c != 0` and follows the parameter domain of [`rmn`](@ref).
+- `arg`: nonempty vector of finite real coordinates, with one estimate returned
+  per entry in the same order. For angular functions use `-1 <= eta <= 1`;
+  for radial functions use prolate `x>=1` or oblate `x>=0`. Singular coordinates
+  follow the behavior of the corresponding wave function. A single coordinate
+  must be wrapped in a vector, e.g. `[0.3]`.
+- `target=:radial`: estimate radial values from `rmn`; `:angular` selects [`smn`](@ref).
+- `spheroid=:prolate`: geometry, `:prolate` or `:oblate`.
+- `precision=:double`: `:double` or `:quad`; evaluate at that precision before
+  reporting integer digit estimates. This does not request a particular digit count.
+- `kind=1`: angular first kind (`1`) or second kind (`2`); radial kinds `1:4`.
+  Only radial `kind=2` has a radial digit estimator; the default radial `kind=1`
+  therefore returns `-1` at every coordinate.
+- `normalize=false`: use the default angular normalization. For angular `kind=1`,
+  `true` selects unit integral normalization for real parameters and its analytic
+  continuation for complex parameters. Angular `kind=2` rejects `true`.
+  This keyword has no effect on radial estimates.
+
+### Interpreting the result
+
 An entry of `-1` means **no estimate is available**. Zero means the backend
 reports no reliable decimal digits. Positive entries are estimates, not guarantees.
 Invalid inputs raise the same domain/argument errors as `smn` or `rmn`.
 
-- Angular `c=0`: evaluate the associated Legendre recurrence, then return `-1`;
-  there is no error estimator for that path.
+- Angular `abs(c)<=1e-4`: return `-1`; the spherical-limit and small-parameter
+  expansions have no calibrated digit estimator.
+- Angular purely imaginary complex parameters return `-1`.
 - Angular `kind=2`: evaluate Qs, then return `-1`; its propagation and
   coefficient convergence checks are not calibrated decimal-digit estimates.
 - Refined angular evaluations for real parameters with `abs(c) > n + 1` return `-1`;
