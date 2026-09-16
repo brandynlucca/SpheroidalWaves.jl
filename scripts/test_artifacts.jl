@@ -38,11 +38,18 @@ function test_artifacts(dist::AbstractString, triplet::AbstractString)
             result = SpheroidalWaves.smn(0, 0, 1.0, [0.25]; precision)
             @assert isfinite(only(result.value))
         end
-        Pkg.test()
+        # The release job runs the numerical suite once, against these archives.
+        include(joinpath($(repr(project)), "test", "runtests.jl"))
         """
     env = copy(ENV)
     pop!(env, "SPHEROIDALWAVES_LIBRARY_DOUBLE", nothing)
     pop!(env, "SPHEROIDALWAVES_LIBRARY_QUAD", nothing)
+    for key in collect(keys(env))
+        (startswith(key,"DYLD_") || key in ("LD_LIBRARY_PATH","LIBRARY_PATH")) && pop!(env,key)
+    end
+    # Do not allow a compiler installation on PATH to supply missing DLLs.
+    env["PATH"] = Sys.iswindows() ? join([Sys.BINDIR,joinpath(ENV["SystemRoot"],"System32")],';') :
+                                   join([Sys.BINDIR,"/usr/bin","/bin"],':')
     run(setenv(`$(Base.julia_cmd()) --startup-file=no --project=$project -e $code`, env))
 end
 
