@@ -9,6 +9,10 @@ module psms_batch_fortran
 
 contains
 
+  subroutine psms_angular_precision_v2() bind(C, name="psms_angular_precision_v2")
+    ! Capability marker for derivative-aware truncation and stable Legendre factors.
+  end subroutine psms_angular_precision_v2
+
   pure subroutine split_wk_to_double_pair(x, hi, lo)
     real(wk), intent(in) :: x
     real(rk), intent(out) :: hi, lo
@@ -129,6 +133,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -200,6 +205,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -277,6 +283,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -299,6 +306,29 @@ contains
     character(c_char), intent(out) :: value_text(*), derivative_text(*)
     integer(c_int), intent(out) :: value_exp(*), derivative_exp(*)
     integer(c_int), intent(out) :: status
+
+    call psms_smn_batch_quad_text_impl(m, n, n_eta, normalize, c_text, str_len, eta_text, value_text, value_exp, derivative_text, derivative_exp, status)
+  end subroutine psms_smn_batch_quad_text
+
+  subroutine psms_smn_batch_quad_text_acc(m, n, n_eta, normalize, c_text, str_len, eta_text, value_text, value_exp, derivative_text, derivative_exp, status, accuracy_out) bind(C, name="psms_smn_batch_quad_text_acc")
+    integer(c_int), value, intent(in) :: m, n, n_eta, normalize, str_len
+    character(c_char), intent(in) :: c_text(*), eta_text(*)
+    character(c_char), intent(out) :: value_text(*), derivative_text(*)
+    integer(c_int), intent(out) :: value_exp(*), derivative_exp(*)
+    integer(c_int), intent(out) :: status
+
+    integer(c_int), intent(out) :: accuracy_out(*)
+    call psms_smn_batch_quad_text_impl(m, n, n_eta, normalize, c_text, str_len, eta_text, value_text, value_exp, derivative_text, derivative_exp, status, accuracy_out)
+  end subroutine psms_smn_batch_quad_text_acc
+
+  subroutine psms_smn_batch_quad_text_impl(m, n, n_eta, normalize, c_text, str_len, eta_text, value_text, value_exp, derivative_text, derivative_exp, status, accuracy_out)
+    integer(c_int), value, intent(in) :: m, n, n_eta, normalize, str_len
+    character(c_char), intent(in) :: c_text(*), eta_text(*)
+    character(c_char), intent(out) :: value_text(*), derivative_text(*)
+    integer(c_int), intent(out) :: value_exp(*), derivative_exp(*)
+    integer(c_int), intent(out) :: status
+
+    integer(c_int), optional, intent(out) :: accuracy_out(*)
 
     integer(c_int) :: i, idx0, lnum
     integer(c_int) :: ioprad, iopang, iopnorm, narg
@@ -366,6 +396,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -382,8 +413,9 @@ contains
       call encode_real_text(derivative_text, off, str_len, derivative_wk)
       value_exp(i) = 0_c_int
       derivative_exp(i) = 0_c_int
+      if (present(accuracy_out)) accuracy_out(i) = naccs(idx0,i)
     end do
-  end subroutine psms_smn_batch_quad_text
+  end subroutine psms_smn_batch_quad_text_impl
 
   subroutine psms_rmn_batch_quad(m, n, c, n_xi, xi, kind, value_re, value_im, deriv_re, deriv_im, status) bind(C, name="psms_rmn_batch_quad")
     integer(c_int), value, intent(in) :: m, n, n_xi, kind
@@ -443,6 +475,7 @@ contains
     arg(1) = 1.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
     allocate(eigout(lnum))
@@ -506,6 +539,46 @@ contains
     real(c_double), intent(out) :: deriv_re_hi(*), deriv_re_lo(*), deriv_im_hi(*), deriv_im_lo(*)
     integer(c_int), intent(out) :: status(*)
 
+    call psms_rmn_batch_quad_fullsplit_impl(m, n, c_hi, c_lo, n_xi, xi_hi, xi_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status)
+  end subroutine psms_rmn_batch_quad_fullsplit
+
+  subroutine psms_rmn_batch_quad_fullsplit_acc(m, n, c_hi, c_lo, n_xi, xi_hi, xi_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status, accuracy_out) bind(C, name="psms_rmn_batch_quad_fullsplit_acc")
+    integer(c_int), value, intent(in) :: m, n, n_xi, kind
+    real(c_double), value, intent(in) :: c_hi, c_lo
+    real(c_double), intent(in) :: xi_hi(*), xi_lo(*)
+    real(c_double), intent(out) :: value_re_hi(*), value_re_lo(*), value_im_hi(*), value_im_lo(*)
+    real(c_double), intent(out) :: deriv_re_hi(*), deriv_re_lo(*), deriv_im_hi(*), deriv_im_lo(*)
+    integer(c_int), intent(out) :: status(*)
+
+    integer(c_int), intent(out) :: accuracy_out(*)
+    call psms_rmn_batch_quad_fullsplit_impl(m, n, c_hi, c_lo, n_xi, xi_hi, xi_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status, accuracy_out)
+  end subroutine psms_rmn_batch_quad_fullsplit_acc
+
+  ! The offset ABI receives x-1, avoiding loss of its significant digits when
+  ! a coordinate extremely close to one crosses the C interface.
+  subroutine psms_rmn_batch_quad_offset_acc(m, n, c_hi, c_lo, n_xi, x1_hi, x1_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status, accuracy_out) bind(C, name="psms_rmn_batch_quad_offset_acc")
+    integer(c_int), value, intent(in) :: m, n, n_xi, kind
+    real(c_double), value, intent(in) :: c_hi, c_lo
+    real(c_double), intent(in) :: x1_hi(*), x1_lo(*)
+    real(c_double), intent(out) :: value_re_hi(*), value_re_lo(*), value_im_hi(*), value_im_lo(*)
+    real(c_double), intent(out) :: deriv_re_hi(*), deriv_re_lo(*), deriv_im_hi(*), deriv_im_lo(*)
+    integer(c_int), intent(out) :: status(*), accuracy_out(*)
+
+    call psms_rmn_batch_quad_fullsplit_impl(m, n, c_hi, c_lo, n_xi, x1_hi, x1_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status, accuracy_out, .true.)
+  end subroutine psms_rmn_batch_quad_offset_acc
+
+  subroutine psms_rmn_batch_quad_fullsplit_impl(m, n, c_hi, c_lo, n_xi, xi_hi, xi_lo, kind, value_re_hi, value_re_lo, value_im_hi, value_im_lo, deriv_re_hi, deriv_re_lo, deriv_im_hi, deriv_im_lo, status, accuracy_out, offset_input)
+    integer(c_int), value, intent(in) :: m, n, n_xi, kind
+    real(c_double), value, intent(in) :: c_hi, c_lo
+    real(c_double), intent(in) :: xi_hi(*), xi_lo(*)
+    real(c_double), intent(out) :: value_re_hi(*), value_re_lo(*), value_im_hi(*), value_im_lo(*)
+    real(c_double), intent(out) :: deriv_re_hi(*), deriv_re_lo(*), deriv_im_hi(*), deriv_im_lo(*)
+    integer(c_int), intent(out) :: status(*)
+
+    integer(c_int), optional, intent(out) :: accuracy_out(*)
+    logical, optional, intent(in) :: offset_input
+    logical :: offset_mode
+
     integer(c_int) :: i, idx0, lnum, ioprad, iopang, iopnorm, narg
     real(wk) :: x1, c_w, xi_w
 
@@ -522,6 +595,8 @@ contains
     iopang = 0_c_int
     iopnorm = 0_c_int
     c_w = pair_double_to_wk(c_hi, c_lo)
+    offset_mode = .false.
+    if (present(offset_input)) offset_mode = offset_input
 
     do i = 1, n_xi
       status(i) = 0_c_int
@@ -561,19 +636,25 @@ contains
     arg(1) = 1.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
     allocate(eigout(lnum))
 
     do i = 1, n_xi
       xi_w = pair_double_to_wk(xi_hi(i), xi_lo(i))
+      if (offset_mode) then
+        x1 = xi_w
+        xi_w = x1 + 1.0_wk
+      else
+        x1 = xi_w - 1.0_wk
+      end if
       if (.not. is_finite_quad(real(xi_w, rk)) .or. abs(xi_w) < 1.0_wk) then
         status(i) = -3_c_int
         cycle
       end if
 
       ioprad = 1_c_int
-      x1 = xi_w - 1.0_wk
       call profcn(c_w, m, lnum, ioprad, x1, iopang, iopnorm, narg, arg, &
                   r1c, ir1e, r1dc, ir1de, r2c, ir2e, r2dc, ir2de, naccr, &
                   s1c, is1e, s1dc, is1de, naccs, eigout)
@@ -591,6 +672,8 @@ contains
         r2v = 0.0_wk
         r2d = 0.0_wk
       end if
+
+      if (present(accuracy_out)) accuracy_out(i) = naccr(idx0)
 
       select case (kind)
       case (1)
@@ -611,7 +694,7 @@ contains
         call split_wk_to_double_pair(-r2d, deriv_im_hi(i), deriv_im_lo(i))
       end select
     end do
-  end subroutine psms_rmn_batch_quad_fullsplit
+  end subroutine psms_rmn_batch_quad_fullsplit_impl
 
   subroutine psms_smn_batch_quad_acc(m, n, c, n_eta, eta, normalize, value, derivative, naccs_out, status) bind(C, name="psms_smn_batch_quad_acc")
     integer(c_int), value, intent(in) :: m, n, n_eta, normalize
@@ -666,6 +749,7 @@ contains
     arg(:) = real(eta(1:narg), wk)
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -740,6 +824,7 @@ contains
     arg(1) = 1.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
     allocate(eigout(lnum))
@@ -836,6 +921,7 @@ contains
     arg(1) = 0.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), eigout(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
 
@@ -886,6 +972,7 @@ contains
     arg(1) = 0.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), eigout(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
 
@@ -970,6 +1057,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))

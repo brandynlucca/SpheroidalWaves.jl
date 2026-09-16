@@ -15,7 +15,11 @@
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
 !      (gauss_cache) to avoid recomputation on repeated calls.
 !   4) Integrated cached wrappers into all call sites within main cprofcn kernel.
-!   5) Preserved original numerical kernels and attribution comments.
+!   5) Retained upstream attribution; numerical corrections are noted below.
+!   6) Include derivative convergence in angular truncation and stabilize
+!      Legendre endpoint factors.
+!   7) Sum radial Neumann series to working precision; retain stable lowest-mode
+!      coefficient seeds and use forward Q ratios close to the boundary.
 !
 ! Modified by: Brandyn M. Lucca; March 2026
 ! Note: This file is NOT a pristine upstream copy.
@@ -275,7 +279,7 @@ module complex_prolate_swf
       if(.not. qleg_cache(i)%valid) cycle
       if(qleg_cache(i)%m /= m) cycle
       if(qleg_cache(i)%ndec /= ndec) cycle
-      if(.not. cache_real_equal(qleg_cache(i)%x1, x1)) cycle
+      if(qleg_cache(i)%x1 /= x1) cycle
       if(qleg_cache(i)%lnum < lnum) cycle
       if(qleg_cache(i)%limq < limq) cycle
       if(qleg_cache(i)%maxq < maxq) cycle
@@ -2822,7 +2826,10 @@ end if
             if(abs(dnewd / s1d) < dcon) go to 340
             doldd = dnewd
 330         continue
-340       if(lm2 < 1) go to 360
+!  At eta=0 an odd-parity value vanishes, but its derivative still needs
+!  the full series. Retain that length when choosing the next degree's limit.
+340       jang = max(jang, j)
+       if(lm2 < 1) go to 360
           doldd = (1.0e0_knd, 0.0e0_knd)
           j = lm2
           ja = lm2
@@ -4443,7 +4450,9 @@ end if
         rm = real(m, knd)
         dconi = 10.0e0_knd ** (ndec + 2)
         dec = 10.0e0_knd ** (-ndec)
-        dconf = 10.0e0_knd ** (-minacc - 4)
+!  Sum to working precision. minacc selects radial representations; using it
+!  here prematurely truncates an otherwise convergent Neumann expansion.
+        dconf = 10.0e0_knd ** (-ndec - 1)
         sumcoef = (10.0e0_knd ** (-ir1de-ineue(l + 1) - ipcoefn + naccrpl))/ &
                 (c * x1 * (x1 + 2.0e0_knd) * r1dc * sneun(l + 1) * pcoefn)
         r2est = abs(sumcoef * dmfnorm) * 10.0e0_knd ** (idmfe)
@@ -6000,6 +6009,10 @@ if (debug) then
 250     format(15x, i6,' "d" coefs.: forward and backward', &
                ' recursion match to ',i3,' digits at n = ',i6)
 end if
+!  For the lowest parity mode, retain the first backward ratio when the
+!  match is at the seed. eigval-glist(1) cancels to order c**4 there.
+!  Higher modes still need the forward ratios below their dominant degree.
+          if(lm2 == 0 .and. nlim == 1) nlim = 0
           do n = 1, nlim
           enr(n) = enrf(n)
           end do
@@ -6767,13 +6780,13 @@ end if
             end do
 120       if(m == 0 .or. iopd == 2 .or. iopd == 3) go to 140
           if(abs(abs(barg(k)) - 1.0e0_knd) < adec) go to 130
-          ajterm = rm * log10(1.0e0_knd - bargs) / 2.0e0_knd
+          ajterm = rm * log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
           jterm = int(ajterm)
           ipnorm(k) = ipnorm(k) + jterm
           pnorm(k) = pnorm(k) * (ten ** (ajterm - jterm))
           if(iopd == 0) go to 130
           ajterm = log10(rm * abs(barg(k))) + (rm - 2.0e0_knd)* &
-                 log10(1.0e0_knd - bargs) / 2.0e0_knd
+                 log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
           jterm = int(ajterm)
           ipdnorm(k) = ipdnorm(k) + jterm
           pdnorm(k) = -pdnorm(k) * (ten ** (ajterm - jterm))
@@ -6845,6 +6858,7 @@ end if
         real(knd) ajm, dec, qdml, qlow, qml, qupp, q00, q11, rin, rm, &
                 term, termpq, tjm, tm, tmr, x, x1, x1d, xsqr
         real(knd) qdl(lnum), qdr(maxq), ql(lnum), qr(maxq)
+        logical :: qforward
 !
 !  integer arrays
         dimension iqdl(lnum), iql(lnum)
@@ -6857,6 +6871,12 @@ end if
         x = x1 + 1.0e0_knd
         x1d = (x + 1.0e0_knd) * x1
         xsqr = sqrt(x1d)
+!  Near x=1, backward convergence needs a depth proportional to
+!  1/acosh(x). The cap below can leave inaccurate Q ratios even in quad.
+!  Forward recurrence is safe over this short degree interval: the bound
+!  uses sinh(acosh(x)) >= acosh(x) and limits dominant-solution growth.
+    qforward = real(limq + m, knd) * xsqr <= 0.25e0_knd
+    if(qforward) go to 20
         mxqrest = limq + ndec * int((1.0e0_knd - 1.0e0_knd / log10(x - xsqr)))
         if(m == 0) mlimq = 50000 * ndec + limq
         if(m == 1) mlimq = 12000 * ndec + limq
@@ -6981,6 +7001,23 @@ end if
           end do
 130     iql(1) = int(log10(abs(ql(1))))
         ql(1) = ql(1) * (10.0e0_knd ** (-iql(1)))
+!
+!  Build positive-degree ratios from exact low-degree values when close
+!  to the boundary. The m>0 seeds share the same scaling; retain their
+!  decimal exponents when forming Q_(m-1)^m / Q_m^m.
+    if(qforward) then
+      if(m == 0) then
+        qr(1) = x - 1.0e0_knd / q00
+      else
+        qr(m + m + 1) = (tm + 1.0e0_knd) * x - tm * (qml / ql(1)) * &
+                         10.0e0_knd ** (iqml - iql(1))
+      end if
+      do jn = m + 2, m + limq
+        rin = real(jn, knd)
+        qr(jn + m) = ((rin + rin - 1.0e0_knd) * x - &
+                     (rin + rm - 1.0e0_knd) / qr(jn + m - 1)) / (rin - rm)
+      end do
+    end if
 !
 !  calculation of ratios of the first derivatives of q with respect
 !  to x, using the relationships:

@@ -1,11 +1,12 @@
 module complex_oblate_batch_fortran
   use, intrinsic :: iso_c_binding
   use param, only: knd
-  use complex_oblate_swf, only: coblfcn
+  use complex_oblate_swf, only: coblfcn, quad_solver => coblfcn
   implicit none
 
   integer, parameter :: rk = c_double
   integer, parameter :: wk = knd
+  logical, parameter :: quad_is_oblate = .true.
 
 contains
 
@@ -85,6 +86,7 @@ contains
     arg(:) = real(eta(1:narg), wk)
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg), naccds(lnum, narg))
     allocate(eigout(lnum))
@@ -159,6 +161,7 @@ contains
     arg(1) = 0.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1), naccds(lnum, 1))
     allocate(eigout(lnum))
@@ -266,6 +269,7 @@ contains
     arg(:) = real(eta(1:narg), wk)
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg), naccds(lnum, narg))
     allocate(eigout(lnum))
@@ -342,6 +346,7 @@ contains
     arg(1) = 0.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1), naccds(lnum, 1))
     allocate(eigout(lnum))
@@ -437,6 +442,7 @@ contains
     arg(1) = 0.0_wk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), eigout(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1), naccds(lnum, 1))
 
@@ -447,5 +453,16 @@ contains
     eig_re = real(eigout(idx0), rk)
     eig_im = real(aimag(eigout(idx0)), rk)
   end subroutine coblate_eigenvalue_c16
+
+  ! Full-precision interface; legacy c16 symbols remain ABI-compatible.
+  subroutine coblate_batch_quad_text(m, n, mode, option, npts, ctext, xtext, width, output, exponents, accuracy, status) bind(C, name="coblate_batch_quad_text")
+    integer(c_int), value, intent(in) :: m, n, mode, option, npts, width
+    character(c_char), intent(in) :: ctext(*), xtext(*)
+    character(c_char), intent(out) :: output(*)
+    integer(c_int), intent(out) :: exponents(*), accuracy(*), status
+    call complex_batch_quad_text(m, n, mode, option, npts, ctext, xtext, width, output, exponents, accuracy, status)
+  end subroutine coblate_batch_quad_text
+
+  include 'complex_quad_text.inc'
 
 end module complex_oblate_batch_fortran

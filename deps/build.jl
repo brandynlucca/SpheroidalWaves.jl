@@ -191,7 +191,7 @@ function verify_sources()
         "complex_oblate_batch_fortran_quad.f90",
     ]
 
-    all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad; batch_wrappers_quad]
+    all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad; batch_wrappers_quad; "scaled_batch.f90"]
     deps_dir = joinpath(PROJECT_DIR, "deps")
 
     for src in all_sources
@@ -354,6 +354,20 @@ function use_prebuilt_artifacts()
     double = _artifact_library("spheroidal_backend_double", "spheroidal_batch_double")
     quad = _artifact_library("spheroidal_backend_quad", "spheroidal_batch_quad")
     if double !== nothing && quad !== nothing
+        compatible = Libdl.dlopen(quad) do handle
+            all(symbol -> Libdl.dlsym_e(handle, symbol) != C_NULL,
+                (:cprolate_batch_quad_text, :coblate_batch_quad_text, :cprolate_radial_quad_offset_text,
+                 :psms_smn_batch_quad_text_acc, :oblate_smn_batch_quad_text_acc,
+                 :psms_rmn_batch_quad_fullsplit_acc, :oblate_rmn_batch_quad_fullsplit_acc,
+                 :psms_rmn_batch_quad_offset_acc, :psms_angular_precision_v2, :spheroidal_scaled_text))
+        end
+        compatible &= Libdl.dlopen(double) do handle
+            Libdl.dlsym_e(handle,:spheroidal_scaled_text) != C_NULL
+        end
+        if !compatible
+            info_msg("Quad artifact lacks required precision-preserving interfaces; rebuilding from source.")
+            return false
+        end
         info_msg("Using prebuilt backend artifacts for this platform.")
         info_msg("double artifact library: $double")
         info_msg("quad artifact library: $quad")

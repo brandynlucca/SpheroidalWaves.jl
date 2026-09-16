@@ -15,7 +15,10 @@
 !      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
 !      (gauss_cache) to avoid recomputation on repeated calls.
 !   4) Integrated cached wrappers into all call sites within main coblfcn kernel.
-!   5) Preserved original numerical kernels and attribution comments.
+!   5) Retained upstream attribution; numerical corrections are noted below.
+!   6) Include derivative convergence in angular truncation and stabilize
+!      Legendre endpoint factors.
+!   7) Preserve the complex parameter in second-kind origin values/derivatives.
 !
 ! Modified by: Brandyn M. Lucca; March 2026
 ! Note: This file is NOT a pristine upstream copy.
@@ -1260,7 +1263,7 @@ end if
             ifac2d = 0
             if(m == 0) go to 160
               do 150 k = 1, m
-              fac2d = fac2d * c / (k * 2.0e0_knd)
+              fac2d = fac2d * cc / (k * 2.0e0_knd)
               if(abs(fac2d) < factor) go to 140
               fac2d = fac2d / factor
               ifac2d = ifac2d + ifactor
@@ -1932,7 +1935,8 @@ end if
               r1dc(li) = r1dc(li) * ten
               ir1de(li) = ir1de(li) - 1
 430      if(ioprad == 1) go to 450
-              r2c(li) = -1.0e0_knd / (c * r1dc(li))
+!  The origin Wronskian contains the complex parameter, not its modulus.
+              r2c(li) = -1.0e0_knd / (cc * r1dc(li))
               ir2e(li) = int(log10(abs(r2c(li))))
               r2c(li) = r2c(li) * (ten ** (-ir2e(li)))
               ir2e(li) = ir2e(li) - ir1de(li)
@@ -4109,7 +4113,10 @@ end if
               end if
             doldd = dnewd
 330         continue
-340    if(lm2 < 1 .or. kflag == 1) go to 360
+!  At eta=0 an odd-parity value vanishes, but its derivative still needs
+!  the full series. Retain that length when choosing the next degree's limit.
+340    jang = max(jang, j)
+    if(lm2 < 1 .or. kflag == 1) go to 360
           doldd = (1.0e0_knd, 0.0e0_knd)
           j = lm2
           ja = lm2
@@ -8410,13 +8417,13 @@ end if
 120       continue
           if(m == 0 .or. iopd == 2 .or. iopd == 3 .or. iopd == 4) go to 140
           if(abs(abs(barg(k)) - 1.0e0_knd) < adec) go to 130
-          ajterm = rm * log10(1.0e0_knd - bargs) / 2.0e0_knd
+          ajterm = rm * log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
           jterm = int(ajterm)
           ipnorm(k) = ipnorm(k) + jterm
           pnorm(k) = pnorm(k) * (ten ** (ajterm - real(jterm, knd)))
           if(iopd == 0) go to 140
           ajterm = log10(rm * abs(barg(k))) + (rm - 2.0e0_knd)* &
-                 log10(1.0e0_knd - bargs) / 2.0e0_knd
+                 log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
           jterm = int(ajterm)
           ipdnorm(k) = ipdnorm(k) + jterm
           pdnorm(k) = -pdnorm(k) * (ten ** (ajterm - real(jterm, knd)))

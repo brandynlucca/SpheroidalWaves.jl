@@ -48,7 +48,7 @@ foreach(src ${DOUBLE_BASE} ${DOUBLE_WRAP} ${QUAD_BASE} ${QUAD_WRAP})
   endif()
 endforeach()
 
-add_library(spheroidal_batch_double SHARED ${DOUBLE_BASE} ${DOUBLE_WRAP})
+add_library(spheroidal_batch_double SHARED ${DOUBLE_BASE} ${DOUBLE_WRAP} deps/scaled_batch.f90)
 target_link_libraries(spheroidal_batch_double PRIVATE OpenMP::OpenMP_Fortran)
 set_target_properties(spheroidal_batch_double PROPERTIES
   OUTPUT_NAME "spheroidal_batch_double"
@@ -61,7 +61,7 @@ if(WIN32)
   set_target_properties(spheroidal_batch_double PROPERTIES PREFIX "")
 endif()
 
-add_library(spheroidal_batch_quad SHARED ${QUAD_BASE} ${QUAD_WRAP})
+add_library(spheroidal_batch_quad SHARED ${QUAD_BASE} ${QUAD_WRAP} deps/scaled_batch.f90)
 target_link_libraries(spheroidal_batch_quad PRIVATE OpenMP::OpenMP_Fortran)
 set_target_properties(spheroidal_batch_quad PROPERTIES
   OUTPUT_NAME "spheroidal_batch_quad"

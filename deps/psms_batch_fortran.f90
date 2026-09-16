@@ -82,6 +82,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -164,6 +165,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
     allocate(eigout(lnum))
@@ -286,6 +288,7 @@ contains
 
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs_tmp(lnum, narg))
     allocate(eigout(lnum))
@@ -363,6 +366,7 @@ contains
     allocate(arg(narg))
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, narg), s1dc(lnum, narg))
     allocate(is1e(lnum, narg), is1de(lnum, narg), naccs(lnum, narg))
     allocate(eigout(lnum))
@@ -453,6 +457,7 @@ contains
     arg(1) = 0.0_rk
     allocate(r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), eigout(lnum))
     allocate(ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), naccr(lnum))
+    naccr = -1_c_int
     allocate(s1c(lnum, 1), s1dc(lnum, 1))
     allocate(is1e(lnum, 1), is1de(lnum, 1), naccs(lnum, 1))
 
