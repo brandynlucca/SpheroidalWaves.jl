@@ -9,6 +9,7 @@ Makefile
 fort.*
 tmp_*
 build_output.txt
+validation/*
 
 # Compiled files
 *.o
