@@ -97,6 +97,12 @@ const PARAMETER_DERIVATIVE_REFERENCES = [
             if iszero(c)
                 @test iszero(v) && iszero(sv) && iszero(sd)
             else
+                # Keep the O(c^2) value and coordinate slope as well as the
+                # O(c) sensitivities; treating a tiny c as zero loses these.
+                lambda = eigenvalue(0,0,c;precision,spheroid)
+                wave = smn(0,0,c,T[T(3)/10];precision,spheroid)
+                @test lambda/c^2 ≈ sigma*one(T)/3 rtol=tolerance
+                @test only(wave.derivative)/c^2 ≈ -sigma*(T(3)/10)/3 rtol=tolerance
                 @test v/c ≈ 2sigma*one(T)/3 rtol=tolerance
                 @test sv/c ≈ sigma*(1-3*(T(3)/10)^2)/9 rtol=tolerance
                 @test sd/c ≈ -2sigma*(T(3)/10)/3 rtol=tolerance
@@ -132,4 +138,29 @@ const PARAMETER_DERIVATIVE_REFERENCES = [
     end
     @test_throws ErrorException jacobian_eigen(0,0,1.0;h=Inf)
     @test_throws ArgumentError SpheroidalWaves._angular_coefficients(0,0,1.0;rtol=NaN)
+end
+
+@testset "Near-zero angular modes retain phase and scaling" begin
+    for precision in (:double,:quad), spheroid in (:prolate,:oblate)
+        T = precision === :quad ? BigFloat : Float64
+        tolerance = precision === :quad ? big"1e-28" : 2e-13
+        c,x = complex(T(1e-20),T(2e-20)),T(3)/10
+        for (m,n) in ((1,1),(1,3),(2,3)), normalize in (false,true)
+            spherical = smn(m,n,zero(c),x;precision,spheroid,normalize)
+            wave = smn(m,n,c,x;precision,spheroid,normalize)
+            @test wave.value ≈ spherical.value rtol=tolerance
+            @test wave.derivative ≈ spherical.derivative rtol=tolerance
+        end
+        sigma = spheroid === :prolate ? 1 : -1
+        scaled = smn(0,0,c,x;precision,spheroid,scaled=true,logderivative=true)
+        slope = only(scaled.derivative.mantissa.*BigFloat(10).^scaled.derivative.exponent)
+        @test slope/c^2 ≈ -sigma*x/3 rtol=tolerance
+        @test only(scaled.logderivative)/c^2 ≈ -sigma*x/3 rtol=tolerance
+        for parameter in (real(c),c)
+            batch = smn(0,0:2,parameter,x;precision,spheroid)
+            @test batch.value[:,1] ≈ smn(0,0,parameter,x;precision,spheroid).value rtol=tolerance
+            @test batch.derivative[1,1]/parameter^2 ≈ -sigma*x/3 rtol=tolerance
+        end
+        @test accuracy(0,0,c,[x];precision,spheroid,target=:angular) == [-1]
+    end
 end

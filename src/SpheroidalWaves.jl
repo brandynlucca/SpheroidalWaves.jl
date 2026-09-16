@@ -415,6 +415,12 @@ function _call_real_smn(prefix::Symbol, m::Integer, n::Integer, c::Real, eta::Ab
     if _is_exact_spherical_limit(c)
         return _spherical_smn_real(m, n, eta; normalize, precision)
     end
+    if _use_small_parameter_expansion(c)
+        T = precision === :quad ? BigFloat : Float64
+        spheroid = prefix === :psms ? :prolate : :oblate
+        result = map(v -> T.(v),_small_parameter_smn(m,n,c,eta,spheroid,precision,normalize))
+        return with_accuracy ? (;result...,accuracy=fill(-1,length(eta))) : result
+    end
 
     lib = _require_backend_library(precision)
     symbol = if precision === :quad
@@ -558,6 +564,12 @@ end
 function _call_complex_smn_raw(prefix::Symbol, m::Integer, n::Integer, c::Complex, eta::AbstractVector{<:Real}; precision::Symbol=:double, normalize::Bool=false)
     if _is_exact_spherical_limit(c)
         return _spherical_smn_complex(m, n, eta; normalize, precision)
+    end
+    if _use_small_parameter_expansion(c)
+        T = precision === :quad ? BigFloat : Float64
+        spheroid = prefix === :cprolate ? :prolate : :oblate
+        result = _small_parameter_smn(m,n,c,eta,spheroid,precision,normalize)
+        return map(v -> Complex{T}.(v),result)
     end
     if iszero(real(c))
         opposite=prefix===:cprolate ? :oblate : :psms
@@ -738,16 +750,10 @@ function _call_real_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Real; 
     if _is_exact_spherical_limit(c)
         return precision === :quad ? BigFloat(n * (n + 1)) : Float64(n * (n + 1))
     end
-    if abs(c)<big"1e-20"
-        # Native double recurrences can return NaN for nonzero c near 1e-100.
-        # Refine the isolated spherical mode; keep the O(c^2) eigenvalue when
-        # n=0 instead of replacing every result with n(n+1).
+    if _use_small_parameter_expansion(c)
         T = precision===:quad ? BigFloat : Float64
         spheroid = prefix===:oblate ? :oblate : :prolate
-        seed = BigFloat(n)*(n+1)
-        plan = _coefficient_plan(m,n,T(c);spheroid,precision,eigenvalue_seed=seed,
-                                 max_terms=max(64,(n-m)÷2+32))
-        plan.converged || error("Small-parameter separation constant did not converge")
+        plan = _small_parameter_plan(m,n,c,spheroid,precision)
         return T(plan.lambda)
     end
 
@@ -789,6 +795,11 @@ function _call_complex_eigenvalue(prefix::Symbol, m::Integer, n::Integer, c::Com
     if _is_exact_spherical_limit(c)
         T = precision === :quad ? BigFloat : Float64
         return complex(T(n) * (T(n) + 1), zero(T))
+    end
+    if _use_small_parameter_expansion(c)
+        T = precision === :quad ? BigFloat : Float64
+        spheroid = prefix === :cprolate ? :prolate : :oblate
+        return Complex{T}(_small_parameter_plan(m,n,c,spheroid,precision).lambda)
     end
     if iszero(real(c))
         opposite=prefix===:cprolate ? :oblate : :psms
@@ -1798,7 +1809,7 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
 
     target in (:angular, :radial) || error("target must be :angular or :radial")
     _validate_wave_arguments(m,n,c,arg,spheroid,precision,target;kind)
-    if target === :angular && (iszero(c) || kind == 2 || _use_angular_expansion(n,c,spheroid) || (c isa Complex && iszero(real(c))))
+    if target === :angular && (_use_small_parameter_expansion(c) || kind == 2 || _use_angular_expansion(n,c,spheroid) || (c isa Complex && iszero(real(c))))
         smn(m,n,c,arg;spheroid,precision,normalize,kind)
         return fill(-1, length(arg)) # Neither evaluation has a calibrated digit estimator.
     elseif target === :radial && (kind != 2 || _radial_needs_analytic(c,arg,kind))

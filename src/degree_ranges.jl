@@ -24,6 +24,7 @@ end
 function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option,
                                    scaled,logderivative,second_derivative)
     c isa Real && c>0 || return nothing
+    target === :angular && _use_small_parameter_expansion(c) && return nothing
     # The earlier quad prolate ABI already shares degrees and transfers fewer
     # channels for ordinary output. Retain it when no extended fields are needed.
     if spheroid===:prolate && precision===:quad && !scaled && !logderivative && !second_derivative &&
@@ -129,7 +130,7 @@ function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
                                            scaled,logderivative,second_derivative)
         shared!==nothing && return shared
     end
-    if kind == 2 || scaled || logderivative || second_derivative || _use_angular_expansion(first(n),c,spheroid)
+    if kind == 2 || scaled || logderivative || second_derivative || _use_angular_expansion(first(n),c,spheroid) || _use_small_parameter_expansion(c)
         return _stack_wave_results([smn(m,degree,c,eta;spheroid,precision,normalize,kind,scaled,logderivative,second_derivative) for degree in n])
     end
     pointer = _degree_range_pointer(:psms_smn_degrees_quad_text, c, spheroid, precision)

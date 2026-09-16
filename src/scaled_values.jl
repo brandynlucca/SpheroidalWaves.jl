@@ -29,6 +29,9 @@ function _scaled_native_values(m,n,c,points,spheroid,precision,target,option)
     if target === :angular && iszero(c)
         return _angular_phase!(_spherical_smn_real(m,n,BigFloat.(points);normalize=option!=0,precision=:quad),m)
     end
+    if target === :angular && _use_small_parameter_expansion(c)
+        return _angular_phase!(_small_parameter_smn(m,n,c,points,spheroid,precision,option!=0),m)
+    end
     requested_n = n
     state = c isa Complex ? _complex_mode_state(spheroid === :prolate ? :cprolate : :coblate,m,n,c,precision) : nothing
     state !== nothing && target === :angular && _require_angular_anchor(state)

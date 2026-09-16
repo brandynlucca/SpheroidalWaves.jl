@@ -146,6 +146,37 @@ function _coefficient_plan(m,n,c;spheroid=:prolate,precision=:double,rtol=nothin
     return plan
 end
 
+# Near zero, the perturbation sigma*c^2*x^2 is much smaller than the
+# spherical eigenvalue gaps. Select that isolated mode without native seeds
+# or angular anchors, which can be unreliable for tiny nonzero parameters.
+_use_small_parameter_expansion(c) = abs(c) <= 1//10000
+
+function _small_parameter_plan(m,n,c,spheroid,precision)
+    T = precision === :quad ? BigFloat : Float64
+    parameter = c isa Real ? T(c) : Complex{T}(c)
+    # Extra guard bits preserve relative accuracy in the O(c^2) coefficients,
+    # even when the absolute eigenproblem residual is already tiny.
+    return setprecision(BigFloat,max(320,Base.precision(BigFloat))) do
+        z = parameter isa Real ? BigFloat(parameter) : Complex{BigFloat}(parameter)
+        # Refine the spherical seed before the cross-expansion agreement check.
+        seed = _solve_coefficient_mode(m,n,z,max(16,(n-m)÷2+9),spheroid,BigFloat(n)*(n+1)).lambda
+        plan = _coefficient_plan(m,n,parameter;spheroid,precision,
+            eigenvalue_seed=seed,max_terms=max(64,(n-m)÷2+32))
+        plan.converged || error("Small-parameter coefficient expansion did not converge")
+        plan
+    end
+end
+
+function _small_parameter_smn(m,n,c,points,spheroid,precision,normalize)
+    plan = _small_parameter_plan(m,n,c,spheroid,precision)
+    # Match the native convention (without Condon–Shortley); the public
+    # boundary supplies that phase. The dominant coefficient stays nonzero.
+    phase = real(plan.v[(n-m)÷2+1]) < 0 ? -1 : 1
+    scale = (isodd(m) ? -phase : phase) *
+            (normalize ? one(BigFloat) : sqrt(_ferrers_norm2(m,n,BigFloat)))
+    return _evaluate_coefficient_vector(plan,scale.*plan.v,points)
+end
+
 # Evaluate a coefficient vector and its coordinate derivative in one recurrence.
 # Factoring (1-x^2)^(m/2) gives explicit endpoint limits without Inf-Inf sums.
 function _evaluate_coefficient_vector(plan,coefficients,points;second_derivative=false)
