@@ -3,18 +3,10 @@ using BinaryBuilder
 name = "SpheroidalWaves"
 version = v"0.5.0"
 
-# For a local BinaryBuilder trial, point this at the source checkout. For the
-# Yggdrasil submission, replace this selection with a GitSource pinned to the
-# published commit containing the backend changes. Never build a moving branch.
-local_source = get(ENV,"SPHEROIDALWAVES_SOURCE_DIR","")
-revision = get(ENV,"SPHEROIDALWAVES_SOURCE_REVISION","")
-sources = if isempty(local_source)
-    occursin(r"^[0-9a-f]{40}$",revision) ||
-        error("Set SPHEROIDALWAVES_SOURCE_REVISION to the published backend commit (40 hex digits)")
-    [GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",revision)]
-else
-    [DirectorySource(abspath(local_source);target="SpheroidalWaves")]
-end
+sources = [
+    GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
+              "1d863a48ab0b0ca4bce84109fba8aab7509aa17c"),
+]
 
 script = raw"""
 cd ${WORKSPACE}/srcdir/SpheroidalWaves*
