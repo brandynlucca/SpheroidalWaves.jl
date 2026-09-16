@@ -125,10 +125,11 @@ jobs:
           using SpheroidalWaves_jll
           ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
           ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
-          push!(LOAD_PATH, pwd())
+          pushfirst!(LOAD_PATH, pwd())
           using SpheroidalWaves
           @testset "JLL libraries and runtime dependencies" begin
               @test !isdir("build")
+              @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
               for precision in (:double,:quad)
                   library = SpheroidalWaves.backend_library(;precision)
                   @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]
@@ -141,13 +142,15 @@ jobs:
                       end
                   end
               end
-              julia_root = lowercase(replace(normpath(joinpath(Sys.BINDIR,"..")), '\\' => '/')) * "/"
+              julia_root = lowercase(replace(dirname(Sys.BINDIR), '\\' => '/')) * "/"
               for library in Libdl.dllist()
                   path = lowercase(replace(library, '\\' => '/'))
                   @test !occursin("/opt/homebrew/", path)
                   @test !occursin("/usr/local/cellar/", path)
                   if occursin(r"^(lib)?(gfortran|gomp|quadmath|gcc_s)", basename(path))
-                      @test occursin("/artifacts/", path) || startswith(path, julia_root)
+                      @testset "Compiler runtime: $path" begin
+                          @test occursin("/artifacts/", path) || startswith(path, julia_root)
+                      end
                   end
               end
           end
