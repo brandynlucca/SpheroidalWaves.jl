@@ -19,14 +19,14 @@ cmake --install build-binarybuilder
 install_license LICENSE
 """
 
-# Start with the platforms currently distributed by the package. Quad precision
-# and the Fortran/OpenMP runtime must be validated on each before expanding it.
-platforms = expand_gfortran_versions([
-    Platform("x86_64","linux";libc="glibc"),
-    Platform("x86_64","windows"),
-    Platform("x86_64","macos"),
-    Platform("aarch64","macos"),
-])
+platforms = supported_platforms()
+
+# gfortran has no REAL(16)/__float128 (quadmath) support on 32-bit ARM or
+# PowerPC64LE, so `selected_real_kind(33)` (deps/prolate_swf_quad.f90:33)
+# resolves to an invalid kind and the quad-precision sources fail to compile.
+filter!(p -> !(arch(p) in ("armv6l", "armv7l", "powerpc64le")), platforms)
+
+platforms = expand_gfortran_versions(platforms)
 
 products = [
     LibraryProduct(["libspheroidal_batch_double","spheroidal_batch_double"],:libspheroidal_batch_double),

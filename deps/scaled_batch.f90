@@ -2,7 +2,6 @@
 ! mantissas and integer decimal exponents without reconstructing large values.
 module scaled_batch
   use, intrinsic :: iso_c_binding
-  use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   use prolate_parameters, only: knd
   use prolate_swf, only: profcn
   use oblate_swf, only: oblfcn
@@ -166,7 +165,11 @@ contains
       end do
       read(text,*,iostat=ios) value
       ok=ios == 0
-      if (ok) ok=ieee_is_finite(value)
+      ! Avoids the `ieee_arithmetic` intrinsic module, which some gfortran
+      ! cross-compiler shards (e.g. aarch64-freebsd, aarch64-linux-musl) lack.
+      ! NaN never equals itself under IEEE comparison; finite values are
+      ! bounded by huge(value).
+      if (ok) ok = (value == value) .and. (abs(value) <= huge(value))
       if (.not. ok) status=-5
     end subroutine
     subroutine store(index,value,exponent)
