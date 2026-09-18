@@ -5,7 +5,6 @@
 ! Each point has eight real channels: Re/Im of value1, derivative1,
 ! value2, derivative2. Angular/eigenvalue calls use only the leading channels.
   subroutine complex_batch_quad_text(m, n, mode, option, npts, ctext, xtext, width, output, exponents, accuracy, status)
-    use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
     integer(c_int), intent(in) :: m, n, mode, option, npts, width
     character(c_char), intent(in) :: ctext(*), xtext(*)
     character(c_char), intent(out) :: output(*)
@@ -40,14 +39,17 @@
       return
     end if
     c = cmplx(cr, ci, kind=wk)
-    if (.not. ieee_is_finite(cr) .or. .not. ieee_is_finite(ci) .or. abs(c) == 0.0_wk) then
+    ! Portable finite check (avoids the `ieee_arithmetic` intrinsic module,
+    ! missing from some gfortran cross-compiler shards): NaN never equals
+    ! itself under IEEE comparison; finite values are bounded by huge().
+    if (.not. is_finite(cr) .or. .not. is_finite(ci) .or. abs(c) == 0.0_wk) then
       status = -5
       return
     end if
     allocate(points(npts))
     do i = 1, npts
       call quad_decode(xtext, (i-1)*width+1, width, points(i), ok)
-      if (.not. ok .or. .not. ieee_is_finite(points(i))) then
+      if (.not. ok .or. .not. is_finite(points(i))) then
         status = -3
         return
       end if
@@ -132,6 +134,11 @@
       call quad_encode(output, idx*width+1, width, aimag(value))
       exponents(idx:idx+1) = exponent
     end subroutine store_pair
+
+    logical function is_finite(x)
+      real(wk), intent(in) :: x
+      is_finite = (x == x) .and. (abs(x) <= huge(x))
+    end function is_finite
   end subroutine complex_batch_quad_text
 
   subroutine quad_decode(buf, offset, width, value, ok)
