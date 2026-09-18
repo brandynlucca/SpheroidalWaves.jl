@@ -9,6 +9,7 @@ Libdl = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [compat]
+Artifacts = "1.10"
 julia = "1.10"
 
 [extras]
