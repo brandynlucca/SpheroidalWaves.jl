@@ -1,11 +1,3 @@
-# Keep reconstructed intermediates in BigFloat's wide exponent range. Native
-# double/quad mantissas remain at their original precision throughout.
-function _has_scaled_abi(path)
-    Libdl.dlopen(path) do handle
-        Libdl.dlsym_e(handle,:spheroidal_scaled_text) != C_NULL
-    end
-end
-
 function _stack_wave_results(results)
     fields = keys(first(results))
     values = map(fields) do field

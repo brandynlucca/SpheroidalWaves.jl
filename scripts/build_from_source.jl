@@ -1,9 +1,10 @@
 #!/usr/bin/env julia
-# deps/build.jl
-# Julia package build script: compiles Fortran batch modules into shared library
-# Runs automatically during package installation
+# scripts/build_from_source.jl
+# Compiles the Fortran batch modules into shared libraries from source.
+# Not run automatically: SpheroidalWaves_jll supplies prebuilt binaries for
+# normal installs. Run this explicitly for local Fortran development or to
+# exercise the source build in CI.
 
-using Artifacts
 using Libdl
 
 # ============================================================================
@@ -13,7 +14,6 @@ const SCRIPT_DIR = dirname(@__FILE__)
 const PROJECT_DIR = dirname(SCRIPT_DIR)
 const BUILD_DIR = joinpath(PROJECT_DIR, "build")
 const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
-const ARTIFACTS_TOML = joinpath(PROJECT_DIR, "Artifacts.toml")
 const SELECTED_FORTRAN = Ref{Union{Nothing,String}}(nothing)
 
 function detect_library_dir()
@@ -334,61 +334,11 @@ function report_library_paths()
     return true
 end
 
-function _find_library_in_root(root::String, stem::String)
-    for dir in (root, joinpath(root, "lib"), joinpath(root, "bin"))
-        path = _find_built_library(dir, stem)
-        path === nothing || return path
-    end
-    return nothing
-end
-
-function _artifact_library(name::String, stem::String)
-    isfile(ARTIFACTS_TOML) || return nothing
-    hash = Artifacts.artifact_hash(name, ARTIFACTS_TOML)
-    hash === nothing && return nothing
-    Artifacts.artifact_exists(hash) || return nothing
-    return _find_library_in_root(Artifacts.artifact_path(hash), stem)
-end
-
-function use_prebuilt_artifacts()
-    double = _artifact_library("spheroidal_backend_double", "spheroidal_batch_double")
-    quad = _artifact_library("spheroidal_backend_quad", "spheroidal_batch_quad")
-    if double !== nothing && quad !== nothing
-        compatible = Libdl.dlopen(quad) do handle
-            all(symbol -> Libdl.dlsym_e(handle, symbol) != C_NULL,
-                (:cprolate_batch_quad_text, :coblate_batch_quad_text, :cprolate_radial_quad_offset_text,
-                 :psms_smn_batch_quad_text_acc, :oblate_smn_batch_quad_text_acc,
-                 :psms_rmn_batch_quad_fullsplit_acc, :oblate_rmn_batch_quad_fullsplit_acc,
-                 :psms_rmn_batch_quad_offset_acc, :psms_angular_precision_v2, :spheroidal_scaled_text))
-        end
-        compatible &= Libdl.dlopen(double) do handle
-            Libdl.dlsym_e(handle,:spheroidal_scaled_text) != C_NULL
-        end
-        if !compatible
-            info_msg("Quad artifact lacks required precision-preserving interfaces; rebuilding from source.")
-            return false
-        end
-        info_msg("Using prebuilt backend artifacts for this platform.")
-        info_msg("double artifact library: $double")
-        info_msg("quad artifact library: $quad")
-        info_msg("Local CMake/Fortran compilation is not required.")
-        return true
-    end
-    return false
-end
-
 # ============================================================================
 # Main Build Workflow
 # ============================================================================
 function main()
     info_msg("SpheroidalWaves Fortran batch build starting...")
-
-    # Pkg installs non-lazy artifacts before running this build script. Avoid
-    # compiling locally when both precision backends are already available.
-    if use_prebuilt_artifacts()
-        return true
-    end
-
     info_msg("Building dual precision backends (double and quad)")
     info_msg("Build directory: $BUILD_DIR")
     
@@ -436,7 +386,7 @@ end
 # ============================================================================
 if !main()
     is_ci = get(ENV, "CI", "false") == "true"
-    
+
     if is_ci
         error("Build failed in CI. This indicates a real installation problem. See errors above.")
     else
@@ -444,17 +394,19 @@ if !main()
         warn_msg("  - You don't have a Fortran compiler installed")
         warn_msg("  - CMake is not available")
         warn_msg("")
-        warn_msg("You can still use SpheroidalWaves if:")
-        warn_msg("  1. Pre-built artifacts are available (automatic download)")
-        warn_msg("  2. You set environment variables with backend paths")
-        warn_msg("  3. You install a Fortran compiler and rebuild")
+        warn_msg("Normal use of SpheroidalWaves does not require this script: the")
+        warn_msg("package installs prebuilt binaries automatically via SpheroidalWaves_jll.")
+        warn_msg("This is only needed to compile the Fortran sources locally, e.g. for")
+        warn_msg("development. To do so:")
+        warn_msg("  1. Install a Fortran compiler and CMake")
+        warn_msg("  2. Rerun: julia --project=. scripts/build_from_source.jl")
+        warn_msg("  3. Point SpheroidalWaves at the result with")
+        warn_msg("     SPHEROIDALWAVES_LIBRARY_DOUBLE / SPHEROIDALWAVES_LIBRARY_QUAD")
         warn_msg("")
         warn_msg("To install a Fortran compiler:")
         warn_msg("  - Ubuntu/Debian: sudo apt-get install gfortran cmake")
         warn_msg("  - macOS: brew install gcc cmake")
         warn_msg("  - Windows: install MinGW-w64 (gfortran) and CMake")
-        warn_msg("")
-        warn_msg("Then rebuild with: julia> import Pkg; Pkg.build(\"SpheroidalWaves\")")
     end
 end
 

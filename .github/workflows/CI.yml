@@ -50,13 +50,21 @@ jobs:
         run: |
           using Pkg
           Pkg.resolve()
-          Pkg.instantiate(;allow_build=false)
-      - uses: julia-actions/julia-buildpkg@v1
+          Pkg.instantiate()
+      # Compile the Fortran sources on every push so source regressions are
+      # caught immediately, rather than only when Yggdrasil.yml is run by hand.
+      - name: Build backends from source
+        run: julia --project=. scripts/build_from_source.jl
+      - name: Point tests at the freshly built backends
+        shell: bash
+        run: |
+          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
       - uses: julia-actions/julia-runtest@v1
         timeout-minutes: 5
 
-  installed-backends:
-    name: Installed backends - ${{ matrix.os }}
+  jll-backends:
+    name: SpheroidalWaves_jll backends - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -78,20 +86,22 @@ jobs:
           version: '1.10'
           arch: ${{ matrix.arch }}
       # No build action or compiler installation: exercise what users download.
-      - name: Install and check released backend libraries
+      - name: Install and check SpheroidalWaves_jll backend libraries
         shell: bash
         run: |
           julia --startup-file=no --project=. -e '
             using Pkg
             Pkg.resolve()
-            Pkg.instantiate(;allow_build=false)
-            using Artifacts, SpheroidalWaves
+            Pkg.instantiate()
+            using SpheroidalWaves_jll, SpheroidalWaves
             @assert !isdir("build") "Consumer checks must not use a local build"
             for precision in (:double, :quad)
                 path = SpheroidalWaves.backend_library(; precision)
                 @assert path !== nothing
-                root = artifact_path(artifact_hash("spheroidal_backend_$precision", "Artifacts.toml"))
-                @assert dirname(realpath(path)) == realpath(root)
+                expected = precision === :double ?
+                    SpheroidalWaves_jll.libspheroidal_batch_double_path :
+                    SpheroidalWaves_jll.libspheroidal_batch_quad_path
+                @assert realpath(path) == realpath(expected)
                 if Sys.isapple()
                     for line in split(read(`otool -L $path`, String), "\n")[2:end]
                         isempty(strip(line)) && continue

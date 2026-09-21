@@ -1,8 +1,8 @@
 module SpheroidalWaves
 
-using Artifacts
 using Libdl
 using LinearAlgebra: Tridiagonal
+using SpheroidalWaves_jll
 
 export smn, rmn, radial_wronskian, accuracy, eigenvalue, eigenvalue_sweep, jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
 
@@ -16,8 +16,6 @@ const _backend_registry_lock = ReentrantLock()
 
 const _ENV_BACKEND_DOUBLE = "SPHEROIDALWAVES_LIBRARY_DOUBLE"
 const _ENV_BACKEND_QUAD = "SPHEROIDALWAVES_LIBRARY_QUAD"
-const _ARTIFACT_DOUBLE = "spheroidal_backend_double"
-const _ARTIFACT_QUAD = "spheroidal_backend_quad"
 
 function _with_backend_registry_lock(f::F) where {F}
     lock(_backend_registry_lock)
@@ -84,50 +82,12 @@ function _backend_filename(stem::AbstractString)
     end
 end
 
-function _configure_one_backend_from_artifact!(artifact_name::String, precision::Symbol)
-    artifacts_toml = joinpath(dirname(@__FILE__), "..", "Artifacts.toml")
-    if !isfile(artifacts_toml)
-        return false
-    end
-    hash = Artifacts.artifact_hash(artifact_name, artifacts_toml)
-    if hash === nothing
-        return false
-    end
-
-    if !Artifacts.artifact_exists(hash)
-        @warn "Backend artifact is bound but not installed" artifact=artifact_name precision maxlog=1
-        return false
-    end
-
-    root = Artifacts.artifact_path(hash)
-    stems = precision === :double ? ["spheroidal_batch_double"] : ["spheroidal_batch_quad"]
-    candidates = String[]
-    for stem in stems
-        libname = _backend_filename(stem)
-        append!(candidates, [
-            joinpath(root, libname),
-            joinpath(root, "lib", libname),
-            joinpath(root, "bin", libname),
-        ])
-    end
-
-    for path in candidates
-        isfile(path) || continue
-        if precision === :quad && !_has_required_quad_abi(path)
-            continue  # A local source build can replace an older artifact.
-        end
-        precision === :double && !_has_scaled_abi(path) && continue
-        if _set_backend_from_candidate(path, precision, "artifact $artifact_name")
-            return true
-        end
-    end
-    return false
-end
-
-function _configure_backends_from_artifacts!()
+function _configure_backends_from_jll!()
     configured_any = false
-    configured_any |= _configure_one_backend_from_artifact!(_ARTIFACT_DOUBLE, :double)
-    configured_any |= _configure_one_backend_from_artifact!(_ARTIFACT_QUAD, :quad)
+    configured_any |= _set_backend_from_candidate(
+        SpheroidalWaves_jll.libspheroidal_batch_double_path, :double, "SpheroidalWaves_jll")
+    configured_any |= _set_backend_from_candidate(
+        SpheroidalWaves_jll.libspheroidal_batch_quad_path, :quad, "SpheroidalWaves_jll")
     return configured_any
 end
 
@@ -162,12 +122,12 @@ function _require_backend_library(precision::Symbol)
     if lib === nothing
         error("""
         No backend library configured for precision :$precision.
-        
+
         To resolve this, try one of:
-        1. Ensure artifacts are available (they should download automatically on first use).
+        1. Ensure SpheroidalWaves_jll is installed (it should download automatically on first use).
         2. Set environment variable: SPHEROIDALWAVES_LIBRARY_$(uppercase(String(precision))) = /path/to/lib
-        3. Run: julia> import Pkg; Pkg.build("SpheroidalWaves")
-        
+        3. For local development, compile from source with `julia --project=. scripts/build_from_source.jl`.
+
         """)
     end
     return lib
@@ -1929,9 +1889,9 @@ include("degree_ranges.jl")
 
 function __init__()
     try
-        # Default path for end users: shipped artifacts.
-        _configure_backends_from_artifacts!()
-        # Developer fallback when no artifact is available.
+        # Default path for end users: SpheroidalWaves_jll.
+        _configure_backends_from_jll!()
+        # Developer fallback for locally compiled sources.
         _configure_backends_from_local_build!()
         # Overrides for CI/power users.
         _configure_backends_from_env!()
