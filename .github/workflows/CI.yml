@@ -49,6 +49,7 @@ jobs:
         shell: julia --color=yes --project=. {0}
         run: |
           using Pkg
+          Pkg.Registry.update()
           Pkg.resolve()
           Pkg.instantiate()
       # Compile the Fortran sources on every push so source regressions are
@@ -91,6 +92,7 @@ jobs:
         run: |
           julia --startup-file=no --project=. -e '
             using Pkg
+            Pkg.Registry.update()
             Pkg.resolve()
             Pkg.instantiate()
             using SpheroidalWaves_jll, SpheroidalWaves
