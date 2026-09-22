@@ -9,6 +9,7 @@ LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 SpheroidalWaves_jll = "a34cad3f-f691-5efd-970c-48ef20c3665d"
 
 [compat]
+LinearAlgebra = "1.10"
 julia = "1.10"
 SpheroidalWaves_jll = "0.5"
 
