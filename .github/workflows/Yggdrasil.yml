@@ -61,7 +61,7 @@ jobs:
         run: |
           cp -R "$HOME/.julia/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
           cp contrib/yggdrasil/build_tarballs.jl products/build_tarballs.jl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: yggdrasil-build
