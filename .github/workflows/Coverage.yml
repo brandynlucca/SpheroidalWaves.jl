@@ -3,9 +3,13 @@ name: Coverage
 on: 
     push:
         branches: main
+        paths-ignore:
+            - 'README.md'
         tags: ['*']
     pull_request:
         branches: main
+        paths-ignore:
+            - 'README.md'
     workflow_dispatch:
 concurrency:
     group: ${{ github.workflow }}-${{ github.ref }}

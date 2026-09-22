@@ -1,15 +1,19 @@
 name: CI
 env:
   JULIA_NUM_THREADS: 4
-  
+
 on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'README.md'
     tags: ['*']
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'README.md'
   workflow_dispatch:
 concurrency:
   # Skip intermediate builds: always.
