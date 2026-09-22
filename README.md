@@ -6,10 +6,13 @@
 
 [![SpheroidalWaves](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FSpheroidalWaves%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=SpheroidalWaves&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves)
 [![SpheroidalWaves_jll](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FSpheroidalWaves_jll%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=SpheroidalWaves_jll&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves_jll)
+
 [![Documentation](https://img.shields.io/badge/docs-latest-blue?label=Docs)](https://brandynlucca.github.io/SpheroidalWaves.jl)
 [![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=Build%20status)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
+[![codecov](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl/graph/badge.svg?token=ZH28KZ4DTQ)](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl)
+
 
 Fast, vectorized computation of prolate and oblate spheroidal wave functions using native Fortran kernels.
 
