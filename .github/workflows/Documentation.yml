@@ -14,6 +14,11 @@ concurrency:
   group: ${{ github.workflow }}-gh-pages
   cancel-in-progress: false
 
+env:
+  # See CI.yml: bypass the pkg.julialang.org snapshot/CDN so a just-merged
+  # registration is visible immediately.
+  JULIA_PKG_SERVER: ""
+
 jobs:
   docs:
     runs-on: ubuntu-latest

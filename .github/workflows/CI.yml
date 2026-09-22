@@ -1,6 +1,10 @@
 name: CI
 env:
   JULIA_NUM_THREADS: 4
+  # Bypass the pkg.julialang.org snapshot/CDN and clone the General registry
+  # directly from GitHub, so a just-merged registration is visible immediately
+  # instead of waiting on Pkg Server snapshot propagation.
+  JULIA_PKG_SERVER: ""
 on:
   push:
     branches:
