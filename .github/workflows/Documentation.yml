@@ -14,11 +14,6 @@ concurrency:
   group: ${{ github.workflow }}-gh-pages
   cancel-in-progress: false
 
-env:
-  # See CI.yml: bypass the pkg.julialang.org snapshot/CDN so a just-merged
-  # registration is visible immediately.
-  JULIA_PKG_SERVER: ""
-
 jobs:
   docs:
     runs-on: ubuntu-latest
@@ -37,7 +32,7 @@ jobs:
         shell: julia --color=yes --project=docs {0}
         run: |
           using Pkg
-          Pkg.Registry.update()
+          Pkg.Registry.add("General")
           Pkg.develop(PackageSpec(path=pwd()))
           Pkg.instantiate()
       - name: Build and deploy
