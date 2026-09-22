@@ -1,8 +1,6 @@
-# SpheroidalWaves.jl
-
-<p align="center">
-  <img src="docs/src/assets/logo.svg" alt="SpheroidalWaves.jl logo" width="240" height="240" align="right">
-</p>
+<h1 align="center">
+  <img src="docs/src/assets/logo.svg" alt="SpheroidalWaves.jl" width="300">
+</h1>
 
 [![SpheroidalWaves](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FSpheroidalWaves%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=SpheroidalWaves&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves)
 [![SpheroidalWaves_jll](https://img.shields.io/badge/dynamic/xml?url=https%3A%2F%2Fplatform.juliahub.com%2Fdocs%2FGeneral%2FSpheroidalWaves_jll%2Fstable%2Fversion.svg&query=concat%28%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5B2%5D%2C+%27+%27%2C+%2F%2F%2A%5Blocal-name%28%29%3D%27text%27%5D%5Blast%28%29%5D%29&label=SpheroidalWaves_jll&color=32B32E&cacheSeconds=3600)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves_jll)
