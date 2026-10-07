@@ -11,8 +11,8 @@
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
 [![codecov](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl/graph/badge.svg?token=ZH28KZ4DTQ)](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl)
 
-[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Fmonthly_downloads%2FSpheroidalWaves&query=total_requests&suffix=%2Fmonth&label=SpheroidalWaves%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves)
-[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Fmonthly_downloads%2FSpheroidalWaves_jll&query=total_requests&suffix=%2Fmonth&label=SpheroidalWaves_jll%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves_jll)
+[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Ftotal_downloads%2FSpheroidalWaves&query=total_requests&label=SpheroidalWaves%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves)
+[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Ftotal_downloads%2FSpheroidalWaves_jll&query=total_requests&label=SpheroidalWaves_jll%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves_jll)
 
 
 Fast, vectorized computation of prolate and oblate spheroidal wave functions using native Fortran kernels.
