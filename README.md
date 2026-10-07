@@ -5,16 +5,19 @@
 [![Julia Registry](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaRegistries%2FGeneral%2Fmaster%2FS%2FSpheroidalWaves%2FVersions.toml&search=.*%5C%5B%22%28%5B%5E%22%5D%2B%29%22%5C%5D&flags=s&replace=v%241&label=Julia%20Registry&color=blue)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves)
 [![GitHub Version](https://img.shields.io/github/v/release/brandynlucca/SpheroidalWaves.jl?label=GitHub)](https://github.com/brandynlucca/SpheroidalWaves.jl)
 [![Yggdrasil](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaPackaging%2FYggdrasil%2Fmaster%2FS%2FSpheroidalWaves%2Fbuild_tarballs.jl&search=version%5Cs%2A%3D%5Cs%2Av%22%28%5B%5E%22%5D%2B%29%22&replace=v%241&label=Yggdrasil&color=forestgreen)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves_jll)
+[![Julia Compatibility](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbrandynlucca%2FSpheroidalWaves.jl%2Fmaster%2FProject.toml&query=%24.compat.julia&suffix=%2B&label=Julia&color=purple)](https://julialang.org)
+[![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/AcousticScattering.jl?label=Last%20commit)](https://github.com/brandynlucca/AcousticScattering.jl/commits/main)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
 
-[![Documentation](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation)](https://brandynlucca.github.io/SpheroidalWaves.jl)
-[![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=Build%20status)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
-[![codecov](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl/graph/badge.svg?token=ZH28KZ4DTQ)](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl)
 
+[![Documentation (stable)](https://img.shields.io/badge/docs-stable-blue?label=Package%20documentation%20(stable))](https://brandynlucca.github.io/AcousticScattering.jl/stable/)
+[![Documentation (latest)](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation%20(latest))](https://brandynlucca.github.io/AcousticScattering.jl/dev/)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
+
+[![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=Build%20status)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![codecov](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl/graph/badge.svg?token=ZH28KZ4DTQ)](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Ftotal_downloads%2FSpheroidalWaves&query=total_requests&label=SpheroidalWaves%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Ftotal_downloads%2FSpheroidalWaves_jll&query=total_requests&label=SpheroidalWaves_jll%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves_jll)
-
 
 Fast, vectorized computation of prolate and oblate spheroidal wave functions using native Fortran kernels.
 
