@@ -1,5 +1,19 @@
 using SpheroidalWaves,Test
 
+@testset "Spherical Bessel recurrence at large arguments" begin
+    SW = SpheroidalWaves
+    for z in (big"80.0", complex(big"80.0", big"0.1"))
+        regular = SW._radial_spherical_bessel(5, z, 1)
+        second = SW._radial_spherical_bessel(5, z, 2)
+        outgoing = SW._radial_spherical_bessel(5, z, 3)
+        incoming = SW._radial_spherical_bessel(5, z, 4)
+        @test regular[1] ≈ sin(z)/z
+        @test regular[2] ≈ sin(z)/z^2-cos(z)/z
+        @test regular ≈ (outgoing+incoming)/2 rtol=big"1e-60"
+        @test second ≈ (outgoing-incoming)/(2im) rtol=big"1e-60"
+    end
+end
+
 @testset "Direct decaying Hankel waves and sensitivities" begin
     # Independent dense spectral perturbation sums and explicit finite Hankel
     # polynomials. Refinements at 100/140 digits and 96/128 terms agree to

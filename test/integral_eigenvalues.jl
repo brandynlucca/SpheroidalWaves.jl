@@ -1,5 +1,14 @@
 using SpheroidalWaves,Test
 
+@testset "Integral refinement rejects an unresolved endpoint distance" begin
+    # Zero bandwidth is handled analytically by the public API. The interior
+    # refinement cannot certify a positive distance from zero at this limit.
+    for precision in (:double, :quad)
+        @test eigenvalue(0, 0, 0; precision, operator=:concentration) == 0
+        @test_throws r"did not converge, including its distance from zero and one" SpheroidalWaves._integral_eigenvalue_data(0, 0., precision)
+    end
+end
+
 @testset "Integral eigenvalue domain and exact limits" begin
     @test_throws ArgumentError eigenvalue(0,0,1;operator=:bad)
     @test_throws ArgumentError eigenvalue(0,0,1;form=:log)

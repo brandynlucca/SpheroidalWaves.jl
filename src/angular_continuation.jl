@@ -52,9 +52,6 @@ function _align_angular_state(reference, candidate)
 end
 
 _mode_eigenvalue_distance(a,b) = abs(a-b)/(1+max(abs(a),abs(b)))
-_candidate_distance_bound(evaluate,reference,c,degree) = 0
-_candidate_distance_bound(evaluate::_AngularModeEvaluator,reference,c,degree) =
-    _mode_eigenvalue_distance(reference.lambda,evaluate.eigenvalue(c,degree))
 
 function _angular_state_distance(a, b)
     anchor_error = abs(a.anchor-b.anchor) / max(abs(a.anchor), abs(b.anchor))
@@ -73,7 +70,8 @@ function _nearest_angular_state(evaluate, reference, c, branch_window)
         degree == reference.n && continue
         # Eigenvalue distance is a lower bound for the full matching score.
         # Exclude clearly separated modes before computing their angular data.
-        bound = _candidate_distance_bound(evaluate,reference,c,degree)
+        bound = evaluate isa _AngularModeEvaluator ?
+            _mode_eigenvalue_distance(reference.lambda,evaluate.eigenvalue(c,degree)) : 0
         if bound > 2score
             runner_up = min(runner_up,bound)
             continue

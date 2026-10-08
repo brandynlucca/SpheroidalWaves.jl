@@ -1,5 +1,28 @@
 using SpheroidalWaves, Test
 
+@testset "Quad text and split-double transfer" begin
+    SW = SpheroidalWaves
+    setprecision(BigFloat, 256) do
+        values = [big"1"+big"2"^(-80), -big"1.234567890123456789", big"0"]
+        hi, lo = SW._split_real_vector_to_double_pairs(values)
+        @test any(!iszero, lo)
+        @test SW._combine_split_parts(hi, lo) ≈ values rtol=big"1e-31"
+        @test SW._combine_split_complex_parts(hi, lo, -hi, -lo) ≈
+              complex.(values, -values) rtol=big"1e-31"
+        text = SW._encode_real_text_vector(values)
+        @test SW._decode_real_text_vector(text, length(values)) ≈ values rtol=big"1e-55"
+        scalar = SW._encode_real_text_scalar(values[1])
+        @test SW._decode_real_text_vector(scalar, 1) ≈ values[1:1] rtol=big"1e-55"
+        @test_throws r"payload overflow" SW._encode_real_text_scalar(big"1.25"; width=1)
+        @test_throws r"payload overflow" SW._encode_real_text_vector(values; width=1)
+        @test isempty(SW._decode_real_text_vector(UInt8[], 0))
+        # Conversion to Float64 can round a mantissa up to ten.
+        scaled = SW._decimal_scaled([big"9.9999999999999999999", big"0", BigFloat(Inf)], Float64)
+        @test scaled.mantissa == [1., 0., Inf]
+        @test scaled.exponent == [1, 0, 0]
+    end
+end
+
 @testset "Quad calculations accept ordinary numeric inputs" begin
     lib = SpheroidalWaves.backend_library(;precision=:quad)
     if lib !== nothing && isfile(lib)

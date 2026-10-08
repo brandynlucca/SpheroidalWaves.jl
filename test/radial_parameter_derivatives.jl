@@ -1,5 +1,28 @@
 using SpheroidalWaves,Test
 
+@testset "Radial expansion refinement budget and recovery" begin
+    SW = SpheroidalWaves
+    budgets = Tuple{Int,Int}[]
+    function coefficient_plan(m, n, c; min_terms, max_terms, kwargs...)
+        push!(budgets, (min_terms, max_terms))
+        return (;converged=true, min_terms)
+    end
+    unconverged(plan, points, kind) = (;tail=BigFloat(Inf))
+    @test_throws r"Differentiated radial expansion did not converge" SW._radial_analytic_data(
+        0, 1, 1.25, [2], :prolate, :double, 2;
+        coefficient_plan, expansion_batch=unconverged)
+    @test budgets == [(96,512), (192,512), (384,768), (768,1536)]
+    empty!(budgets)
+    # A second expansion with a resolved tail must terminate refinement and
+    # return the successful result and its corresponding coefficient plan.
+    improving(plan, points, kind) = (;tail=plan.min_terms == 96 ? big"1.0" : big"1e-35")
+    result, plan = SW._radial_analytic_data(0, 1, 1.25, [2], :prolate, :double, 2;
+        coefficient_plan, expansion_batch=improving)
+    @test budgets == [(96,512), (192,512)]
+    @test result.tail ≈ big"1e-35"
+    @test plan.min_terms == 192
+end
+
 @testset "Radial analytic parameter derivatives" begin
     for precision in (:double,:quad)
         lib=SpheroidalWaves.backend_library(;precision)

@@ -216,7 +216,7 @@ function _evaluate_coefficient_vector(plan,coefficients,points;second_derivative
                 (iszero(f) ? zero(f) : _directed_infinity(-x*f,coefficients isa AbstractVector{<:Real},BigFloat)) :
                 m == 2 ? -2x*f : zero(f)
             if second_derivative
-                seconds[i] = m==0 ? ddf : m==2 ? -2f-4x*df : m==4 ? 8f :
+                seconds[i] = m==0 ? ddf : m==2 ? -2*f-4x*df : m==4 ? 8f :
                     m>4 ? zero(f) : _directed_infinity((m==1 ? -1 : 1)*f,coefficients isa AbstractVector{<:Real},BigFloat)
             end
         else

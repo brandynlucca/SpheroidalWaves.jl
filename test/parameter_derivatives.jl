@@ -1,5 +1,77 @@
 using SpheroidalWaves, Test
 
+@testset "Explicit finite differences agree with analytic sensitivities" begin
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+        T = precision === :quad ? BigFloat : Float64
+        h = precision === :quad ? T(10)^(-10) : T(1e-4)
+        tolerance = precision === :quad ? T(1e-17) : T(2e-7)
+        for c in (T(1.25), complex(T(1.25), T(0.2))), metadata in (false, true)
+            exact = jacobian_eigen(1, 2, c; precision, spheroid)
+            fd = jacobian_eigen(1, 2, c; precision, spheroid, h,
+                                with_metadata=metadata, adaptive=metadata)
+            if c isa Real
+                @test (metadata ? fd.derivative : fd) ≈ exact rtol=tolerance
+                if metadata
+                    @test fd.metadata.method === :finite_difference
+                    @test fd.metadata.suggested_action === :accept
+                end
+            else
+                @test fd.d_dcreal ≈ exact.d_dcreal rtol=tolerance
+                @test fd.d_dcimag ≈ im*exact.d_dcreal rtol=tolerance
+                metadata && @test fd.metadata_dcimag.finite_flag
+            end
+            for (differentiate, points) in ((jacobian_smn, T[0.3]), (jacobian_rmn, T[2]))
+                exact = differentiate(1, 2, c, points; precision, spheroid)
+                fd = differentiate(1, 2, c, points; precision, spheroid, h,
+                                   with_metadata=metadata, adaptive=metadata)
+                for field in keys(exact)
+                    @test getproperty(fd, field) ≈ getproperty(exact, field) rtol=tolerance
+                end
+                if metadata
+                    fields = c isa Real ? (:metadata_value, :metadata_derivative) :
+                        (:metadata_value_dcreal, :metadata_value_dcimag,
+                         :metadata_derivative_dcreal, :metadata_derivative_dcimag)
+                    for field in fields
+                        @test getproperty(fd, field).method === :finite_difference
+                        @test getproperty(fd, field).finite_flag
+                    end
+                end
+            end
+        end
+    end
+end
+
+@testset "Finite difference reliability and refinement" begin
+    SW = SpheroidalWaves
+    for precision in (:double, :quad)
+        for (coarse, fine, flag, action) in (
+                (1.0, 1.0, :good, :accept),
+                (1.0001, 1.0, :warning, precision === :quad ? :accept : :retry_smaller_h),
+                (2.0, 1.0, :poor, precision === :quad ? :retry_smaller_h : :use_quad),
+                (Inf, 1.0, :poor, :retry_smaller_h))
+            md = SW._jacobian_metadata(coarse, fine, 0.1; precision, rtol=1e-6, atol=1e-10)
+            @test md.conditioning_flag === flag
+            @test md.suggested_action === action
+            @test md.finite_flag == isfinite(coarse)
+        end
+        # A cubic has a centered derivative error exactly h^2. Check which
+        # stencil is returned and that poor consistency triggers refinement.
+        steps = Float64[]
+        calc(h) = (push!(steps, h); ((1+h)^3-(1-h)^3)/(2h))
+        derivative, md = SW._finite_difference_with_metadata(calc, 0.5;
+            precision, adaptive=true, rtol=1e-6, atol=1e-10)
+        @test steps == [0.5, 0.25, 0.125]
+        @test derivative == 3 + 0.125^2
+        @test md.step_used == 0.125
+        empty!(steps)
+        derivative, md = SW._finite_difference_with_metadata(calc, 0.5;
+            precision, adaptive=false, rtol=1e-6, atol=1e-10)
+        @test steps == [0.5, 0.25]
+        @test derivative == 3.25
+        @test md.step_used == 0.5
+    end
+end
+
 # Inline references from an independent 384-bit Legendre/Bessel expansion,
 # differentiated with a five-point stencil. Refining 80 to 104 terms and
 # h=1e-10 to 1e-12 changed every entry by less than 6e-39.

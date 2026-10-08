@@ -67,7 +67,7 @@ jobs:
           echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
           echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
       - uses: julia-actions/julia-runtest@v1
-        timeout-minutes: 5
+        timeout-minutes: 10
 
   jll-backends:
     name: SpheroidalWaves_jll backends - ${{ matrix.os }}

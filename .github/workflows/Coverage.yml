@@ -18,6 +18,8 @@ jobs:
     coverage:
         name: Code Coverage
         runs-on: ubuntu-latest
+        env:
+            JULIA_NUM_THREADS: '2'
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7

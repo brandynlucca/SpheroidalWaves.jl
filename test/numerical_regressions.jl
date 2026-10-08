@@ -1,5 +1,49 @@
 using SpheroidalWaves, Test
 
+@testset "Coordinate zeros and stationary points" begin
+    SW = SpheroidalWaves
+    for precision in (:double, :quad)
+        T = precision === :quad ? BigFloat : Float64
+        tolerance = precision === :quad ? T(1e-27) : T(1e-11)
+        # P_3'(x) = (15x^2-3)/2 and P_2(x) = (3x^2-1)/2.
+        @test SW.angular_zeros(0, 3, 0; stationary=true, precision) ≈
+              [-inv(sqrt(T(5))), inv(sqrt(T(5)))] atol=tolerance
+        @test isempty(SW.angular_zeros(2, 2, 0; precision))
+        for spheroid in (:prolate, :oblate), stationary in (false, true), kind in (1, 2)
+            roots = SW.radial_zeros(0, 0, T(2), (T(2), T(4));
+                                   precision, spheroid, kind, stationary)
+            @test !isempty(roots)
+            @test issorted(roots) && all(2 .<= roots .<= 4)
+            values = rmn(0, 0, T(2), roots; precision, spheroid, kind)
+            @test all(abs.(getproperty(values, stationary ? :derivative : :value)) .< 20tolerance)
+        end
+    end
+    @test_throws DomainError SW.angular_zeros(0, 0, 0; stationary=true)
+    for rtol in (0, -1, NaN, Inf)
+        @test_throws ArgumentError SW.angular_zeros(0, 1, 0; rtol)
+        @test_throws ArgumentError SW.radial_zeros(0, 0, 1, (2, 3); rtol)
+    end
+    @test_throws ArgumentError SW.angular_zeros(0, 1, 0; max_points=32)
+    @test_throws ArgumentError SW.radial_zeros(0, 0, 1, (2, 3); max_points=32)
+    @test_throws ArgumentError SW.radial_zeros(0, 0, 1, (2, 3); kind=3)
+    @test_throws ArgumentError SW.radial_zeros(0, 0, 1, (1, 2))
+    @test_throws ArgumentError SW.radial_zeros(0, 0, 1, (3, 2))
+    # Synthetic polynomials exercise exact grid roots and failed searches.
+    polynomial(x) = x .* (x .- 1)
+    @test SW._coordinate_zeros(polynomial, 0., 1., 1e-12, 4, 8) == [0., 1.]
+    @test SW._bisect_wave(identity, 0., 1., 0., 1., 1e-12) == 0
+    @test SW._bisect_wave(identity, -1., 0., -1., 0., 1e-12) == 0
+    @test_throws ErrorException SW._bisect_wave(x -> fill(NaN, length(x)), -1., 1., -1., 1., 1e-12)
+    @test_throws ErrorException SW._coordinate_zeros(x -> fill(NaN, length(x)), 0., 1., 1e-12, 4, 8)
+    @test_throws DomainError SW._coordinate_zeros(x -> zero(x), 0., 1., 1e-12, 4, 8)
+    @test_throws ErrorException SW._coordinate_zeros(polynomial, 0., 1., 1e-12, 4, 4)
+    # An unattainable tolerance must exhaust the bounded bisection search.
+    setprecision(BigFloat, 2048) do
+        @test_throws r"did not converge" SW._bisect_wave(x -> 3x .- 1,
+            big"0", big"1", big"-1", big"2", big"1e-1000")
+    end
+end
+
 @testset "Focused numerical regressions" begin
     for precision in (:double,:quad)
         lib = SpheroidalWaves.backend_library(;precision)

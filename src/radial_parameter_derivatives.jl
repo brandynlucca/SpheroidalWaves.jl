@@ -174,7 +174,8 @@ end
 _radial_needs_analytic(c,points,kind) = c isa Complex &&
     (iszero(real(c)) || kind>=3)
 
-function _radial_analytic_data(m,n,c,points,spheroid,precision,kind;eigenvalue_seed=nothing)
+function _radial_analytic_data(m,n,c,points,spheroid,precision,kind;eigenvalue_seed=nothing,
+        coefficient_plan=_coefficient_plan, expansion_batch=_radial_expansion_batch)
     spheroid===:prolate && c isa Complex && any(isone,points) &&
         throw(DomainError(points,"complex prolate radial evaluation requires x > 1"))
     T = precision===:quad ? BigFloat : Float64
@@ -192,9 +193,9 @@ function _radial_analytic_data(m,n,c,points,spheroid,precision,kind;eigenvalue_s
         for attempt in 1:4
             max_terms = max(512,2minimum)
             rtol = min(big"1e-42",exp(-2BigFloat(abs(parameter)))*big"1e-42")
-            plan = _coefficient_plan(m,n,parameter;spheroid,precision,rtol,min_terms=minimum,max_terms,eigenvalue_seed)
+            plan = coefficient_plan(m,n,parameter;spheroid,precision,rtol,min_terms=minimum,max_terms,eigenvalue_seed)
             plan.converged || error("Radial sensitivity coefficients did not converge")
-            result = _radial_expansion_batch(plan,coordinates,kind)
+            result = expansion_batch(plan,coordinates,kind)
             result.tail<=big"1e-34" && return result,plan
             minimum *= 2
         end

@@ -1,5 +1,56 @@
 using SpheroidalWaves, Test
 
+@testset "Native spherical and imaginary-parameter angular limits" begin
+    SW = SpheroidalWaves
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+        prefix = spheroid === :prolate ? :cprolate : :coblate
+        opposite = spheroid === :prolate ? :oblate : :prolate
+        for c in (0im, 1im)
+            raw = SW._call_complex_smn_raw(prefix, 0, 1, c, [0.3]; precision)
+            reference = smn(0, 1, abs(imag(c)), 0.3; spheroid=opposite, precision)
+            @test raw.value ≈ reference.value
+            @test raw.derivative ≈ reference.derivative
+        end
+        # Coefficient reconstruction must choose the same phase on the
+        # imaginary axis as the real problem with opposite geometry.
+        expansion = SW._angular_coefficients(1, 2, 1im; precision, spheroid)
+        reconstructed = sum(d.*smn(1, l, 0, 0.3; precision).value
+                            for (d,l) in zip(expansion.coefficients, expansion.degrees))
+        @test reconstructed ≈ smn(1, 2, 1im, 0.3; precision, spheroid).value rtol=(precision === :quad ? big"1e-28" : 1e-12)
+    end
+end
+
+@testset "Continuation endpoint anchors and unresolved paths" begin
+    SW = SpheroidalWaves
+    for precision in (:double, :quad)
+        evaluate = SW._angular_phase_evaluator(:cprolate, 0, 1, precision; endpoint_anchor=true)
+        state = evaluate(1.25+0.1im)
+        @test state.endpoint_anchor && 0 < state.endpoint_point < 1
+        @test state.anchor == state.profile[end-1]
+        @test length(state.profile) == 10
+        @test_throws r"origin anchor" SW._require_angular_anchor(state)
+    end
+    state = (m=0, n=0, lambda=0., anchor=1., profile=[1., 0.], sign=1,
+             endpoint_anchor=false, endpoint_point=0.)
+    constant(c, n=0) = (;state..., n, lambda=Float64(n*(n+1)))
+    @test SW._transport_angular_phase(constant, 1., state, nextfloat(1.); branch_window=0).anchor == 1
+    @test SW._transport_angular_phase(constant, 0., state, 0.1; branch_window=1).n == 0
+    @test_throws r"must be finite" SW._transport_angular_phase(constant, 0., state, Inf)
+    # An unresolved jump must fail even when no representable midpoint remains.
+    jump(c, n=0) = (;state..., profile=[0., 1.])
+    @test_throws r"could not resolve" SW._transport_angular_phase(jump, 1., state, nextfloat(1.); branch_window=0)
+    @test_throws ArgumentError SW._angular_coefficients(0, 4, 1; max_terms=1)
+    limited = SW._coefficient_plan(0, 2, 1; max_terms=4)
+    @test !limited.converged && limited.terms == 4
+    plan = SW._coefficient_plan(0, 1, 1.25)
+    for value in (big"0.0", BigFloat(NaN))
+        unresolved = (;plan..., v=fill(value, length(plan.v)),
+                       phase=Ref{Union{Nothing,Int}}(nothing))
+        @test_throws r"phase cannot be resolved" SW._coefficient_phase(unresolved, :double)
+        @test unresolved.phase[] === nothing
+    end
+end
+
 @testset "Angular spherical limit and Condon–Shortley phase" begin
     # Closed-form Ferrers polynomials, independently of the implementation's
     # recurrence. Both normalization choices use the same phase.

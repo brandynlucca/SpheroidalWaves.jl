@@ -72,10 +72,10 @@ function _configure_backends_from_env!()
     return configured_any
 end
 
-function _backend_filename(stem::AbstractString)
-    if Sys.iswindows()
+function _backend_filename(stem::AbstractString, kernel::Symbol=Sys.KERNEL)
+    if kernel === :NT
         return "$stem.dll"
-    elseif Sys.isapple()
+    elseif kernel === :Darwin
         return "lib$stem.dylib"
     else
         return "lib$stem.so"
@@ -91,8 +91,7 @@ function _configure_backends_from_jll!()
     return configured_any
 end
 
-function _configure_backends_from_local_build!()
-    build_root = normpath(joinpath(dirname(@__FILE__), "..", "build"))
+function _configure_backends_from_local_build!(build_root::AbstractString=normpath(joinpath(dirname(@__FILE__), "..", "build")))
     configured_any = false
     for precision in (:double, :quad)
         backend_library(precision=precision) === nothing || continue
@@ -1682,7 +1681,11 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
     end
 
     f(c) = T(eigenvalue(m, n, c; spheroid=spheroid, precision=precision) - lambda_target)
+    jacobian(c) = jacobian_eigen(m, n, c; spheroid, precision, with_metadata=true, adaptive=true)
+    return _find_separation_root(f, jacobian, T(lambda_target), a, b, atol, rtol, maxiter, use_jacobian)
+end
 
+function _find_separation_root(f, jacobian, lambda_target, a::T, b::T, atol, rtol, maxiter, use_jacobian) where {T}
     fa = f(a)
     fb = f(b)
     if !isfinite(fa) || !isfinite(fb)
@@ -1715,8 +1718,7 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
         method = :bisection
 
         if use_jacobian
-            j = jacobian_eigen(m, n, mid; spheroid=spheroid, precision=precision,
-                               with_metadata=true, adaptive=true)
+            j = jacobian(mid)
             d = T(j.derivative)
             md = j.metadata
             if isfinite(d) && abs(d) > sqrt(eps(T)) && md.suggested_action == :accept
@@ -1887,18 +1889,22 @@ end
 
 include("degree_ranges.jl")
 
-function __init__()
+function _initialize_backends!(configure_jll=_configure_backends_from_jll!,
+                              configure_local=_configure_backends_from_local_build!,
+                              configure_env=_configure_backends_from_env!)
     try
         # Default path for end users: SpheroidalWaves_jll.
-        _configure_backends_from_jll!()
+        configure_jll()
         # Developer fallback for locally compiled sources.
-        _configure_backends_from_local_build!()
+        configure_local()
         # Overrides for CI/power users.
-        _configure_backends_from_env!()
+        configure_env()
     catch e
         @warn "Failed to configure backend libraries during module initialization: $e" maxlog=1
     end
 end
+
+__init__() = _initialize_backends!()
 
 end
 

@@ -1,4 +1,25 @@
 using SpheroidalWaves, Test, Libdl
+
+@testset "Radial range fallback preserves extended fields" begin
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate), extended in (false, true)
+        c = 1.25+0.1im
+        batch = rmn(0, 1:2, c, 2; precision, spheroid,
+                    scaled=extended, logderivative=extended, second_derivative=extended)
+        for (j,n) in enumerate(1:2)
+            scalar = rmn(0, n, c, 2; precision, spheroid,
+                         scaled=extended, logderivative=extended, second_derivative=extended)
+            for field in keys(scalar)
+                actual, expected = getproperty(batch, field), getproperty(scalar, field)
+                if expected isa NamedTuple
+                    @test actual.mantissa[:,j] ≈ expected.mantissa
+                    @test actual.exponent[:,j] == expected.exponent
+                else
+                    @test actual[:,j] ≈ expected
+                end
+            end
+        end
+    end
+end
 @testset "Degree ranges preserve wave functions" begin
     # Exercise multiple coordinates, a range starting above m, both norms,
     # angular endpoints, and all four radial kinds.
