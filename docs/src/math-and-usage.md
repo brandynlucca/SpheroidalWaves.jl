@@ -1,8 +1,7 @@
 # Mathematical basis and usage
 
 Use integer order and degree `0≤m≤n`.
-The parameter `c` may be real or complex; coordinates must be real.
-Write `σ=1` for prolate and `σ=-1` for oblate geometry.
+The parameter `c` and evaluation coordinates may be real or complex. Write `σ=1` for prolate and `σ=-1` for oblate geometry.
 
 ## Precision and outputs
 
@@ -25,6 +24,19 @@ The derivative is with respect to the coordinate.
     Ordinary numeric arguments work with `precision=:quad`.
     It cannot recover digits already lost in the inputs or guarantee 30 accurate digits
     in every parameter regime.
+
+## Parallel evaluation
+
+Calls are thread-safe. Start Julia with `julia --threads=auto --project`:
+
+~~~julia
+parameters = [0.5, 1.0, 1.5, 2.0]
+tasks = [Threads.@spawn smn(1, 2, c, [-0.3, 0.3]; precision=:quad)
+         for c in parameters]
+results = fetch.(tasks)
+~~~
+
+Keep shared inputs unchanged and use separate output buffers for each task.
 
 ## Angular functions
 
@@ -119,13 +131,32 @@ rmn(1, 2, 1.25, [0.0, 1.0]; spheroid=:oblate, kind=3, precision=:quad)
 ~~~
 
 !!! warning "Radial domain"
-    Requires `c≠0`; exact zero throws `DomainError`.
-    Prolate coordinates satisfy `x≥1` for real parameters and `x>1` for complex parameters.
-    Oblate coordinates satisfy `x≥0`.
-    At `x=1`, real prolate first-kind calls use one-sided limits; kinds 2–4 return `NaN`.
-    The same parameter restriction applies to radial Jacobians, Wronskians, and accuracy diagnostics.
+    Real prolate coordinates satisfy `x≥1`, real oblate coordinates `x≥0`.
+    At prolate `x=1`, the first kind uses one-sided limits. Kinds 2–4 return `NaN`.
+    Standard normalization requires `c≠0`.
+
+`normalization=:static` evaluates $c^{-n}R_1$ or $c^{n+1}R_2$, including their finite limits at `c=0`. It supports kinds 1 and 2 in `rmn`, `jacobian_rmn`, `radial_wronskian`, and radial `accuracy`.
+
+~~~julia
+rmn(0, 1, 0, 2; normalization=:static) # value ≈ [2/3]
+~~~
 
 ## Complex branches
+
+Complex coordinates continue the real-coordinate normalization on these cuts:
+
+| Function | Excluded coordinates |
+|:--|:--|
+| Angular | Real rays `z < -1` and `z > 1` |
+| Prolate radial | Real segment `-1 ≤ z < 1` |
+| Oblate radial | Imaginary rays `z=iy`, `abs(y) ≥ 1` |
+
+Angular `z=±1` and prolate `z=1` retain their one-sided endpoint conventions. Oblate continuation passes through `z=0`. Coordinate order does not change the branch. Complex coordinates support the same derivative, scaling, and degree-range options. Use `accuracy(...; diagnostics=true)` for convergence and conditioning estimates.
+
+~~~julia
+smn(1, 2, 1.25, 0.3 + 0.2im; derivatives=2)
+rmn(1, 2, 1.25, [1.5 + 0.2im, 2.0 - 0.1im]; kind=3)
+~~~
 
 For complex `c`, scalar `eigenvalue`, `smn`, and `rmn` follow degree
 `n` from `real(c)` along the vertical segment to `c`.
@@ -140,4 +171,4 @@ Angular normalization and phase follow that branch.
 
 [Mathematical tools](mathematical-tools.md) covers eigenvalue operators,
 parameter derivatives, inverse bandwidth, sweeps, degree ranges, scaled values,
-logarithmic derivatives, second coordinate derivatives, and accuracy diagnostics.
+logarithmic derivatives, higher coordinate derivatives, and accuracy diagnostics.
