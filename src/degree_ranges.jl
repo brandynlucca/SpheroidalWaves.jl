@@ -1,3 +1,16 @@
+smn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::Complex;kwargs...) = smn(m,n,c,[z];kwargs...)
+rmn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::Complex;kwargs...) = rmn(m,n,c,[z];kwargs...)
+
+function smn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::AbstractVector{<:Number};kwargs...)
+    _validate_degree_range(m,n,z,get(kwargs,:spheroid,:prolate),get(kwargs,:precision,:double))
+    _stack_wave_results([smn(m,degree,c,z;kwargs...) for degree in n])
+end
+
+function rmn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::AbstractVector{<:Number};kwargs...)
+    _validate_degree_range(m,n,z,get(kwargs,:spheroid,:prolate),get(kwargs,:precision,:double))
+    _stack_wave_results([rmn(m,degree,c,z;kwargs...) for degree in n])
+end
+
 function _validate_degree_range(m, n, points, spheroid, precision)
     _validate_precision(precision)
     spheroid in (:prolate, :oblate) || throw(ArgumentError("invalid spheroid: $spheroid"))
@@ -49,10 +62,10 @@ function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option
         native_first>last(n) && return nothing
     end
     native_degrees = native_first:last(n)
-    native_points = BigFloat.(points)
+    native_points = _input_bigfloat.(points)
     target===:radial && spheroid===:prolate && (native_points .-= 1)
-    ctext = _encode_real_text_vector([c,zero(c)])
-    xtext = _encode_real_text_vector(native_points)
+    ctext = _format_fortran_input([c,zero(c)])
+    xtext = _format_fortran_input(native_points)
     count = 8length(points)*length(native_degrees)
     exponents = zeros(Cint,count)
     status = Ref{Cint}(0)
@@ -63,7 +76,7 @@ function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option
               spheroid===:oblate,target===:angular ? 1 : 2,option,m,native_first,last(n),length(points),
               _QUAD_TEXT_WIDTH,ctext,xtext,output,exponents,status)
         _check_scalar_status(status[])
-        data = _decode_scaled_real_text_vector(output,exponents,count)
+        data = _parse_fortran_output(output,exponents,count)
     else
         output = zeros(Float64,count)
         ccall(pointer,Cvoid,(Cint,Cint,Cint,Cint,Cint,Cint,Cint,Cint,
@@ -94,7 +107,7 @@ function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option
         second_derivative && (result = _wave_second_derivative(result,m,degree,c,points,spheroid,precision,target;option))
         converted = map(v->scaled ? _decimal_scaled(v,T) : T.(v),result)
         if logderivative
-            ratio = T[iszero(v) ? T(NaN) : d/v for (v,d) in zip(result.value,result.derivative)]
+            ratio = T[_wave_logderivative(v,d,x,m,spheroid,target,target===:angular ? 1 : option) for (v,d,x) in zip(result.value,result.derivative,points)]
             converted = (;converted...,logderivative=ratio)
         end
         converted
@@ -120,11 +133,15 @@ Use `precision=:quad` to request quad precision with the same numeric arguments.
 function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
         eta::AbstractVector{<:Real}; spheroid::Symbol=:prolate,
         precision::Symbol=:double, normalize::Bool=false, kind::Integer=1, scaled::Bool=false,
-        logderivative::Bool=false,second_derivative::Bool=false)
+        logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1)
     _validate_degree_range(m, n, eta, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     all(x -> abs(x) <= 1, eta) || throw(ArgumentError("eta must lie in [-1, 1]"))
     kind in (1,2) || throw(ArgumentError("angular kind must be 1 or 2"))
+    derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    derivatives > 2 && return _stack_wave_results([smn(m,degree,c,eta;
+        spheroid,precision,normalize,kind,scaled,logderivative,derivatives) for degree in n])
+    second_derivative |= derivatives == 2
     if kind==1
         shared = _shared_real_degree_range(m,n,c,eta,spheroid,precision,:angular,Int(normalize),
                                            scaled,logderivative,second_derivative)
@@ -141,8 +158,8 @@ function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
             derivative=hcat((r.derivative for r in results)...))
     end
     count = length(eta)*length(n)
-    c_text = _encode_real_text_scalar(c)
-    eta_text = _encode_real_text_vector(eta)
+    c_text = _format_fortran_input(c)
+    eta_text = _format_fortran_input(eta)
     value_text = fill(UInt8(' '), _QUAD_TEXT_WIDTH*count)
     derivative_text = similar(value_text)
     value_exp = zeros(Cint, count)
@@ -155,8 +172,8 @@ function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
         _bool_to_cint(normalize), c_text, Cint(_QUAD_TEXT_WIDTH), eta_text,
         value_text, value_exp, derivative_text, derivative_exp, status)
     _check_scalar_status(status[])
-    result = (; value=reshape(_decode_scaled_real_text_vector(value_text, value_exp, count), length(eta), :),
-        derivative=reshape(_decode_scaled_real_text_vector(derivative_text, derivative_exp, count), length(eta), :))
+    result = (; value=reshape(_parse_fortran_output(value_text, value_exp, count), length(eta), :),
+        derivative=reshape(_parse_fortran_output(derivative_text, derivative_exp, count), length(eta), :))
     return _angular_phase!(result, m)
 end
 
@@ -175,11 +192,15 @@ precision with the same numeric arguments.
 function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
         x::AbstractVector{<:Real}; spheroid::Symbol=:prolate,
         precision::Symbol=:double, kind::Integer=1,scaled::Bool=false,
-        logderivative::Bool=false,second_derivative::Bool=false)
+        logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1,normalization::Symbol=:standard)
     _validate_degree_range(m, n, x, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     kind in 1:4 || throw(ArgumentError("kind must be in 1:4"))
-    _validate_wave_arguments(m,first(n),c,x,spheroid,precision,:radial;kind)
+    _validate_wave_arguments(m,first(n),c,x,spheroid,precision,:radial;kind,normalization)
+    derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    (derivatives > 2 || normalization === :static) && return _stack_wave_results([rmn(m,degree,c,x;
+        spheroid,precision,kind,scaled,logderivative,second_derivative,derivatives,normalization) for degree in n])
+    second_derivative |= derivatives == 2
     shared = _shared_real_degree_range(m,n,c,x,spheroid,precision,:radial,kind,
                                        scaled,logderivative,second_derivative)
     shared!==nothing && return shared
@@ -194,8 +215,8 @@ function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
             derivative=hcat((r.derivative for r in results)...))
     end
     count = 4*length(x)*length(n)
-    c_text = _encode_real_text_scalar(c)
-    x_text = _encode_real_text_vector(x)
+    c_text = _format_fortran_input(c)
+    x_text = _format_fortran_input(x)
     output = fill(UInt8(' '), _QUAD_TEXT_WIDTH*count)
     exponents = zeros(Cint, count)
     status = Ref{Cint}(0)
@@ -205,7 +226,7 @@ function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
         Cint(m), Cint(first(n)), Cint(last(n)), Cint(kind), c_text,
         Cint(length(x)), x_text, Cint(_QUAD_TEXT_WIDTH), output, exponents, status)
     _check_scalar_status(status[])
-    data = reshape(_decode_scaled_real_text_vector(output, exponents, count), 4, length(x), :)
+    data = reshape(_parse_fortran_output(output, exponents, count), 4, length(x), :)
     if kind == 1 || kind == 2
         channel = kind == 1 ? 1 : 3
         return (; value=complex.(data[channel, :, :]), derivative=complex.(data[channel+1, :, :]))

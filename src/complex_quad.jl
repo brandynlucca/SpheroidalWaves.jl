@@ -21,10 +21,10 @@ function _call_complex_quad(prefix, m, n, c, points, mode, option)
     offsets = prefix === :cprolate && mode == 2
     symbol = offsets ? :cprolate_radial_quad_offset_text : Symbol(prefix, "_batch_quad_text")
     pointer = _quad_symbol_pointer(lib, symbol)
-    ctext = _encode_real_text_vector([real(c), imag(c)])
+    ctext = _format_fortran_input([real(c), imag(c)])
     endpoint = mode == 1 ? _angular_endpoint_plan(m,n,c,points,prefix === :cprolate ? :prolate : :oblate) : nothing
     native_points = endpoint === nothing ? points : endpoint.native_points
-    xtext = _encode_real_text_vector(offsets ? BigFloat.(native_points) .- 1 : native_points)
+    xtext = _format_fortran_input(offsets ? _input_bigfloat.(native_points) .- 1 : native_points)
     count = 8 * length(points)
     output = fill(UInt8(' '), _QUAD_TEXT_WIDTH * count)
     exponents = zeros(Cint, count)
@@ -36,7 +36,7 @@ function _call_complex_quad(prefix, m, n, c, points, mode, option)
           m, n, mode, option, length(points), ctext, xtext, _QUAD_TEXT_WIDTH,
           output, exponents, accuracy, status)
     _check_scalar_status(status[])
-    data = reshape(_decode_scaled_real_text_vector(output, exponents, count), 8, :)
+    data = reshape(_parse_fortran_output(output, exponents, count), 8, :)
     if endpoint !== nothing
         value = complex.(data[1,:],data[2,:])
         derivative = complex.(data[3,:],data[4,:])

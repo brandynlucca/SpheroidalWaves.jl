@@ -3,38 +3,38 @@
 # for even modes, or differentiate it at x=0 for odd modes. Orthogonality
 # leaves just v[1] in the integral. No oscillatory quadrature is needed here.
 function _integral_eigenvalue_data(n,c,precision; sensitivity=false)
-    bits = _angular_working_bits(c)
+    bits = _angular_precision(c)
     previous = nothing
-    tolerance = precision===:quad ? big"1e-34" : big"1e-17"
+    tolerance = precision===:quad ? _SWFloat("1e-34") : _SWFloat("1e-17")
     for attempt in 1:4
-        result = setprecision(BigFloat,bits) do
+        result = _with_swprecision(bits) do
             # Avoid an unresolved native eigenvalue at extremely small c.
             # The perturbation has norm <= c^2, so the spherical eigenvalue
             # identifies the same isolated mode well inside the seed tolerance.
-            seed = c<big"1e-20" ? BigFloat(n)*(n+1) : nothing
+            seed = c<_SWFloat("1e-20") ? _SWFloat(n)*(n+1) : nothing
             plan = _guarded_angular_plan(0,n,c,:prolate,precision;eigenvalue_seed=seed)
             origin = _evaluate_coefficient_vector(plan,plan.v,[0])
             ratio = if iseven(n)
-                sqrt(big"2.0")*first(plan.v)/only(origin.value)
+                sqrt(_SWFloat("2.0"))*first(plan.v)/only(origin.value)
             else
-                BigFloat(c)*sqrt(big"2.0"/3)*first(plan.v)/only(origin.derivative)
+                _SWFloat(c)*sqrt(_SWFloat("2.0")/3)*first(plan.v)/only(origin.derivative)
             end
             amplitude = abs(ratio)
-            concentration = BigFloat(c)*amplitude^2/(2BigFloat(pi))
+            concentration = _SWFloat(c)*amplitude^2/(2_SWFloat(pi))
             complement = 1-concentration
             if sensitivity
                 endpoint = only(_evaluate_coefficient_vector(plan,plan.v,[1]).value)
                 # Differentiate the sinc kernel: its quadratic form is
                 # |integral(exp(i*c*t)*psi(t),t=-1..1)|^2/pi.
                 # The Fourier identity at x=1 then gives Lambda'/Lambda.
-                dlog = 2endpoint^2/BigFloat(c)
-                dconcentration = amplitude^2*endpoint^2/BigFloat(pi)
+                dlog = 2endpoint^2/_SWFloat(c)
+                dconcentration = amplitude^2*endpoint^2/_SWFloat(pi)
                 damplitude = if n==0 && c<1//2
                     # Avoid subtracting endpoint^2 - 1/2 = O(c^2).
                     dorigin = _evaluate_coefficient_vector(plan,plan.dv,[0])
                     amplitude*(first(plan.dv)/first(plan.v)-only(dorigin.value)/only(origin.value))
                 else
-                    amplitude*(endpoint^2-1//2)/BigFloat(c)
+                    amplitude*(endpoint^2-1//2)/_SWFloat(c)
                 end
                 (;amplitude,concentration,complement,dlog,dconcentration,damplitude)
             else
@@ -62,7 +62,7 @@ function _integral_parameter(m,n,c,spheroid,precision,operator,form)
     operator===:fourier && form!==:value &&
         throw(ArgumentError("the Fourier operator supports only form=:value"))
     T = precision===:quad ? BigFloat : Float64
-    parameter = T(c)
+    parameter = _input_float(T,c)
     isfinite(parameter) || throw(DomainError(c,"c is not finite at the requested precision"))
     !iszero(c) && iszero(parameter) &&
         throw(DomainError(c,"c rounds to zero at the requested precision; use precision=:quad"))
@@ -84,7 +84,7 @@ function _integral_eigenvalue(m,n,c,spheroid,precision,operator,form)
     form===:value && return T(result.concentration)
     form===:complement && return T(result.complement)
     # Retain a tiny negative logarithm even when concentration rounds to one.
-    logarithm = setprecision(BigFloat,Base.precision(result.concentration)) do
+    logarithm = _with_swprecision(Base.precision(result.concentration)) do
         result.concentration>1//2 ? log1p(-result.complement) : log(result.concentration)
     end
     return T(logarithm)
@@ -136,7 +136,7 @@ function _find_integral_bandwidth(m,n,target,bracket,spheroid,precision,form,
     a = _integral_parameter(m,n,bracket[1],spheroid,precision,:concentration,form)
     b = _integral_parameter(m,n,bracket[2],spheroid,precision,:concentration,form)
     a<b || throw(ArgumentError("bracket must satisfy 0 <= c_lo < c_hi"))
-    y = T(target)
+    y = _input_float(T,target)
     !iszero(target) && iszero(y) && throw(DomainError(target,"target rounds to zero; use precision=:quad or a logarithmic target"))
     isfinite(target) && !isfinite(y) && throw(DomainError(target,"target is not finite at the requested precision; use precision=:quad"))
     form===:complement && isone(y) && !isone(target) &&
@@ -150,21 +150,21 @@ function _find_integral_bandwidth(m,n,target,bracket,spheroid,precision,form,
         return (converged=true,c=a,residual=zero(T),iterations=0,bracket=(a,b),method=:endpoint)
     end
     isfinite(y) || throw(DomainError(target,"target must be finite except log=-Inf"))
-    t = BigFloat(y)
+    t = _SWFloat(y)
     odds = form===:value ? log(t)-log1p(-t) :
            form===:complement ? log1p(-t)-log(t) : t-log(-expm1(t))
     function evaluate(c)
         if iszero(c)
             value = form===:value ? zero(T) : form===:complement ? one(T) : T(-Inf)
-            return (f=BigFloat(-Inf),d=BigFloat(Inf),residual=value-y)
+            return (f=_SWFloat(-Inf),d=_SWFloat(Inf),residual=value-y)
         end
         result = _integral_eigenvalue_data(n,c,precision;sensitivity=use_jacobian)
-        setprecision(BigFloat,Base.precision(result.concentration)) do
+        _with_swprecision(Base.precision(result.concentration)) do
             logvalue = result.concentration>1//2 ? log1p(-result.complement) : log(result.concentration)
             value = form===:value ? result.concentration : form===:complement ? result.complement : logvalue
             (f=logvalue-log(result.complement)-odds,
-             d=use_jacobian ? result.dlog/result.complement : BigFloat(NaN),
-             residual=T(value-BigFloat(y)))
+             d=use_jacobian ? result.dlog/result.complement : _SWFloat(NaN),
+             residual=T(value-_SWFloat(y)))
         end
     end
     left,right = evaluate(a),evaluate(b)
@@ -177,7 +177,7 @@ function _find_integral_bandwidth(m,n,target,bracket,spheroid,precision,form,
     method = :bisection
     for iteration in 1:maxiter
         result = evaluate(c)
-        xtol = T(atol)+T(rtol)*abs(c)
+        xtol = _input_float(T,atol)+_input_float(T,rtol)*abs(c)
         # A small absolute eigenvalue residual alone is insufficient in a tail.
         if iszero(result.f) || (abs(result.f)<=rtol &&
            (b-a<=xtol || (use_jacobian && abs(result.f/result.d)<=xtol)))

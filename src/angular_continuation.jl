@@ -9,14 +9,14 @@ end
 
 function _angular_phase_evaluator(prefix, m, n, precision;endpoint_anchor=nothing,endpoint_coordinate=nothing)
     T = precision === :quad ? BigFloat : Float64
-    points = T[0, 1//4, 1//2, 3//4]
+    points = T[0, 0.25, 0.5, 0.75]
     cache = Dict{Any,Any}()
     lambda_cache = Dict{Any,Any}()
     eigen = (c,degree) -> get!(lambda_cache,(c,degree)) do
         _call_complex_eigenvalue(prefix,m,degree,c;precision)
     end
     use_endpoint = Ref{Union{Nothing,Bool}}(endpoint_anchor)
-    endpoint_point = Ref(endpoint_coordinate === nothing ? zero(T) : T(endpoint_coordinate))
+    endpoint_point = Ref(endpoint_coordinate === nothing ? zero(T) : _input_float(T,endpoint_coordinate))
     sample = (c, degree=n) -> get!(cache,(c,degree)) do
         r = _call_complex_smn_raw(prefix, m, degree, c, points; precision, normalize=true)
         lambda = eigen(c,degree)
@@ -126,7 +126,7 @@ const _complex_mode_cache_key = gensym(:complex_mode_cache)
 
 function _complex_mode_state(prefix,m,n,c,precision)
     T = precision === :quad ? BigFloat : Float64
-    parameter = Complex{T}(c)
+    parameter = _input_float(Complex{T},c)
     isfinite(parameter) || error("c is not finite at the requested precision")
     # Reuse the canonical path across coordinates, radial kinds, and diagnostics.
     # Task-local storage avoids shared mutable continuation state. Backend and
@@ -171,7 +171,7 @@ function _call_complex_smn(prefix, m, n, c, eta; precision=:double, normalize=fa
     iszero(c) && return _spherical_smn_complex(m, n, eta; precision, normalize)
     T = precision === :quad ? BigFloat : Float64
     state = _require_angular_anchor(_complex_mode_state(prefix,m,n,c,precision))
-    result = _call_complex_smn_raw(prefix, m, state.n, Complex{T}(c), eta; precision, normalize)
+    result = _call_complex_smn_raw(prefix, m, state.n, _input_float(Complex{T},c), eta; precision, normalize)
     return _scale_mode_result!(result,_angular_mode_factor(m,n,state,normalize,T))
 end
 
@@ -194,18 +194,18 @@ end
 function _angular_jacobian_evaluator(m, n, c, eta; spheroid, precision, normalize,kind=1)
     _validate_wave_arguments(m,n,c,eta,spheroid,precision,:angular;kind)
     T = precision === :quad ? BigFloat : Float64
-    center = Complex{T}(c)
+    center = _input_float(Complex{T},c)
     prefix = spheroid === :prolate ? :cprolate : :coblate
     state = _require_angular_anchor(_complex_mode_state(prefix,m,n,center,precision))
     phase_evaluate = _angular_phase_evaluator(prefix, m, n, precision)
     cache = Dict{Complex{T}, Any}()
-    return parameter -> get!(cache, Complex{T}(parameter)) do
-        local_state = _transport_angular_phase(phase_evaluate, center, state, Complex{T}(parameter))
+    return parameter -> get!(cache, _input_float(Complex{T},parameter)) do
+        local_state = _transport_angular_phase(phase_evaluate, center, state, _input_float(Complex{T},parameter))
         if kind == 2
-            return _angular_second_kind(m,n,Complex{T}(parameter),eta,spheroid,precision,
+            return _angular_second_kind(m,n,_input_float(Complex{T},parameter),eta,spheroid,precision,
                                         normalize,false,false,false;mode=local_state)
         end
-        result = _call_complex_smn_raw(prefix, m, local_state.n, Complex{T}(parameter), eta; precision, normalize)
+        result = _call_complex_smn_raw(prefix, m, local_state.n, _input_float(Complex{T},parameter), eta; precision, normalize)
         factor = _angular_mode_factor(m,n,local_state,normalize,T) * (isodd(m) ? -1 : 1)
         return _scale_mode_result!(result,factor)
     end
@@ -213,20 +213,25 @@ end
 
 # Eigenvalue and radial finite differences follow the same local branch as the
 # angular stencil, including when the scalar reference path has a cut nearby.
-function _complex_local_evaluator(m,n,c,spheroid,precision;points=nothing,kind=1)
+function _complex_local_evaluator(m,n,c,spheroid,precision;points=nothing,kind=1,normalization=:standard)
     _validate_wave_arguments(m,n,c,points === nothing ? [0] : points,spheroid,precision,
-                             points === nothing ? :angular : :radial;kind)
+                             points === nothing ? :angular : :radial;kind,normalization)
     T = precision === :quad ? BigFloat : Float64
-    center = Complex{T}(c)
+    center = _input_float(Complex{T},c)
     prefix = spheroid === :prolate ? :cprolate : :coblate
     state = _complex_mode_state(prefix,m,n,center,precision)
     evaluate = _angular_phase_evaluator(prefix,m,n,precision;
         endpoint_anchor=state.endpoint_anchor,endpoint_coordinate=state.endpoint_point)
     cache = Dict{Complex{T},Any}()
-    return parameter -> get!(cache,Complex{T}(parameter)) do
-        points !== nothing && _validate_radial_parameter(parameter)
-        local_state = _transport_angular_phase(evaluate,center,state,Complex{T}(parameter))
+    return parameter -> get!(cache,_input_float(Complex{T},parameter)) do
+        points !== nothing && normalization === :standard && _validate_radial_parameter(parameter)
+        local_state = _transport_angular_phase(evaluate,center,state,_input_float(Complex{T},parameter))
         points === nothing && return local_state.lambda
+        if normalization === :static
+            result = _static_radial_values(m,local_state.n,parameter,points,spheroid,precision,kind;eigenvalue_seed=local_state.lambda)
+            factor = _radial_mode_factor(n,local_state)*parameter^(kind==1 ? local_state.n-n : n-local_state.n)
+            return _scale_mode_result!(map(v -> Complex{T}.(v),result),factor)
+        end
         result = _call_complex_rmn_raw(prefix,m,local_state.n,parameter,points;precision,kind)
         return _scale_mode_result!(result,_radial_mode_factor(n,local_state))
     end

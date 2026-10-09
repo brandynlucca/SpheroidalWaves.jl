@@ -1,23 +1,16 @@
-# Ferrers (on-the-cut) Qs on -1 < x < 1. DLMF 30.5.2 and 30.5.4 fix
-# its origin data. The joining sums include the finite extension of the
-# Legendre coefficients below degree m: DLMF 30.8(ii), 30.11.4.
-function _qs_initial_data(m,n,c,spheroid,precision;mode=nothing)
-    rtol = min(big"1e-40",exp(-2BigFloat(abs(c)))*big"1e-40")
-    max_terms = max(512,(n-m)÷2+2ceil(Int,abs(c))+32)
-    plan = _coefficient_plan(m,n,c;spheroid,precision,rtol,max_terms,
-                             eigenvalue_seed=mode === nothing ? nothing : mode.lambda)
-    plan.converged || error("Qs coefficient expansion did not converge")
-    scale = _coefficient_phase(plan,precision;mode)*sqrt(_ferrers_norm2(m,n,BigFloat))
-    d = [scale*v/sqrt(_ferrers_norm2(m,l,BigFloat)) for (v,l) in zip(plan.v,plan.degrees)]
-    dc = [scale*v/sqrt(_ferrers_norm2(m,l,BigFloat)) for (v,l) in zip(plan.dv,plan.degrees)]
+# DLMF 30.11.4, including the finite extension needed for positive order.
+function _coefficient_joining_sums(plan,scale;extend=true)
+    m,n,c,spheroid = plan.m,plan.n,plan.c,plan.spheroid
+    d = [scale*v/sqrt(_ferrers_norm2(m,l,_SWFloat)) for (v,l) in zip(plan.v,plan.degrees)]
+    dc = [scale*v/sqrt(_ferrers_norm2(m,l,_SWFloat)) for (v,l) in zip(plan.dv,plan.degrees)]
     g = (spheroid === :prolate ? 1 : -1)*plan.c^2
     dg = 2*(spheroid === :prolate ? 1 : -1)*plan.c
     # Weighted sum = (n+m)!/(n-m)! * A^(-m).
-    weights = [prod(BigFloat(k) for k in l-m+1:l+m;init=big"1") for l in plan.degrees]
+    weights = [prod(_SWFloat(k) for k in l-m+1:l+m;init=_SWFloat("1")) for l in plan.degrees]
     weighted = sum(d.*weights)
     joining = sum(d)
     dweighted,djoining = sum(dc.*weights),sum(dc)
-    if m > 0 && !iszero(g)
+    if extend && m > 0 && !iszero(g)
         # Work with d_l=(-1)^k a_{n,k}^m, so off-diagonal signs reverse.
         previous,current = zero(g),one(g)
         dprevious,dcurrent = zero(g),zero(g)
@@ -27,24 +20,39 @@ function _qs_initial_data(m,n,c,spheroid,precision;mode=nothing)
             push!(lower,current)
             push!(dlower,dcurrent)
             a = g*(l-m-1)*(l-m)/((2l-3)*(2l-1))
-            shift = g*(1-2BigFloat(l*(l+1)-1+m^2)/((2l-1)*(2l+3)))
+            shift = g*(1-2_SWFloat(l*(l+1)-1+m^2)/((2l-1)*(2l+3)))
             b = l*(l+1)+shift-plan.lambda
             cc = g*(l+m+1)*(l+m+2)/((2l+3)*(2l+5))
             numerator = a*previous+b*current
             bound = abs(a*previous)+(abs(l*(l+1))+abs(shift)+abs(plan.lambda))*abs(current)
-            abs(numerator) > sqrt(eps(BigFloat))*bound ||
-                throw(DomainError(c,"Qs finite coefficient extension is singular or numerically unresolved (DLMF 30.8(ii))"))
+            abs(numerator) > sqrt(eps(_SWFloat))*bound ||
+                throw(DomainError(c,"Positive-order finite coefficient extension is singular or numerically unresolved (DLMF 30.8(ii))"))
             # Differentiate the finite extension, including its normalization.
             dnumerator = (dg/g*a)*previous+a*dprevious+
                          (dg/g*shift-plan.dlambda)*current+b*dcurrent
             dprevious,dcurrent = dcurrent,-dnumerator/cc+numerator*(dg/g)/cc
             previous,current = current,-numerator/cc
         end
-        iszero(current) && throw(DomainError(c,"Qs is undefined: its finite coefficient extension is singular (DLMF 30.8(ii))"))
+        iszero(current) && throw(DomainError(c,"Positive-order finite coefficient extension is singular (DLMF 30.8(ii))"))
         joining += sum(lower)*(first(d)/current)
         djoining += sum(dlower)*(first(d)/current)+
                     sum(lower)*(first(dc)/current-first(d)*dcurrent/current^2)
     end
+    return (;d,dc,weights,weighted,joining,dweighted,djoining,g,dg)
+end
+
+# Ferrers (on-the-cut) Qs on -1 < x < 1. DLMF 30.5.2 and 30.5.4 fix
+# its origin data. The joining sums include the finite extension of the
+# Legendre coefficients below degree m: DLMF 30.8(ii), 30.11.4.
+function _qs_initial_data(m,n,c,spheroid,precision;mode=nothing,rtol=nothing)
+    rtol = min(_SWFloat("1e-40"),exp(-2_SWFloat(abs(c)))*_SWFloat("1e-40"),rtol===nothing ? one(_SWFloat) : rtol)
+    max_terms = max(512,(n-m)÷2+2ceil(Int,abs(c))+32)
+    plan = _coefficient_plan(m,n,c;spheroid,precision,rtol,max_terms,
+                             eigenvalue_seed=mode === nothing ? nothing : mode.lambda)
+    plan.converged || error("Qs coefficient expansion did not converge")
+    scale = _coefficient_phase(plan,precision;mode)*sqrt(_ferrers_norm2(m,n,_SWFloat))
+    sums = _coefficient_joining_sums(plan,scale)
+    (;d,dc,weights,weighted,joining,dweighted,djoining,g,dg) = sums
     # For c=0 the extension vanishes and the factorial Wronskian is exact.
     constant = joining*weighted
     dconstant = djoining*weighted+joining*dweighted
@@ -52,9 +60,9 @@ function _qs_initial_data(m,n,c,spheroid,precision;mode=nothing)
         error("Qs normalization is singular or numerically unresolved")
     tail = max(sum(abs,d[max(1,end-3):end])/abs(joining),
                sum(abs,(d.*weights)[max(1,end-3):end])/abs(weighted))
-    tail <= big"1e-34" || error("Qs joining sums did not converge to the required precision")
-    origin = _evaluate_coefficient_vector(plan,scale.*plan.v,[big"0"])
-    dorigin = _evaluate_coefficient_vector(plan,scale.*plan.dv,[big"0"])
+    tail <= _SWFloat("1e-34") || error("Qs joining sums did not converge to the required precision")
+    origin = _evaluate_coefficient_vector(plan,scale.*plan.v,[_SWFloat("0")])
+    dorigin = _evaluate_coefficient_vector(plan,scale.*plan.dv,[_SWFloat("0")])
     if iseven(n-m)
         y,dy = zero(constant),constant/only(origin.value)
         z,dz = zero(constant),(dconstant-dy*only(dorigin.value))/only(origin.value)
@@ -65,7 +73,7 @@ function _qs_initial_data(m,n,c,spheroid,precision;mode=nothing)
     isfinite(y) && isfinite(dy) || error("Qs origin normalization is numerically unresolved")
     # P ~ a*(1-x^2)^(m/2) at +1. This also fixes the direction of Q's
     # logarithmic (m=0) or algebraic (m>0) endpoint divergence.
-    a = (-1)^m*weighted/(BigFloat(2)^m*factorial(big(m)))
+    a = (-1)^m*weighted/(_SWFloat(2)^m*factorial(big(m)))
     amplitude = constant/(m == 0 ? a : 2m*a)
     return (;lambda=plan.lambda,dlambda=plan.dlambda,g,dg,y,dy,z,dz,amplitude,constant,dconstant,plan)
 end
@@ -77,7 +85,7 @@ end
 function _qs_step(m,lambda,g,x,y,dy,h;sensitivity=nothing)
     u = (1-x)*(1+x)
     a = (u^2,-4x*u,6x^2-2,4x,one(x))
-    b = (-2x*u,6x^2-2,6x,big"2")
+    b = (-2x*u,6x^2-2,6x,_SWFloat("2"))
     d = ((lambda-g*x^2)*u-m^2,-2x*lambda-2g*x+4g*x^3,-lambda-g+6g*x^2,4g*x,g)
     coefficients = [y,dy]
     if sensitivity !== nothing
@@ -86,7 +94,7 @@ function _qs_step(m,lambda,g,x,y,dy,h;sensitivity=nothing)
         dc = ((dlambda-dg*x^2)*u,-2x*dlambda-2dg*x+4dg*x^3,
               -dlambda-dg+6dg*x^2,4dg*x,dg)
     end
-    tolerance = big"1e-45"
+    tolerance = _SWFloat("1e-45")
     for k in 0:254
         total = zero(y)
         for j in 1:min(4,k)
@@ -146,15 +154,15 @@ function _qs_values(m,n,c,points,spheroid,precision;sensitivity=false,mode=nothi
     values = fill(zero(data.y),length(points))
     derivatives,seconds = similar(values),similar(values)
     tangents,dtangents = similar(values),similar(values)
-    x,y,dy = big"0",data.y,data.dy
+    x,y,dy = _SWFloat("0"),data.y,data.dy
     z,dz = data.z,data.dz
     step_limit = inv(1+sqrt(abs(data.lambda))+abs(c)+m)
     for i in sortperm(abs.(points))
-        target = abs(BigFloat(points[i]))
+        target = abs(_SWFloat(points[i]))
         parity = points[i] < 0 && iseven(n-m) ? -1 : 1
         dparity = points[i] < 0 ? -parity : parity
         if target == 1
-            divergent = _directed_infinity(data.amplitude,c isa Real,BigFloat)
+            divergent = _directed_infinity(data.amplitude,c isa Real,_SWFloat)
             values[i],derivatives[i],seconds[i] = parity*divergent,dparity*divergent,parity*divergent
             # Qs is singular at the endpoint itself. Do not infer a parameter
             # derivative by subtracting infinities or just its leading amplitude.
@@ -184,20 +192,20 @@ function _qs_values(m,n,c,points,spheroid,precision;sensitivity=false,mode=nothi
     return sensitivity ? (;result...,dvalue_dc=tangents,dderivative_dc=dtangents,plan=data.plan) : result
 end
 
-_qs_working_bits(c) = max(256,Base.precision(BigFloat)+64,256+ceil(Int,5abs(c)))
+_qs_precision(c) = max(256,Base.precision(_SWFloat)+64,256+ceil(Int,5abs(c)))
 
 function _angular_second_kind(m,n,c,points,spheroid,precision,normalize,scaled,logderivative,second_derivative;mode=nothing)
     # Unit-integral normalization is not defined for the singular family.
     normalize && throw(ArgumentError("normalize=true is only defined for angular kind=1; Qs uses the DLMF second-kind normalization"))
     R = precision === :quad ? BigFloat : Float64
     T = c isa Real ? R : Complex{R}
-    parameter = c isa Real ? R(c) : Complex{R}(c)
-    coordinates = BigFloat.(points)
+    parameter = c isa Real ? _input_float(R,c) : _input_float(Complex{R},c)
+    coordinates = _SWFloat.(points)
     # Extra guard digits protect coefficient sums and propagation, including
     # oblate solutions concentrated near an endpoint. Quad inputs never pass
     # through Float64. This is still a double/quad API, not arbitrary precision.
-    bits = _qs_working_bits(parameter)
-    result = setprecision(BigFloat,bits) do
+    bits = _qs_precision(parameter)
+    result = _with_swprecision(bits) do
         _qs_values(m,n,parameter,coordinates,spheroid,precision;mode)
     end
     selected = second_derivative ? result : (;result.value,result.derivative)

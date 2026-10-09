@@ -62,7 +62,7 @@ function eigenvalue_sweep(m::Integer,
     end
 
     T = precision === :quad ? BigFloat : Float64
-    cvals = T.(c_grid)
+    cvals = _input_float.(T,c_grid)
     all(isfinite, cvals) || error("c_grid must be finite")
     if length(cvals) > 1
         diffs = diff(cvals)
@@ -203,7 +203,7 @@ function eigenvalue_sweep(m::Integer,n::Integer,c_grid::AbstractVector{<:Complex
     branch_window >= 0 || error("branch_window must be nonnegative")
     evaluator === nothing || throw(ArgumentError("complex continuation requires native angular profiles; custom eigenvalue-only evaluators are unsupported"))
     T = precision === :quad ? BigFloat : Float64
-    cvals = Complex{T}.(c_grid)
+    cvals = _input_float.(Complex{T},c_grid)
     all(isfinite,cvals) || error("c_grid must be finite at the requested precision")
     prefix = spheroid === :prolate ? :cprolate : :coblate
     lambdas = similar(cvals)

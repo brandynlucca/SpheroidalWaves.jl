@@ -6,7 +6,7 @@ _near_angular_endpoint(x) = 0 < 1-abs(x) < 1//65536
 function _angular_endpoint_plan(m, n, c, points, spheroid; precision=:quad)
     indices = findall(_near_angular_endpoint, points)
     isempty(indices) && return nothing
-    parameter = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
+    parameter = c isa Real ? _input_bigfloat(c) : _input_float(Complex{BigFloat},c)
     # This plan is attached to a raw native evaluation. Its degree has already
     # been selected by the caller; do not continue that label a second time.
     native_lambda = parameter isa Complex ?
@@ -20,11 +20,11 @@ function _angular_endpoint_plan(m, n, c, points, spheroid; precision=:quad)
     anchor_distance = BigFloat(2)^(-ceil(Int,log2(scale)))
     anchor = 1-anchor_distance
     anchor == 1 && error("Angular endpoint anchor exceeds the native coordinate resolution")
-    native_points = BigFloat.(points)
+    native_points = _input_bigfloat.(points)
     native_points[indices] .= anchor
-    radius = max(anchor_distance,maximum(i -> 1-abs(BigFloat(points[i])),indices))
+    radius = max(anchor_distance,maximum(i -> 1-abs(_input_bigfloat(points[i])),indices))
     coefficients = _angular_endpoint_coefficients(m,lambda,q,radius)
-    (;indices,points=BigFloat.(points),native_points,coefficients,anchor_distance)
+    (;indices,points=_input_bigfloat.(points),native_points,coefficients,anchor_distance)
 end
 
 function _angular_endpoint_coefficients(m,lambda,q,radius)
@@ -66,14 +66,14 @@ function _angular_endpoint_reconstruct!(value, derivative, plan, m, n)
     plan === nothing && return nothing
     d0 = plan.anchor_distance
     anchor_shape = _angular_endpoint_polynomial(plan.coefficients,d0).value
-    anchor_factor = (d0*(2-d0))^(m//2)
+    anchor_factor = (d0*(2-d0))^(BigFloat(m)/2)
     for i in plan.indices
         x = abs(plan.points[i])
         distance = 1-x
         u = distance*(1+x)
         shape = _angular_endpoint_polynomial(plan.coefficients,distance)
         amplitude = value[i]/(anchor_factor*anchor_shape)
-        factor = u^(m//2)
+        factor = u^(BigFloat(m)/2)
         value[i] = amplitude*factor*shape.value
         derivative[i] = -amplitude*factor*(shape.derivative+m*x/u*shape.value)
         if plan.points[i] < 0

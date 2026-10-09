@@ -78,7 +78,7 @@ function _spherical_smn_real(m::Integer, n::Integer, eta::AbstractVector{<:Real}
     value = Vector{T}(undef, length(eta))
     derivative = similar(value)
     for (i, x) in enumerate(eta)
-        value[i], derivative[i] = _spherical_angular_point(m, n, T(x), normalize)
+        value[i], derivative[i] = _spherical_angular_point(m, n, _input_float(T,x), normalize)
     end
     return (; value, derivative)
 end

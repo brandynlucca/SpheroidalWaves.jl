@@ -59,7 +59,7 @@ function angular_zeros(m::Integer,n::Integer,c::Real;stationary::Bool=false,
     _validate_wave_arguments(m,n,c,[0],spheroid,precision,:angular)
     stationary && m == n == 0 && iszero(c) && throw(DomainError(c,"constant function has no isolated stationary points"))
     T=precision === :quad ? BigFloat : Float64
-    tolerance=rtol === nothing ? T(10)^(precision === :quad ? -28 : -12) : T(rtol)
+    tolerance=rtol === nothing ? T(10)^(precision === :quad ? -28 : -12) : _input_float(T,rtol)
     isfinite(tolerance) && tolerance > 0 || throw(ArgumentError("rtol must be finite and positive"))
     margin=precision === :quad ? T(2)^(-108) : 16eps(T)
     !stationary && n == m && return T[]
@@ -86,9 +86,9 @@ function radial_zeros(m::Integer,n::Integer,c::Real,interval::Tuple{<:Real,<:Rea
     kind in (1,2) || throw(ArgumentError("real zero searches support radial kinds 1 and 2"))
     _validate_wave_arguments(m,n,c,collect(interval),spheroid,precision,:radial;kind)
     T=precision === :quad ? BigFloat : Float64
-    a,b=T.(interval)
+    a,b=_input_float.(T,interval)
     a < b && (spheroid !== :prolate || a > 1) || throw(ArgumentError("require a nonsingular interval with a < b"))
-    tolerance=rtol === nothing ? T(10)^(precision === :quad ? -28 : -12) : T(rtol)
+    tolerance=rtol === nothing ? T(10)^(precision === :quad ? -28 : -12) : _input_float(T,rtol)
     isfinite(tolerance) && tolerance > 0 || throw(ArgumentError("rtol must be finite and positive"))
     evaluate(x) = real.(getproperty(rmn(m,n,c,x;spheroid,precision,kind,scaled=true),stationary ? :derivative : :value).mantissa)
     initial=max(32,4(n-m+1),ceil(Int,16abs(c)*(b-a)/T(pi)))
