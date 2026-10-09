@@ -12,11 +12,10 @@ using SpheroidalWaves, Test
             (jacobian_rmn, (0, 0, c, [2+0.125im])))
             ordinary = jac(args...; options...)
             reported = jac(args...; options..., diagnostics = true)
-            @test isequal(reported, jac(args...; options..., with_metadata = true))
             @test isequal(ordinary, jac(args...; options..., diagnostics = false))
-            # The explicit new keyword takes precedence over its compatibility alias.
-            @test isequal(ordinary, jac(args...; options..., with_metadata = true, diagnostics = false))
-            @test isequal(reported, jac(args...; options..., with_metadata = false, diagnostics = true))
+            @test any(name -> startswith(string(name), "metadata"), keys(reported))
+            @test_throws MethodError jac(args...; options..., with_metadata = true)
+            @test_throws MethodError jac(args...; options..., diagnostics = true, with_metadata = false)
         end
     end
 end
@@ -302,13 +301,13 @@ end
         # stencil is returned and that poor consistency triggers refinement.
         steps = Float64[]
         calc(h) = (push!(steps, h); ((1+h)^3-(1-h)^3)/(2h))
-        derivative, md = SW._finite_difference_with_metadata(calc, 0.5;
+        derivative, md = SW._finite_difference_diagnostics(calc, 0.5;
             precision, adaptive = true, rtol = 1e-6, atol = 1e-10)
         @test steps == [0.5, 0.25, 0.125]
         @test derivative == 3 + 0.125^2
         @test md.step_used == 0.125
         empty!(steps)
-        derivative, md = SW._finite_difference_with_metadata(calc, 0.5;
+        derivative, md = SW._finite_difference_diagnostics(calc, 0.5;
             precision, adaptive = false, rtol = 1e-6, atol = 1e-10)
         @test steps == [0.5, 0.25]
         @test derivative == 3.25

@@ -371,7 +371,7 @@ function _radial_analytic_wave(m, n, c, points, spheroid, precision, kind, scale
 end
 
 function _radial_analytic_jacobian(m, n, c, points, spheroid, precision, kind,
-        with_metadata; normalization = :standard)
+        diagnostics; normalization = :standard)
     result, plan = if normalization === :static
         _with_swprecision(_static_precision(m, n, c)) do
             if iszero(c)
@@ -412,13 +412,13 @@ function _radial_analytic_jacobian(m, n, c, points, spheroid, precision, kind,
     mv, md = metadata(value), metadata(derivative)
     if c isa Real
         output = (; dvalue_dc = value, dderivative_dc = derivative)
-        return with_metadata ?
+        return diagnostics ?
                (; output..., metadata_value = mv, metadata_derivative = md) : output
     end
     output = (;
         dvalue_dcreal = value, dvalue_dcimag = complex.(-imag.(value), real.(value)),
         dderivative_dcreal = derivative, dderivative_dcimag = complex.(-imag.(derivative), real.(derivative)))
-    return with_metadata ?
+    return diagnostics ?
            (; output..., metadata_value_dcreal = mv, metadata_value_dcimag = mv,
         metadata_derivative_dcreal = md, metadata_derivative_dcimag = md) : output
 end

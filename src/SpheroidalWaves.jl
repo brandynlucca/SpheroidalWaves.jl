@@ -345,7 +345,7 @@ function _jacobian_metadata(
     )
 end
 
-function _finite_difference_with_metadata(calc::Function, step::Real; precision::Symbol,
+function _finite_difference_diagnostics(calc::Function, step::Real; precision::Symbol,
         adaptive::Bool, rtol::Real, atol::Real)
     d_h = calc(step)
     d_h2 = calc(step / 2)
@@ -1423,7 +1423,7 @@ jacobian_eigen(0, 2, 1.0; operator=:concentration, diagnostics=true)
 """
 function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double, h = nothing,
-        with_metadata::Bool = false, diagnostics::Bool = with_metadata, adaptive::Bool = true,
+        diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10,
         operator::Symbol = :separation, form::Symbol = :value,
         order::Integer = 1)
@@ -1449,7 +1449,7 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
             fm = eigenvalue(m, n, cm; spheroid = spheroid, precision = precision)
             (fp - fm) / (2 * s)
         end
-        derivative, metadata = _finite_difference_with_metadata(
+        derivative, metadata = _finite_difference_diagnostics(
             calc, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
         return diagnostics ? (derivative = derivative, metadata = metadata) : derivative
@@ -1465,10 +1465,10 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
             fm = evaluate(c-s*im)
             (fp - fm) / (2 * s)
         end
-        d_dcreal, metadata_dcreal = _finite_difference_with_metadata(
+        d_dcreal, metadata_dcreal = _finite_difference_diagnostics(
             calc_re, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
-        d_dcimag, metadata_dcimag = _finite_difference_with_metadata(
+        d_dcimag, metadata_dcimag = _finite_difference_diagnostics(
             calc_im, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
 
@@ -1520,7 +1520,7 @@ function jacobian_smn(
         m::Integer, n::Integer, c::Union{Real, Complex}, eta::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false, h = nothing,
         kind::Integer = 1,
-        with_metadata::Bool = false, diagnostics::Bool = with_metadata, adaptive::Bool = true,
+        diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
@@ -1554,10 +1554,10 @@ function jacobian_smn(
             sm = evaluate(c-s)
             (sp.derivative .- sm.derivative) ./ (2 * s)
         end
-        dvalue_dc, metadata_value = _finite_difference_with_metadata(
+        dvalue_dc, metadata_value = _finite_difference_diagnostics(
             calc_value, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
-        dderivative_dc, metadata_derivative = _finite_difference_with_metadata(
+        dderivative_dc, metadata_derivative = _finite_difference_diagnostics(
             calc_derivative, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
         if diagnostics
@@ -1593,16 +1593,16 @@ function jacobian_smn(
             (sp.derivative .- sm.derivative) ./ (2 * s)
         end
 
-        dvalue_dcreal, metadata_value_dcreal = _finite_difference_with_metadata(
+        dvalue_dcreal, metadata_value_dcreal = _finite_difference_diagnostics(
             calc_value_re, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
-        dvalue_dcimag, metadata_value_dcimag = _finite_difference_with_metadata(
+        dvalue_dcimag, metadata_value_dcimag = _finite_difference_diagnostics(
             calc_value_im, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
-        dderivative_dcreal, metadata_derivative_dcreal = _finite_difference_with_metadata(
+        dderivative_dcreal, metadata_derivative_dcreal = _finite_difference_diagnostics(
             calc_derivative_re, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
-        dderivative_dcimag, metadata_derivative_dcimag = _finite_difference_with_metadata(
+        dderivative_dcimag, metadata_derivative_dcimag = _finite_difference_diagnostics(
             calc_derivative_im, step; precision = precision,
             adaptive = adaptive, rtol = rtol, atol = atol)
 
@@ -1662,7 +1662,7 @@ For order 1 and complex `c = a + ib`, returns:
 function jacobian_rmn(
         m::Integer, n::Integer, c::Union{Real, Complex}, x::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1, h = nothing,
-        with_metadata::Bool = false, diagnostics::Bool = with_metadata, adaptive::Bool = true,
+        diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1, normalization::Symbol = :standard)
     _validate_precision(precision)
     normalization === :standard && _validate_radial_parameter(c)
@@ -1675,7 +1675,7 @@ function jacobian_rmn(
     h === nothing && return _radial_analytic_jacobian(
         m, n, c, x, spheroid, precision, kind, diagnostics; normalization)
     step = _resolve_jacobian_step(c, h, precision)
-    differentiate = _finite_difference_with_metadata
+    differentiate = _finite_difference_diagnostics
     if c isa Real
         T = precision === :quad ? BigFloat : Float64
         c = _input_float(T, c)
@@ -2135,7 +2135,7 @@ function jacobian_smn(
         m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         kind::Integer = 1, h = nothing,
-        with_metadata::Bool = false, diagnostics::Bool = with_metadata, adaptive::Bool = true,
+        diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :angular, kind, normalize, :standard,
@@ -2146,7 +2146,7 @@ function jacobian_rmn(
         m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1,
         normalization::Symbol = :standard, h = nothing,
-        with_metadata::Bool = false, diagnostics::Bool = with_metadata, adaptive::Bool = true,
+        diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :radial, kind, false, normalization,

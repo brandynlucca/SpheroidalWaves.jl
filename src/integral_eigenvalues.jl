@@ -96,7 +96,7 @@ function _integral_eigenvalue(m, n, c, spheroid, precision, operator, form)
 end
 
 function _integral_eigen_jacobian(m, n, c, spheroid, precision, operator, form,
-        h, with_metadata, adaptive, rtol, atol)
+        h, diagnostics, adaptive, rtol, atol)
     parameter = _integral_parameter(m, n, c, spheroid, precision, operator, form)
     T = typeof(parameter)
     if h !== nothing
@@ -110,9 +110,9 @@ function _integral_eigen_jacobian(m, n, c, spheroid, precision, operator, form,
         calc(s) = iszero(parameter) ?
                   (-3f(parameter)+4f(parameter+s)-f(parameter+2s))/(2s) :
                   (f(parameter+s)-f(parameter-s))/(2s)
-        derivative, metadata = _finite_difference_with_metadata(
+        derivative, metadata = _finite_difference_diagnostics(
             calc, step; precision, adaptive, rtol, atol)
-        return with_metadata ? (; derivative, metadata) : derivative
+        return diagnostics ? (; derivative, metadata) : derivative
     end
     if iszero(parameter)
         derivative = if operator===:fourier
@@ -134,7 +134,7 @@ function _integral_eigen_jacobian(m, n, c, spheroid, precision, operator, form,
         finite_flag = isfinite(derivative),
         conditioning_flag = isfinite(derivative) ? :good : :singular,
         suggested_action = isfinite(derivative) ? :accept : :singular_limit)
-    return with_metadata ? (; derivative, metadata) : derivative
+    return diagnostics ? (; derivative, metadata) : derivative
 end
 
 # Invert log(Lambda/(1-Lambda)), which remains sensitive in either tail.

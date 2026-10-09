@@ -44,7 +44,7 @@ end
 
 function _complex_coordinate_jacobian(
         m, n, c, points, spheroid, precision, target, kind, normalize, normalization,
-        h, with_metadata, adaptive, rtol, atol, order)
+        h, diagnostics, adaptive, rtol, atol, order)
     _validate_jacobian_tolerances(rtol, atol)
     _validate_complex_coordinates(
         m, n, c, points, spheroid, precision, target; kind, normalization)
@@ -53,7 +53,7 @@ function _complex_coordinate_jacobian(
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
     order==2 && return _wave_curvature(
         m, n, c, points, spheroid, precision, kind, normalize, target,
-        h, with_metadata, adaptive, rtol, atol; normalization)
+        h, diagnostics, adaptive, rtol, atol; normalization)
     R = precision===:quad ? BigFloat : Float64
     T = Complex{R}
     if h===nothing
@@ -80,7 +80,7 @@ function _complex_coordinate_jacobian(
         function difference(direction, index)
             estimate(s) = T[(a[index]-b[index])/(2s)
                             for (a, b) in zip(sample(c+direction*s).states, sample(c-direction*s).states)]
-            _finite_difference_with_metadata(
+            _finite_difference_diagnostics(
                 estimate, step; precision, adaptive, rtol, atol)
         end
         value, mv = difference(1, 1)
@@ -92,12 +92,12 @@ function _complex_coordinate_jacobian(
     end
     if c isa Real
         result = (; dvalue_dc = value, dderivative_dc = derivative)
-        return with_metadata ?
+        return diagnostics ?
                (; result..., metadata_value = mv, metadata_derivative = md) : result
     end
     result = (; dvalue_dcreal = value, dvalue_dcimag = iv,
         dderivative_dcreal = derivative, dderivative_dcimag = id)
-    return with_metadata ?
+    return diagnostics ?
            (; result..., metadata_value_dcreal = mv, metadata_value_dcimag = miv,
         metadata_derivative_dcreal = md, metadata_derivative_dcimag = mid) : result
 end
@@ -128,7 +128,7 @@ function _parameter_curvature(evaluate, c, precision, h, adaptive, rtol, atol;
         center = sample(parameter)
         sum(w .* (sample(z) .- center) for (w, z) in zip(weights, grid)) ./ (12s)
     end
-    value, metadata = _finite_difference_with_metadata(
+    value, metadata = _finite_difference_diagnostics(
         estimate, step; precision, adaptive, rtol, atol)
     # Identical nonzero samples can hide a small second derivative after rounding.
     # Report this loss of resolution instead of treating a flat stencil as evidence.
@@ -145,7 +145,7 @@ function _parameter_curvature(evaluate, c, precision, h, adaptive, rtol, atol;
 end
 
 function _eigen_curvature(m, n, c, spheroid, precision, operator, form,
-        h, with_metadata, adaptive, rtol, atol)
+        h, diagnostics, adaptive, rtol, atol)
     operator === :separation ?
     _validate_wave_arguments(m, n, c, [0], spheroid, precision, :angular) :
     _integral_parameter(m, n, c, spheroid, precision, operator, form)
@@ -172,14 +172,14 @@ function _eigen_curvature(m, n, c, spheroid, precision, operator, form,
             nonnegative = operator!==:separation)
     end
     if c isa Real
-        return with_metadata ? (; derivative = value, metadata) : value
+        return diagnostics ? (; derivative = value, metadata) : value
     end
     result = (; d2_dcreal2 = value, d2_dcreal_dcimag = im*value, d2_dcimag2 = -value)
-    return with_metadata ? (; result..., metadata) : result
+    return diagnostics ? (; result..., metadata) : result
 end
 
 function _wave_curvature(m, n, c, points, spheroid, precision, kind, normalize, target,
-        h, with_metadata, adaptive, rtol, atol; normalization = :standard)
+        h, diagnostics, adaptive, rtol, atol; normalization = :standard)
     endpoints = m==1 && kind==1 ?
                 findall(
         x -> isreal(x) && (target === :angular ? abs(x)==1 : spheroid === :prolate && x==1),
@@ -216,7 +216,7 @@ function _wave_curvature(m, n, c, points, spheroid, precision, kind, normalize, 
         d2derivative_dcreal2 = derivative, d2derivative_dcreal_dcimag = complex.(
             -imag.(derivative), real.(derivative)),
         d2derivative_dcimag2 = -derivative)
-    return with_metadata ? (; result..., metadata) : result
+    return diagnostics ? (; result..., metadata) : result
 end
 
 function _endpoint_parameter_sensitivity(
@@ -257,21 +257,21 @@ function _coefficient_derivative_metadata(plan, value)
         suggested_action = good ? :accept : :use_quad)
 end
 
-function _coefficient_eigen_jacobian(m, n, c, spheroid, precision, with_metadata)
+function _coefficient_eigen_jacobian(m, n, c, spheroid, precision, diagnostics)
     plan = _sensitivity_plan(m, n, c, spheroid, precision)
     T = precision === :quad ? BigFloat : Float64
     value = c isa Real ? T(plan.dlambda) : Complex{T}(plan.dlambda)
     metadata = _coefficient_derivative_metadata(plan, value)
     if c isa Real
-        return with_metadata ? (; derivative = value, metadata) : value
+        return diagnostics ? (; derivative = value, metadata) : value
     end
     result = (d_dcreal = value, d_dcimag = im*value)
-    return with_metadata ?
+    return diagnostics ?
            (; result..., metadata_dcreal = metadata, metadata_dcimag = metadata) : result
 end
 
 function _coefficient_angular_jacobian(
-        m, n, c, eta, spheroid, precision, normalize, with_metadata; regular_factor = false)
+        m, n, c, eta, spheroid, precision, normalize, diagnostics; regular_factor = false)
     _validate_wave_arguments(m, n, c, eta, spheroid, precision, :angular)
     T = precision === :quad ? BigFloat : Float64
     parameter = c isa Real ? _input_float(T, c) : _input_float(Complex{T}, c)
@@ -293,17 +293,17 @@ function _coefficient_angular_jacobian(
     md = _coefficient_derivative_metadata(plan, derivative)
     if c isa Real
         result = (dvalue_dc = value, dderivative_dc = derivative)
-        return with_metadata ?
+        return diagnostics ?
                (; result..., metadata_value = mv, metadata_derivative = md) : result
     end
     result = (dvalue_dcreal = value, dvalue_dcimag = complex.(-imag.(value), real.(value)),
         dderivative_dcreal = derivative, dderivative_dcimag = complex.(-imag.(derivative), real.(derivative)))
-    return with_metadata ?
+    return diagnostics ?
            (; result..., metadata_value_dcreal = mv, metadata_value_dcimag = mv,
         metadata_derivative_dcreal = md, metadata_derivative_dcimag = md) : result
 end
 
-function _qs_angular_jacobian(m, n, c, eta, spheroid, precision, normalize, with_metadata)
+function _qs_angular_jacobian(m, n, c, eta, spheroid, precision, normalize, diagnostics)
     normalize &&
         throw(ArgumentError("normalize=true is only defined for angular kind=1; Qs uses the DLMF second-kind normalization"))
     T = precision === :quad ? BigFloat : Float64
@@ -320,12 +320,12 @@ function _qs_angular_jacobian(m, n, c, eta, spheroid, precision, normalize, with
     mv, md = metadata(value), metadata(derivative)
     if c isa Real
         output = (dvalue_dc = value, dderivative_dc = derivative)
-        return with_metadata ?
+        return diagnostics ?
                (; output..., metadata_value = mv, metadata_derivative = md) : output
     end
     output = (dvalue_dcreal = value, dvalue_dcimag = im .* value,
         dderivative_dcreal = derivative, dderivative_dcimag = im .* derivative)
-    return with_metadata ?
+    return diagnostics ?
            (; output..., metadata_value_dcreal = mv, metadata_value_dcimag = mv,
         metadata_derivative_dcreal = md, metadata_derivative_dcimag = md) : output
 end
