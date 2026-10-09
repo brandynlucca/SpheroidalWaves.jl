@@ -13,7 +13,8 @@ cd ${WORKSPACE}/srcdir/SpheroidalWaves*
 cmake -S . -B build-binarybuilder \
     -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TARGET_TOOLCHAIN} \
     -DCMAKE_INSTALL_PREFIX=${prefix} \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_BUILD_TYPE=Release \
+    -DSWF_BUILD_TESTS=OFF
 cmake --build build-binarybuilder --parallel ${nproc}
 cmake --install build-binarybuilder
 install_license LICENSE
