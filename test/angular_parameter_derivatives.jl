@@ -30,7 +30,7 @@ using SpheroidalWaves,Test
         x=T(3)/10
         for (m,n,cr,ci,spheroid,v,d) in references
             c=ci=="0" ? parse(T,cr) : complex(parse(T,cr),parse(T,ci))
-            j=jacobian_smn(m,n,c,[-x,x];precision,spheroid,kind=2,with_metadata=true)
+            j=jacobian_smn(m,n,c,[-x,x];precision,spheroid,kind=2,diagnostics=true)
             value=c isa Real ? j.dvalue_dc : j.dvalue_dcreal
             derivative=c isa Real ? j.dderivative_dc : j.dderivative_dcreal
             metadata=c isa Real ? j.metadata_value : j.metadata_value_dcreal
@@ -49,7 +49,7 @@ using SpheroidalWaves,Test
             j=jacobian_smn(1,2,zero(T),[-x,x];precision,spheroid,kind=2)
             @test all(iszero,j.dvalue_dc) && all(iszero,j.dderivative_dc)
         end
-        j=jacobian_smn(0,0,T(1),T[-1,1];precision,kind=2,with_metadata=true)
+        j=jacobian_smn(0,0,T(1),T[-1,1];precision,kind=2,diagnostics=true)
         @test all(isnan,j.dvalue_dc) && all(isnan,j.dderivative_dc)
         @test !j.metadata_value.finite_flag && j.metadata_value.conditioning_flag===:poor
 

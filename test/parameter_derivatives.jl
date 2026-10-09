@@ -1,5 +1,23 @@
 using SpheroidalWaves, Test
 
+@testset "Jacobian diagnostics keyword" begin
+    for c in (1.25,1.25+0.125im), options in ((;),(;h=1e-4,adaptive=false),(;order=2,h=1e-3,adaptive=false))
+        for (jac,args) in ((jacobian_eigen,(0,0,c)),
+                           (jacobian_smn,(0,0,c,[0.25])),
+                           (jacobian_rmn,(0,0,c,[2.])),
+                           (jacobian_smn,(0,0,c,[0.25+0.125im])),
+                           (jacobian_rmn,(0,0,c,[2+0.125im])))
+            ordinary = jac(args...;options...)
+            reported = jac(args...;options...,diagnostics=true)
+            @test isequal(reported,jac(args...;options...,with_metadata=true))
+            @test isequal(ordinary,jac(args...;options...,diagnostics=false))
+            # The explicit new keyword takes precedence over its compatibility alias.
+            @test isequal(ordinary,jac(args...;options...,with_metadata=true,diagnostics=false))
+            @test isequal(reported,jac(args...;options...,with_metadata=false,diagnostics=true))
+        end
+    end
+end
+
 @testset "Static radial sensitivities" begin
     offsets = collect(-4:4)
     first_weights,second_weights = SpheroidalWaves._difference_weights(offsets)
@@ -10,8 +28,8 @@ using SpheroidalWaves, Test
             h = big"0.001"
             wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
             samples = [rmn(1,2,wide+k*h,[big"2"];spheroid,precision=:quad,kind,normalization=:static) for k in offsets]
-            first = jacobian_rmn(1,2,c,[T(2)];spheroid,precision,kind,normalization=:static,with_metadata=true)
-            second = jacobian_rmn(1,2,c,[T(2)];spheroid,precision,kind,normalization=:static,order=2,with_metadata=true)
+            first = jacobian_rmn(1,2,c,[T(2)];spheroid,precision,kind,normalization=:static,diagnostics=true)
+            second = jacobian_rmn(1,2,c,[T(2)];spheroid,precision,kind,normalization=:static,order=2,diagnostics=true)
             for (field,a,b) in ((:value,:dvalue_dc,:d2value_dc2),(:derivative,:dderivative_dc,:d2derivative_dc2))
                 first_value = c isa Real ? getproperty(first,a) : getproperty(first,field===:value ? :dvalue_dcreal : :dderivative_dcreal)
                 second_value = c isa Real ? getproperty(second,b) : getproperty(second,field===:value ? :d2value_dcreal2 : :d2derivative_dcreal2)
@@ -32,7 +50,7 @@ using SpheroidalWaves, Test
     end
     for precision in (:double,:quad), c in (1.25,1.25+0im,1.25+0.125im)
         for (jac,x) in ((jacobian_smn,-1.),(jacobian_smn,1.),(jacobian_rmn,1.))
-            result = jac(1,2,c,[x];precision,order=2,with_metadata=true)
+            result = jac(1,2,c,[x];precision,order=2,diagnostics=true)
             d = c isa Real ? result.d2derivative_dc2 : result.d2derivative_dcreal2
             @test isinf(only(d)) && !isnan(only(d))
             @test result.metadata.conditioning_flag === :singular
@@ -67,7 +85,7 @@ end
         for c in (T(1.25),complex(T(1.25),T(0.125)))
             wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
             h = big"0.0001"
-            e = jacobian_eigen(1,2,c;spheroid,precision,order=2,with_metadata=true)
+            e = jacobian_eigen(1,2,c;spheroid,precision,order=2,diagnostics=true)
             ev = c isa Real ? e.derivative : e.d2_dcreal2
             @test ev ≈ reference(z -> eigenvalue(1,2,z;spheroid,precision=:quad),wide,h) rtol=tol
             @test e.metadata.method === :differenced_sensitivity && e.metadata.finite_flag
@@ -77,7 +95,7 @@ end
                 (;d2_dcreal2=ev,d2_dcreal_dcimag=im*ev,d2_dcimag2=-ev))
             for (f,jac,point,kinds) in ((smn,jacobian_smn,T(0.3),(1,2)),(rmn,jacobian_rmn,T(2),(1,2,3,4)))
                 for kind in kinds
-                    j = jac(1,2,c,[point];spheroid,precision,kind,order=2,with_metadata=true)
+                    j = jac(1,2,c,[point];spheroid,precision,kind,order=2,diagnostics=true)
                     v = c isa Real ? j.d2value_dc2 : j.d2value_dcreal2
                     d = c isa Real ? j.d2derivative_dc2 : j.d2derivative_dcreal2
                     if kind <= 2
@@ -115,17 +133,17 @@ end
     @test_throws ArgumentError jacobian_rmn(0,0,1,[2];order=2,h=0.5)
     @test_throws ArgumentError jacobian_eigen(0,0,1;order=2,h=eps()/10)
     @test_throws r"h must be finite" jacobian_eigen(0,0,1;order=2,h=-1)
-    explicit = jacobian_eigen(0,0,1.;order=2,h=1e-3,adaptive=false,with_metadata=true)
+    explicit = jacobian_eigen(0,0,1.;order=2,h=1e-3,adaptive=false,diagnostics=true)
     @test explicit.metadata.step_used == 1e-3
     @test explicit.derivative ≈ jacobian_eigen(0,0,1.;order=2) rtol=1e-9
-    bad = jacobian_smn(0,0,1.,[-1.,1.];kind=2,order=2,with_metadata=true)
+    bad = jacobian_smn(0,0,1.,[-1.,1.];kind=2,order=2,diagnostics=true)
     @test all(isnan,bad.d2value_dc2) && !bad.metadata.finite_flag
     @test bad.metadata.conditioning_flag === :poor
-    small = jacobian_rmn(0,0,1e-8,[2.];order=2,with_metadata=true)
+    small = jacobian_rmn(0,0,1e-8,[2.];order=2,diagnostics=true)
     @test small.metadata.step_used < 1e-8/4
     @test all(isfinite,small.d2value_dc2)
     for precision in (:double,:quad)
-        unresolved = jacobian_rmn(0,1,big"1e-50",[2.];precision,order=2,with_metadata=true)
+        unresolved = jacobian_rmn(0,1,big"1e-50",[2.];precision,order=2,diagnostics=true)
         @test unresolved.metadata.conditioning_flag === :poor
         @test unresolved.metadata.suggested_action === (precision===:double ? :use_quad : :unresolved)
     end
@@ -149,7 +167,7 @@ end
             @test jacobian_eigen(0,n,zero(T);operator=:concentration,form=:complement,precision,order=2) == 0
             @test jacobian_eigen(0,n,zero(T);operator=:fourier,precision,order=2) ==
                 (n==0 ? -T(2)/9 : n==2 ? -T(8)/45 : zero(T))
-            singular = jacobian_eigen(0,n,zero(T);operator=:concentration,form=:log,precision,order=2,with_metadata=true)
+            singular = jacobian_eigen(0,n,zero(T);operator=:concentration,form=:log,precision,order=2,diagnostics=true)
             @test singular.derivative == -Inf && singular.metadata.conditioning_flag === :singular
             for operator in (:concentration,:fourier)
                 c,h = big"1.25",big"0.0001"
@@ -170,7 +188,7 @@ end
     end
     @test_throws DomainError jacobian_eigen(0,0,0;operator=:concentration,form=:log,order=2,h=0.01)
     @test_throws ArgumentError jacobian_eigen(0,0,1;operator=:concentration,order=2,h=1)
-    forward = jacobian_eigen(0,0,0.;operator=:fourier,order=2,h=0.001,with_metadata=true)
+    forward = jacobian_eigen(0,0,0.;operator=:fourier,order=2,h=0.001,diagnostics=true)
     @test forward.derivative ≈ -2/9 rtol=1e-9
     @test forward.metadata.method === :differenced_sensitivity
     tiny = jacobian_eigen(0,2,big"1e-40";operator=:concentration,form=:log,precision=:quad,order=2)
@@ -185,7 +203,7 @@ end
         for c in (T(1.25), complex(T(1.25), T(0.2))), metadata in (false, true)
             exact = jacobian_eigen(1, 2, c; precision, spheroid)
             fd = jacobian_eigen(1, 2, c; precision, spheroid, h,
-                                with_metadata=metadata, adaptive=metadata)
+                                diagnostics=metadata, adaptive=metadata)
             if c isa Real
                 @test (metadata ? fd.derivative : fd) ≈ exact rtol=tolerance
                 if metadata
@@ -200,7 +218,7 @@ end
             for (differentiate, points) in ((jacobian_smn, T[0.3]), (jacobian_rmn, T[2]))
                 exact = differentiate(1, 2, c, points; precision, spheroid)
                 fd = differentiate(1, 2, c, points; precision, spheroid, h,
-                                   with_metadata=metadata, adaptive=metadata)
+                                   diagnostics=metadata, adaptive=metadata)
                 for field in keys(exact)
                     @test getproperty(fd, field) ≈ getproperty(exact, field) rtol=tolerance
                 end
@@ -301,7 +319,7 @@ const PARAMETER_DERIVATIVE_REFERENCES = [
         radial_tolerance = precision === :quad ? big"1e-28" : big"5e-12"
         for (spheroid,complex_parameter,reference) in PARAMETER_DERIVATIVE_REFERENCES
             c = complex_parameter ? complex(T(5)/4,T(1)/5) : T(5)/4
-            e = jacobian_eigen(1,2,c;precision,spheroid,with_metadata=true)
+            e = jacobian_eigen(1,2,c;precision,spheroid,diagnostics=true)
             @test (complex_parameter ? e.d_dcreal : e.derivative) ≈ reference[1] rtol=tolerance
             metadata = complex_parameter ? e.metadata_dcreal : e.metadata
             @test metadata.method === :coefficients
@@ -318,7 +336,7 @@ const PARAMETER_DERIVATIVE_REFERENCES = [
                 @test only(s.dvalue_dcimag) ≈ im*reference[2] rtol=tolerance
             end
             for kind in (1,2)
-                r = jacobian_rmn(1,2,c,T[2];precision,spheroid,kind,with_metadata=true)
+                r = jacobian_rmn(1,2,c,T[2];precision,spheroid,kind,diagnostics=true)
                 rv = complex_parameter ? r.dvalue_dcreal : r.dvalue_dc
                 rd = complex_parameter ? r.dderivative_dcreal : r.dderivative_dc
                 @test only(rv) ≈ reference[2kind+2] rtol=radial_tolerance
@@ -376,11 +394,11 @@ const PARAMETER_DERIVATIVE_REFERENCES = [
         end
         small_c = precision === :quad ? big"1e-12" : 1e-6
         r = rmn(0,1,small_c,T[2];precision,kind=2)
-        dr = jacobian_rmn(0,1,small_c,T[2];precision,kind=2,with_metadata=true)
+        dr = jacobian_rmn(0,1,small_c,T[2];precision,kind=2,diagnostics=true)
         # The leading second-kind n=1 term is proportional to c^-2.
         @test only(small_c.*dr.dvalue_dc./r.value) ≈ -2 rtol=(precision === :quad ? big"1e-20" : 1e-9)
         @test dr.metadata_value.step_used === nothing
-        endpoint = jacobian_smn(1,1,T(1.25),T[-1,1];precision,with_metadata=true)
+        endpoint = jacobian_smn(1,1,T(1.25),T[-1,1];precision,diagnostics=true)
         @test all(iszero,endpoint.dvalue_dc)
         @test all(isinf,endpoint.dderivative_dc)
         @test !endpoint.metadata_derivative.finite_flag
@@ -429,23 +447,23 @@ end
     for spheroid in (:prolate,:oblate),
         (f,jac,z) in ((smn,jacobian_smn,0.3+0.2im),(rmn,jacobian_rmn,1.6+0.3im)), kind in 1:2
         c = big"1.25"+big"0.125"*im
-        result = jac(1,2,c,z;spheroid,precision=:quad,kind,with_metadata=true)
-        difference = jac(1,2,c,z;spheroid,precision=:quad,kind,h=big"1e-6",with_metadata=true)
+        result = jac(1,2,c,z;spheroid,precision=:quad,kind,diagnostics=true)
+        difference = jac(1,2,c,z;spheroid,precision=:quad,kind,h=big"1e-6",diagnostics=true)
         @test result.dvalue_dcreal ≈ difference.dvalue_dcreal rtol=big"1e-10"
         @test result.dderivative_dcimag ≈ difference.dderivative_dcimag rtol=big"1e-10"
         @test result.dvalue_dcimag == im*result.dvalue_dcreal
         @test result.dderivative_dcimag == im*result.dderivative_dcreal
         @test result.metadata_value_dcreal.method === :differentiated_equation
         @test result.metadata_derivative_dcimag.conditioning_flag === :good
-        second = jac(1,2,c,z;spheroid,precision=:quad,kind,order=2,with_metadata=true)
+        second = jac(1,2,c,z;spheroid,precision=:quad,kind,order=2,diagnostics=true)
         h = big"1e-6"
         jp = jac(1,2,c+h,z;spheroid,precision=:quad,kind)
         jm = jac(1,2,c-h,z;spheroid,precision=:quad,kind)
         @test second.d2value_dcreal2 ≈ (jp.dvalue_dcreal-jm.dvalue_dcreal)/(2h) rtol=big"1e-10"
         @test second.d2value_dcimag2 == -second.d2value_dcreal2
         @test second.d2derivative_dcreal_dcimag == im*second.d2derivative_dcreal2
-        real_result = jac(1,2,real(c),z;spheroid,precision=:quad,kind,with_metadata=true)
-        real_difference = jac(1,2,real(c),z;spheroid,precision=:quad,kind,h,adaptive=false,with_metadata=true)
+        real_result = jac(1,2,real(c),z;spheroid,precision=:quad,kind,diagnostics=true)
+        real_difference = jac(1,2,real(c),z;spheroid,precision=:quad,kind,h,adaptive=false,diagnostics=true)
         @test real_result.dvalue_dc ≈ real_difference.dvalue_dc rtol=big"1e-10"
         @test real_result.dderivative_dc ≈ real_difference.dderivative_dc rtol=big"1e-10"
         # Differentiate the returned third derivative along an imaginary step.

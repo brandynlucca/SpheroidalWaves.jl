@@ -103,7 +103,7 @@ function eigenvalue_sweep(m::Integer,
                     jac = jacobian_eigen(m, selected_n[i - 1], cprev;
                                          spheroid=spheroid,
                                          precision=precision,
-                                         with_metadata=true,
+                                         diagnostics=true,
                                          adaptive=true)
                     dlambda = T(jac.derivative)
                     if isfinite(dlambda) && jac.metadata.suggested_action == :accept

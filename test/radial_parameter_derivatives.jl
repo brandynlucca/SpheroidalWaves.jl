@@ -70,7 +70,7 @@ end
             m>0 && @test iszero(only(endpoint.dvalue_dc))
         end
         for kind in (2,3,4)
-            singular=jacobian_rmn(0,1,T(5)/4,T[1];precision,kind,with_metadata=true)
+            singular=jacobian_rmn(0,1,T(5)/4,T[1];precision,kind,diagnostics=true)
             @test all(isnan,singular.dvalue_dc) && !singular.metadata_value.finite_flag
         end
         @test all(isfinite,jacobian_rmn(0,0,complex(T(1),T(1)/10),T[1];precision).dvalue_dcreal)

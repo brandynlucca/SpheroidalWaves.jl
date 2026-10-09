@@ -151,10 +151,10 @@ end
         spheroid = isodd(div(i-1,2)) ? :oblate : :prolate
         c = isodd(div(i-1,4)) ? 5//4+1//16*im : 5//4
         (smn(1,2,c,[-1//2,1//4];spheroid,precision,kind=2,second_derivative=true),
-         jacobian_smn(1,2,c,[1//4];spheroid,precision,with_metadata=true),
+         jacobian_smn(1,2,c,[1//4];spheroid,precision,diagnostics=true),
          rmn(1,2,c,[2//1,9//4];spheroid,precision,kind=3,scaled=true),
-         jacobian_rmn(1,2,c,[2//1];spheroid,precision,kind=2,with_metadata=true),
-         jacobian_eigen(1,2,c;spheroid,precision,with_metadata=true),
+         jacobian_rmn(1,2,c,[2//1];spheroid,precision,kind=2,diagnostics=true),
+         jacobian_eigen(1,2,c;spheroid,precision,diagnostics=true),
          smn(0,0,1//1000000,1//4;spheroid,precision),
          eigenvalue(0,1,5//4;precision,operator=:concentration),
          jacobian_eigen(0,1,5//4;precision,operator=:fourier),
@@ -162,7 +162,7 @@ end
          kmn(1,2,c;spheroid,precision),
          amn(1,2,c;spheroid,precision),
          amn(-1,2,c;spheroid,precision),
-         jacobian_eigen(1,2,c;spheroid,precision,order=2,with_metadata=true),
+         jacobian_eigen(1,2,c;spheroid,precision,order=2,diagnostics=true),
          jacobian_smn(1,2,c,[1//4];spheroid,precision,order=2),
          jacobian_rmn(1,2,c,[2];spheroid,precision,order=2),
          smn(1,2,c,[1//4];spheroid,precision,derivatives=4),

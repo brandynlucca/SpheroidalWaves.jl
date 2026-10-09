@@ -13,7 +13,7 @@ using SpheroidalWaves,Test
         T=precision===:quad ? BigFloat : Float64
         tol=precision===:quad ? big"1e-27" : big"2e-12"
         for n in 0:3
-            d=jacobian_eigen(0,n,0;operator=:concentration,precision,with_metadata=true)
+            d=jacobian_eigen(0,n,0;operator=:concentration,precision,diagnostics=true)
             @test d.derivative isa T
             @test d.derivative == (n==0 ? T(2)/T(pi) : zero(T))
             @test d.metadata.method===:right_limit
@@ -37,7 +37,7 @@ using SpheroidalWaves,Test
     end
     # Explicit h retains the existing finite-difference interface, including
     # a forward stencil at zero and convergence metadata.
-    d=jacobian_eigen(0,0,0.;operator=:concentration,h=1e-4,with_metadata=true)
+    d=jacobian_eigen(0,0,0.;operator=:concentration,h=1e-4,diagnostics=true)
     @test d.derivative≈2/pi rtol=1e-8
     @test d.metadata.step_used>0
     @test jacobian_eigen(0,1,1.;operator=:fourier,h=1e-4)≈jacobian_eigen(0,1,1.;operator=:fourier) rtol=1e-8
