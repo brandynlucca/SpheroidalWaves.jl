@@ -1,6 +1,8 @@
 using SpheroidalWaves
 using Test
 
+include("thread_safety.jl")
+
 @testset "SpheroidalWaves.jl" begin
     assert_allclose(actual, expected; atol=1e-10, rtol=0.0) = begin
         @test length(actual) == length(expected)
@@ -24,6 +26,9 @@ using Test
         @test :jacobian_smn in exported
         @test :jacobian_rmn in exported
         @test :find_c_for_eigenvalue in exported
+        @test :dmn in exported
+        @test :kmn in exported
+        @test :amn in exported
         @test !(:set_backend_library! in exported)
         @test !(:backend_library in exported)
     end

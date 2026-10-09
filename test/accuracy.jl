@@ -1,5 +1,60 @@
 using SpheroidalWaves, Test
 
+@testset "Complex-coordinate convergence diagnostics" begin
+    for precision in (:double,:quad), spheroid in (:prolate,:oblate), target in (:angular,:radial)
+        R = precision===:quad ? BigFloat : Float64
+        points = target===:angular ? Complex{R}[0.25+0.125im,0.5+0.25im] : Complex{R}[2+0.25im,1.5+0.25im]
+        options = target===:angular ? (;) : (;normalization=:static)
+        report = accuracy(0,0,0,points;spheroid,precision,target,kind=2,diagnostics=true,options...)
+        actual = (target===:angular ? smn : rmn)(0,0,0,points;spheroid,precision,kind=2,options...)
+        reference = target===:angular ? atanh.(points) : spheroid===:prolate ? -atanh.(inv.(points)) : atan.(points).-R(pi)/2
+        @test report.digits == accuracy(0,0,0,points;spheroid,precision,target,kind=2,options...)
+        @test all(d -> d>=(precision===:quad ? 28 : 12),report.digits)
+        for (i,diagnostic) in enumerate(report.diagnostics)
+            @test diagnostic.method === :continuation_refinement
+            @test diagnostic.converged && diagnostic.finite_flag
+            @test diagnostic.conditioning_flag === :good
+            @test abs(actual.value[i]-reference[i]) <= R(10)^(-report.digits[i])*abs(reference[i])
+            @test diagnostic.coordinate_condition ≈ abs(points[i]*actual.derivative[i]/actual.value[i])
+            @test iszero(diagnostic.parameter_condition)
+        end
+    end
+    for target in (:angular,:radial)
+        z = target===:angular ? 0.25+0.125im : 2+0.25im
+        report = accuracy(1,2,1.25+0.125im,[z];target,diagnostics=true)
+        @test only(report.digits)>=12
+        @test only(report.diagnostics).converged
+    end
+    zero_report = accuracy(0,1,0,[0im];target=:angular,diagnostics=true)
+    @test zero_report.digits == [-1]
+    @test only(zero_report.diagnostics).finite_flag
+    @test isinf(only(zero_report.diagnostics).coordinate_condition)
+    endpoints = accuracy(1,1,1.25,[1+0im,0.25+0.125im];target=:angular,diagnostics=true)
+    @test endpoints.digits[1] == -1 && endpoints.digits[2]>=12
+    @test endpoints.diagnostics[1].conditioning_flag === :unavailable
+    real_report = accuracy(0,0,0,[0.25];target=:angular,diagnostics=true)
+    @test real_report.digits == [-1] && real_report.diagnostics === nothing
+    @test_throws ArgumentError accuracy(0,0,1,[0.25im];target=:angular,kind=2,normalize=true)
+    @test accuracy(0,0,1,[2+0.25im];normalize=true) == accuracy(0,0,1,[2+0.25im])
+
+    SW = SpheroidalWaves
+    F = SW._SWFloat
+    SW._with_swprecision(384) do
+        plan = SW._sensitivity_plan(0,0,F(0),:prolate,:double)
+        state = Complex{F}.((1,1,0,0))
+        unresolved = SW._coordinate_accuracy_record(state,Complex{F}.((2,1,0,0)),plan,1,:double,false)
+        @test unresolved.digits == -1 && unresolved.diagnostics.conditioning_flag === :poor
+        underflow = Complex{F}.((F("1e-400"),F("1e-400"),0,0))
+        @test SW._coordinate_accuracy_record(underflow,underflow,plan,1,:double,false).digits == 0
+        overflow = Complex{F}.((F("1e400"),1,0,0))
+        @test SW._coordinate_accuracy_record(overflow,overflow,plan,1,:double,false).diagnostics.conditioning_flag === :singular
+        sensitive = Complex{F}.((1,10000,0,0))
+        warning = SW._coordinate_accuracy_record(sensitive,sensitive,plan,1,:double,false)
+        @test warning.diagnostics.conditioning_flag === :warning
+        @test warning.digits < 12
+    end
+end
+
 @testset "Endpoint series estimates remain unavailable" begin
     for precision in (:double,:quad), spheroid in (:prolate,:oblate)
         lib=SpheroidalWaves.backend_library(;precision)
@@ -8,9 +63,9 @@ using SpheroidalWaves, Test
         end
         T=precision === :quad ? BigFloat : Float64
         for c in (T(5)/4,complex(T(5)/4,T(1)/5)), m in (0,2)
-            estimates=accuracy(m,m+1,c,T[-1,0.3,1];spheroid,precision,target=:angular)
-            @test estimates[[1,3]] == [-1,-1]
-            @test estimates[2] == only(accuracy(m,m+1,c,T[0.3];spheroid,precision,target=:angular))
+            estimates=accuracy(m,m+1,c,[-big"1",-1+big"1e-12",big"0.3",1-big"1e-12",big"1"];spheroid,precision,target=:angular)
+            @test estimates[[1,2,4,5]] == [-1,-1,-1,-1]
+            @test estimates[3] == only(accuracy(m,m+1,c,[big"0.3"];spheroid,precision,target=:angular))
         end
     end
 end

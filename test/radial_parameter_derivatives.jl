@@ -73,7 +73,7 @@ end
             singular=jacobian_rmn(0,1,T(5)/4,T[1];precision,kind,with_metadata=true)
             @test all(isnan,singular.dvalue_dc) && !singular.metadata_value.finite_flag
         end
-        @test_throws DomainError jacobian_rmn(0,0,complex(T(1),T(1)/10),T[1];precision)
+        @test all(isfinite,jacobian_rmn(0,0,complex(T(1),T(1)/10),T[1];precision).dvalue_dcreal)
     end
     lib=SpheroidalWaves.backend_library(;precision=:quad)
     if lib!==nothing && isfile(lib)

@@ -9,13 +9,13 @@ using SpheroidalWaves, Test
         @test SW._combine_split_parts(hi, lo) ≈ values rtol=big"1e-31"
         @test SW._combine_split_complex_parts(hi, lo, -hi, -lo) ≈
               complex.(values, -values) rtol=big"1e-31"
-        text = SW._encode_real_text_vector(values)
-        @test SW._decode_real_text_vector(text, length(values)) ≈ values rtol=big"1e-55"
-        scalar = SW._encode_real_text_scalar(values[1])
-        @test SW._decode_real_text_vector(scalar, 1) ≈ values[1:1] rtol=big"1e-55"
-        @test_throws r"payload overflow" SW._encode_real_text_scalar(big"1.25"; width=1)
-        @test_throws r"payload overflow" SW._encode_real_text_vector(values; width=1)
-        @test isempty(SW._decode_real_text_vector(UInt8[], 0))
+        text = SW._format_fortran_input(values)
+        @test SW._parse_fortran_output(text, length(values)) ≈ values rtol=big"1e-55"
+        scalar = SW._format_fortran_input(values[1])
+        @test SW._parse_fortran_output(scalar, 1) ≈ values[1:1] rtol=big"1e-55"
+        @test_throws r"payload overflow" SW._format_fortran_input(big"1.25"; width=1)
+        @test_throws r"payload overflow" SW._format_fortran_input(values; width=1)
+        @test isempty(SW._parse_fortran_output(UInt8[], 0))
         # Conversion to Float64 can round a mantissa up to ten.
         scaled = SW._decimal_scaled([big"9.9999999999999999999", big"0", BigFloat(Inf)], Float64)
         @test scaled.mantissa == [1., 0., Inf]

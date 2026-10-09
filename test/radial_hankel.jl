@@ -1,5 +1,31 @@
 using SpheroidalWaves,Test
 
+@testset "Decaying waves at complex coordinates" begin
+    # Explicit finite Hankel polynomials, independent of coordinate propagation.
+    function outgoing(l,t)
+        polynomial = sum(BigFloat(factorial(big(l+k)))/(factorial(big(k))*factorial(big(l-k)))*(im/(2t))^k for k in 0:l)
+        (-im)^(l+1)*exp(im*t)/t*polynomial
+    end
+    c,z = big"4",big"2"+big"5"*im
+    for spheroid in (:prolate,:oblate)
+        coefficients = dmn(0,0,c;spheroid,precision=:quad)
+        weights = coefficients.coefficients
+        denominator = sum(weights)
+        terms = [(-1)^(l÷2)*w for (l,w) in zip(coefficients.degrees,weights)]
+        values = [outgoing(l,c*z) for l in coefficients.degrees]
+        slopes = [c*(l/(c*z)*outgoing(l,c*z)-outgoing(l+1,c*z)) for l in coefficients.degrees]
+        value,derivative = sum(terms.*values)/denominator,sum(terms.*slopes)/denominator
+        for precision in (:double,:quad)
+            tolerance = precision===:quad ? big"2e-27" : 2e-12
+            actual = rmn(0,0,c,z;spheroid,precision,kind=3,scaled=true)
+            @test only(actual.value.mantissa.*BigFloat(10).^actual.value.exponent) ≈ value rtol=tolerance
+            @test only(actual.derivative.mantissa.*BigFloat(10).^actual.derivative.exponent) ≈ derivative rtol=tolerance
+            incoming = rmn(0,0,c,conj(z);spheroid,precision,kind=4)
+            @test only(incoming.value) ≈ conj(value) rtol=tolerance
+        end
+    end
+end
+
 @testset "Spherical Bessel recurrence at large arguments" begin
     SW = SpheroidalWaves
     for z in (big"80.0", complex(big"80.0", big"0.1"))
