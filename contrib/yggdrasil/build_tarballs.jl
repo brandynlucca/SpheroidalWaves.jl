@@ -1,11 +1,11 @@
 using BinaryBuilder
 
 name = "SpheroidalWaves"
-version = v"0.5.0"
+version = v"0.6.0"
 
 sources = [
     GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
-    "70874f2eb281ccc09f7367014d41411fdd83ddfb"),
+    "e54a77efcf7c7cd9128f5604462528dbef6ae0ba"),
 ]
 
 script = raw"""
