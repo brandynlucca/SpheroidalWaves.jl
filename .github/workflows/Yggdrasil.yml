@@ -38,8 +38,10 @@ jobs:
         id: recipe
         shell: julia --color=yes {0}
         run: |
-          using TOML
-          version = VersionNumber(TOML.parsefile("Project.toml")["version"])
+          using Pkg, TOML
+          project = TOML.parsefile("Project.toml")
+          version = VersionNumber(project["version"])
+          @assert version in Pkg.Types.semver_spec(project["compat"]["SpheroidalWaves_jll"]) "Package compatibility must include generated JLL $version"
           revision = ENV["GITHUB_SHA"]
           @assert occursin(r"^[0-9a-f]{40}$", revision)
           path = "contrib/yggdrasil/build_tarballs.jl"
@@ -129,15 +131,19 @@ jobs:
           using Pkg, Libdl, Test
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           Pkg.activate(;temp=true)
-          Pkg.develop(path="binarybuilder-products/SpheroidalWaves_jll")
+          Pkg.develop([
+              Pkg.PackageSpec(path=pwd()),
+              Pkg.PackageSpec(path="binarybuilder-products/SpheroidalWaves_jll"),
+          ])
           using SpheroidalWaves_jll
           ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
           ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
-          pushfirst!(LOAD_PATH, pwd())
           using SpheroidalWaves
           @testset "JLL libraries and runtime dependencies" begin
               @test !isdir("build")
               @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
+              @test realpath(dirname(dirname(pathof(SpheroidalWaves_jll)))) == realpath("binarybuilder-products/SpheroidalWaves_jll")
+              @test SpheroidalWaves.SpheroidalWaves_jll === SpheroidalWaves_jll
               for precision in (:double,:quad)
                   library = SpheroidalWaves.backend_library(;precision)
                   @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]

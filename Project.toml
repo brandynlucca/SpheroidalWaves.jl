@@ -11,7 +11,7 @@ SpheroidalWaves_jll = "a34cad3f-f691-5efd-970c-48ef20c3665d"
 [compat]
 LinearAlgebra = "1.10"
 julia = "1.10"
-SpheroidalWaves_jll = "0.5"
+SpheroidalWaves_jll = "0.5, 0.6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
