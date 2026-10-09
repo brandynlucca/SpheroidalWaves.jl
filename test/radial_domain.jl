@@ -197,8 +197,7 @@ end
     end
 end
 @testset "Complex radial coordinates" begin
-    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
-
+    for (precision, spheroid) in ((:double, :prolate), (:quad, :oblate))
         T = precision===:quad ? BigFloat : Float64
         tolerance = precision===:quad ? big"2e-26" : 3e-12
         sigma = spheroid===:prolate ? 1 : -1

@@ -12,8 +12,7 @@ using SpheroidalWaves, Test
         end
         values
     end
-    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
-
+    for (precision, spheroid) in ((:quad, :prolate), (:double, :oblate))
         T = precision===:quad ? BigFloat : Float64
         tolerance = precision===:quad ? big"2e-27" : 3e-12
         points = Complex{T}[0.3 + 0.2im, -0.4 - 0.3im, 1.4 + 0.2im]

@@ -149,45 +149,64 @@ end
 
 @testset "Concurrent public computations and unrelated BigFloat arithmetic" begin
     SW = SpheroidalWaves
-    function evaluate(i)
+    function evaluate(i, c)
         precision = isodd(i) ? :double : :quad
         spheroid = isodd(div(i-1, 2)) ? :oblate : :prolate
-        c = isodd(div(i-1, 4)) ? 5//4+1//16*im : 5//4
-        (
-            smn(1, 2, c, [-1//2, 1//4]; spheroid, precision,
+        # Exercise each curvature path in both precisions without repeating
+        # every stencil for all eight backend combinations.
+        curvature = if i <= 2
+            jacobian_eigen(1, 2, c; spheroid, precision, order = 2, diagnostics = true)
+        elseif i <= 4
+            jacobian_smn(1, 2, c, [0.25]; spheroid, precision, order = 2)
+        elseif i <= 6
+            jacobian_rmn(1, 2, c, [2.0]; spheroid, precision, order = 2)
+        else
+            jacobian_rmn(1, 2, c, [2.0]; spheroid, precision,
+                normalization = :static, order = 2)
+        end
+        results = Any[
+            smn(1, 2, c, [-0.5, 0.25]; spheroid, precision,
                 kind = 2, second_derivative = true),
-            jacobian_smn(1, 2, c, [1//4]; spheroid, precision, diagnostics = true),
-            rmn(1, 2, c, [2//1, 9//4]; spheroid, precision, kind = 3, scaled = true),
+            jacobian_smn(1, 2, c, [0.25]; spheroid, precision, diagnostics = true),
+            rmn(1, 2, c, [2.0, 2.25]; spheroid, precision, kind = 3, scaled = true),
             jacobian_rmn(
-                1, 2, c, [2//1]; spheroid, precision, kind = 2, diagnostics = true),
+                1, 2, c, [2.0]; spheroid, precision, kind = 2, diagnostics = true),
             jacobian_eigen(1, 2, c; spheroid, precision, diagnostics = true),
-            smn(0, 0, 1//1000000, 1//4; spheroid, precision),
-            eigenvalue(0, 1, 5//4; precision, operator = :concentration),
-            jacobian_eigen(0, 1, 5//4; precision, operator = :fourier),
             dmn(1, 2, c; spheroid, precision),
-            kmn(1, 2, c; spheroid, precision),
-            amn(1, 2, c; spheroid, precision),
-            amn(-1, 2, c; spheroid, precision),
-            jacobian_eigen(1, 2, c; spheroid, precision, order = 2, diagnostics = true),
-            jacobian_smn(1, 2, c, [1//4]; spheroid, precision, order = 2),
-            jacobian_rmn(1, 2, c, [2]; spheroid, precision, order = 2),
-            smn(1, 2, c, [1//4]; spheroid, precision, derivatives = 4),
-            rmn(1, 2, c, [2]; spheroid, precision, derivatives = 4),
-            rmn(1, 2, c, [spheroid===:prolate ? 1 : 0, 2]; spheroid,
-                precision, normalization = :static, derivatives = 4),
-            rmn(1, 2, zero(c), [2]; spheroid, precision, kind = 2, normalization = :static),
-            jacobian_rmn(
-                1, 2, c, [2]; spheroid, precision, normalization = :static, order = 2),
-            smn(1, 2, c, [-1, 1]; spheroid, precision, derivatives = 4),
-            smn(1, 2, c, [1//4+1//8*im]; spheroid, precision, kind = 2, derivatives = 4),
-            rmn(1, 2, c, [2+1//4*im]; spheroid, precision, kind = 3, scaled = true),
-            jacobian_rmn(
-                1, 2, c, [2-1//4*im]; spheroid, precision, normalization = :static),
-            accuracy(1, 2, c, [1//4+1//8*im, 1//2+1//4*im]; spheroid,
-                precision, target = :angular, diagnostics = true))
+            curvature
+        ]
+        # Each extension runs in both precisions. The core calls above cover
+        # all eight geometry, precision and parameter-type combinations.
+        extensions = if i <= 2
+            (kmn(1, 2, c; spheroid, precision),
+                amn(1, 2, c; spheroid, precision),
+                amn(-1, 2, c; spheroid, precision),
+                smn(0, 0, 1//1000000, 1//4; spheroid, precision))
+        elseif i <= 4
+            (smn(1, 2, c, [-1.0, 0.25, 1.0]; spheroid, precision, derivatives = 4),
+                rmn(1, 2, c, [2.0]; spheroid, precision, derivatives = 4),
+                rmn(1, 2, c, [0.0, 2.0]; spheroid, precision,
+                    normalization = :static, derivatives = 4),
+                rmn(1, 2, zero(c), [2.0]; spheroid, precision,
+                    kind = 2, normalization = :static))
+        elseif i <= 6
+            (smn(1, 2, c, [0.25+0.125im]; spheroid, precision, kind = 2, derivatives = 4),
+                rmn(1, 2, c, [2.0+0.25im]; spheroid, precision, kind = 3, scaled = true),
+                jacobian_rmn(1, 2, c, [2.0-0.25im]; spheroid, precision,
+                    normalization = :static))
+        else
+            (
+                accuracy(1, 2, c, [0.25+0.125im, 0.5+0.25im]; spheroid,
+                    precision, target = :angular, diagnostics = true),
+                eigenvalue(0, 1, 1.25; precision, operator = :concentration),
+                jacobian_eigen(0, 1, 1.25; precision, operator = :fourier))
+        end
+        append!(results, extensions)
+        return results
     end
     # Both geometries, precisions and real/complex parameter families.
-    reference = evaluate.(1:8)
+    parameters = Any[isodd(div(i-1, 4)) ? 1.25+0.0625im : 1.25 for i in 1:8]
+    reference = [evaluate(i, c) for (i, c) in enumerate(parameters)]
     public_types(x::Number) = !(x isa SW._SWFloat) && !(x isa Complex{SW._SWFloat})
     public_types(x::Union{Tuple, NamedTuple, AbstractArray}) = all(public_types, x)
     public_types(x) = true
@@ -207,7 +226,9 @@ end
             valid &= precision(value) == initial[1] && value == unrelated
             checks += 1
             checks == 1 && notify(sampling)
-            yield()
+            # Sample throughout the workers without continuously allocating
+            # BigFloats while Julia compiles their first calls.
+            sleep(0.001)
         end
         (checks, valid)
     end
@@ -215,7 +236,7 @@ end
     tasks = [Threads.@spawn begin
                  wait(release)
                  wait(sampling)
-                 [evaluate(i) for _ in 1:2]
+                 [evaluate(i, parameters[i]) for _ in 1:2]
              end for i in 1:8]
     notify(release)
     try

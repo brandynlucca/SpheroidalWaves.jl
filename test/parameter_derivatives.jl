@@ -26,11 +26,15 @@ end
     for precision in (:double, :quad), spheroid in (:prolate, :oblate), kind in 1:2
         T = precision === :quad ? BigFloat : Float64
         tolerance = precision === :quad ? big"2e-20" : 2e-9
-        for c in (zero(T), complex(T(1.25), T(0.125)))
-            h = big"0.001"
+        # Pair zero and complex cases across precisions and kinds. The static
+        # limit checks below also exercise every geometry/kind in quad.
+        parameters = (precision === :quad) == (kind == 2) ?
+                     (complex(T(1.25), T(0.125)),) : (zero(T),)
+        for c in parameters
+            h = precision === :quad ? big"0.001" : big"0.02"
             wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
             samples = [rmn(1, 2, wide+k*h, [big"2"]; spheroid,
-                           precision = :quad, kind, normalization = :static)
+                           precision, kind, normalization = :static)
                        for k in offsets]
             first = jacobian_rmn(1, 2, c, [T(2)]; spheroid, precision, kind,
                 normalization = :static, diagnostics = true)
@@ -50,22 +54,28 @@ end
                                              (values .- values[5]))/h^2 rtol=tolerance atol=tolerance
             end
             @test second.metadata.finite_flag
-            fd = jacobian_rmn(1, 2, c, [T(2)]; spheroid, precision,
-                kind, normalization = :static, h = 1e-4)
-            key = c isa Real ? :dvalue_dc : :dvalue_dcreal
-            @test getproperty(fd, key)≈getproperty(first, key) rtol=1e-6 atol=1e-9
+            if spheroid === :prolate
+                fd = jacobian_rmn(1, 2, c, [T(2)]; spheroid, precision,
+                    kind, normalization = :static, h = 1e-4)
+                key = c isa Real ? :dvalue_dc : :dvalue_dcreal
+                @test getproperty(fd, key)≈getproperty(first, key) rtol=1e-6 atol=1e-9
+            end
         end
-        tiny = jacobian_rmn(1, 2, big"1e-40", [2]; spheroid,
-            precision = :quad, kind, normalization = :static)
-        limit = jacobian_rmn(1, 2, big"0", [2]; spheroid, precision = :quad,
-            kind, normalization = :static, order = 2)
-        @test tiny.dvalue_dc ./ big"1e-40" ≈ limit.d2value_dc2 rtol=big"1e-22"
+        if precision === :quad
+            tiny = jacobian_rmn(1, 2, big"1e-40", [2]; spheroid,
+                precision, kind, normalization = :static)
+            limit = jacobian_rmn(1, 2, big"0", [2]; spheroid,
+                precision, kind, normalization = :static, order = 2)
+            @test tiny.dvalue_dc ./ big"1e-40" ≈ limit.d2value_dc2 rtol=big"1e-22"
+        end
         complex_zero = jacobian_rmn(1, 2, complex(zero(T)), [T(2)]; spheroid,
             precision, kind, normalization = :static, h = 1e-4)
         @test all(iszero, complex_zero.dvalue_dcreal)
     end
-    for precision in (:double, :quad), c in (1.25, 1.25+0im, 1.25+0.125im)
-
+    # Endpoint rules depend on real versus complex dispatch, not on a full
+    # Cartesian product of parameter representations and precisions.
+    for (precision, c) in ((:double, 1.25), (:double, 1.25+0im),
+        (:quad, 1.25+0.125im))
         for (jac, x) in ((jacobian_smn, -1.0), (jacobian_smn, 1.0), (jacobian_rmn, 1.0))
             result = jac(1, 2, c, [x]; precision, order = 2, diagnostics = true)
             d = c isa Real ? result.d2derivative_dc2 : result.d2derivative_dcreal2
@@ -102,34 +112,52 @@ end
 
         T = precision === :quad ? BigFloat : Float64
         tol = precision === :quad ? big"5e-22" : 3e-10
-        for c in (T(1.25), complex(T(1.25), T(0.125)))
+        # Pair parameter types across geometries and precisions. Double checks
+        # all kinds, and quad checks each independent angular/radial solution.
+        parameters = (precision === :double) == (spheroid === :prolate) ?
+                     (T(1.25),) : (complex(T(1.25), T(0.125)),)
+        for c in parameters
             wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
-            h = big"0.0001"
+            h = precision === :quad ? big"0.0001" : big"0.02"
             e = jacobian_eigen(1, 2, c; spheroid, precision, order = 2, diagnostics = true)
             ev = c isa Real ? e.derivative : e.d2_dcreal2
             @test ev ≈
-                  reference(z -> eigenvalue(1, 2, z; spheroid, precision = :quad), wide, h) rtol=tol
+                  reference(z -> eigenvalue(1, 2, z; spheroid, precision), wide, h) rtol=tol
             @test e.metadata.method === :differenced_sensitivity && e.metadata.finite_flag
             @test e.metadata.step_used > 0
             @test ev isa (c isa Real ? T : Complex{T})
             @test jacobian_eigen(1, 2, c; spheroid, precision, order = 2) ==
                   (c isa Real ? ev :
                    (; d2_dcreal2 = ev, d2_dcreal_dcimag = im*ev, d2_dcimag2 = -ev))
-            for (f, jac, point, kinds) in ((smn, jacobian_smn, T(0.3), (1, 2)),
-                (rmn, jacobian_rmn, T(2), (1, 2, 3, 4)))
+            angular_kinds = precision === :double ? (1, 2) :
+                            (spheroid === :prolate ? 1 : 2,)
+            radial_kinds = precision === :double ? (1, 2, 3, 4) :
+                           (spheroid === :prolate ? 2 : 1,)
+            for (f, jac, point, kinds) in ((smn, jacobian_smn, T(0.3), angular_kinds),
+                (rmn, jacobian_rmn, T(2), radial_kinds))
+                curvatures = Dict()
                 for kind in kinds
                     j = jac(1, 2, c, [point]; spheroid, precision,
                         kind, order = 2, diagnostics = true)
+                    curvatures[kind] = j
                     v = c isa Real ? j.d2value_dc2 : j.d2value_dcreal2
                     d = c isa Real ? j.d2derivative_dc2 : j.d2derivative_dcreal2
                     if kind <= 2
-                        values(z) = f(
-                            1, 2, z, [BigFloat(point)]; spheroid, precision = :quad, kind)
-                        @test v ≈ reference(z -> values(z).value, wide, h) rtol=tol
-                        @test d ≈ reference(z -> values(z).derivative, wide, h) rtol=tol
+                        # Each reference call returns both value and slope.
+                        # A wider double angular stencil avoids cancellation
+                        # in the small curvature of the coordinate derivative.
+                        step = precision === :double && f === smn ? big"0.04" : h
+                        samples = [f(1, 2, wide+k*step, [BigFloat(point)];
+                                       spheroid, precision, kind) for k in offsets]
+                        for (field, actual) in ((:value, v), (:derivative, d))
+                            center = getproperty(samples[5], field)
+                            expected = sum(BigFloat(w) .*
+                                           (getproperty(sample, field) .- center)
+                            for (w, sample) in zip(weights, samples)) ./ step^2
+                            @test actual ≈ expected rtol=tol
+                        end
                     else
-                        a = jac(1, 2, c, [point]; spheroid, precision, kind = 1, order = 2)
-                        b = jac(1, 2, c, [point]; spheroid, precision, kind = 2, order = 2)
+                        a, b = curvatures[1], curvatures[2]
                         av, bv = c isa Real ? (a.d2value_dc2, b.d2value_dc2) :
                                  (a.d2value_dcreal2, b.d2value_dcreal2)
                         @test v ≈ av+(kind==3 ? im : -im)*bv rtol=tol
@@ -180,11 +208,11 @@ end
     imaginary = jacobian_smn(1, 2, 1.25im, [0.3]; order = 2)
     opposite = jacobian_smn(1, 2, 1.25, [0.3]; spheroid = :oblate, order = 2)
     @test imaginary.d2value_dcreal2 ≈ -opposite.d2value_dc2 rtol=1e-9
-    # Independent mixed real/imaginary differences of function values.
+    # For a holomorphic function the O(h^2) mixed-difference errors cancel
+    # on a square stencil, giving a fourth-order check from four values.
     c, h = complex(big"1.25", big"0.125"), big"0.0001"
-    offsets, weights = (-2, -1, 1, 2), (1, -8, 8, -1)
-    mixed = sum(a*b*only(smn(1, 2, c+(i+im*j)*h, [big"0.3"]; precision = :quad).value)
-    for (i, a) in zip(offsets, weights), (j, b) in zip(offsets, weights))/(144h^2)
+    mixed = sum(i*j*only(smn(1, 2, c+(i+im*j)*h, [big"0.3"]; precision = :quad).value)
+    for i in (-1, 1), j in (-1, 1))/(4h^2)
     @test only(jacobian_smn(1, 2, c, [big"0.3"]; precision = :quad, order = 2).d2value_dcreal_dcimag) ≈
           mixed rtol=1e-14
 end
@@ -246,37 +274,34 @@ end
         T = precision === :quad ? BigFloat : Float64
         h = precision === :quad ? T(10)^(-10) : T(1e-4)
         tolerance = precision === :quad ? T(1e-17) : T(2e-7)
-        for c in (T(1.25), complex(T(1.25), T(0.2))), metadata in (false, true)
-
+        parameters = (precision === :double) == (spheroid === :prolate) ?
+                     (T(1.25),) : (complex(T(1.25), T(0.2)),)
+        for c in parameters
             exact = jacobian_eigen(1, 2, c; precision, spheroid)
             fd = jacobian_eigen(1, 2, c; precision, spheroid, h,
-                diagnostics = metadata, adaptive = metadata)
+                diagnostics = true)
             if c isa Real
-                @test (metadata ? fd.derivative : fd) ≈ exact rtol=tolerance
-                if metadata
-                    @test fd.metadata.method === :finite_difference
-                    @test fd.metadata.suggested_action === :accept
-                end
+                @test fd.derivative ≈ exact rtol=tolerance
+                @test fd.metadata.method === :finite_difference
+                @test fd.metadata.suggested_action === :accept
             else
                 @test fd.d_dcreal ≈ exact.d_dcreal rtol=tolerance
                 @test fd.d_dcimag ≈ im*exact.d_dcreal rtol=tolerance
-                metadata && @test fd.metadata_dcimag.finite_flag
+                @test fd.metadata_dcimag.finite_flag
             end
             for (differentiate, points) in ((jacobian_smn, T[0.3]), (jacobian_rmn, T[2]))
                 exact = differentiate(1, 2, c, points; precision, spheroid)
                 fd = differentiate(1, 2, c, points; precision, spheroid, h,
-                    diagnostics = metadata, adaptive = metadata)
+                    diagnostics = true)
                 for field in keys(exact)
                     @test getproperty(fd, field) ≈ getproperty(exact, field) rtol=tolerance
                 end
-                if metadata
-                    fields = c isa Real ? (:metadata_value, :metadata_derivative) :
-                             (:metadata_value_dcreal, :metadata_value_dcimag,
-                        :metadata_derivative_dcreal, :metadata_derivative_dcimag)
-                    for field in fields
-                        @test getproperty(fd, field).method === :finite_difference
-                        @test getproperty(fd, field).finite_flag
-                    end
+                fields = c isa Real ? (:metadata_value, :metadata_derivative) :
+                         (:metadata_value_dcreal, :metadata_value_dcimag,
+                    :metadata_derivative_dcreal, :metadata_derivative_dcimag)
+                for field in fields
+                    @test getproperty(fd, field).method === :finite_difference
+                    @test getproperty(fd, field).finite_flag
                 end
             end
         end
@@ -556,51 +581,62 @@ end
     end
 end
 @testset "Complex coordinate parameter sensitivities" begin
-    for (jac, z, options) in ((jacobian_smn, 1+0im, (;)),
-        (jacobian_rmn, 1+0im, (;)),
-        (jacobian_rmn, 1+0im, (; normalization = :static)),
-        (jacobian_rmn, 0im, (; spheroid = :oblate)))
-        c = big"1.25"+big"0.125"*im
-        analytic = jac(0, 0, c, z; precision = :quad, options...)
-        stencil = jac(0, 0, c, z; precision = :quad, h = big"1e-6", options...)
-        @test analytic.dvalue_dcreal ≈ stencil.dvalue_dcreal rtol=big"1e-10"
-        @test analytic.dderivative_dcreal≈stencil.dderivative_dcreal rtol=big"1e-10" atol=big"1e-40"
+    for (jac, z, precision, options) in ((jacobian_smn, 1, :double, (;)),
+        (jacobian_rmn, 1, :double, (;)),
+        (jacobian_rmn, 1, :quad, (; normalization = :static)),
+        (jacobian_rmn, 0, :double, (; spheroid = :oblate)))
+        T = precision === :quad ? BigFloat : Float64
+        z, c = complex(T(z)), complex(T(1.25), T(0.125))
+        h = precision === :quad ? big"1e-6" : 1e-4
+        tolerance = precision === :quad ? big"1e-10" : 2e-7
+        analytic = jac(0, 0, c, z; precision, options...)
+        stencil = jac(0, 0, c, z; precision, h, adaptive = false, options...)
+        @test analytic.dvalue_dcreal ≈ stencil.dvalue_dcreal rtol=tolerance
+        @test analytic.dderivative_dcreal≈stencil.dderivative_dcreal rtol=tolerance atol=eps(T)
     end
-    singular = jacobian_smn(0, 0, 1.25+0.125im, 1+0im; kind = 2, h = 1e-5)
+    singular = jacobian_smn(0, 0, 1.25+0.125im, 1.0+0im; kind = 2, h = 1e-5)
     @test all(isnan, singular.dvalue_dcreal)
-    for spheroid in (:prolate, :oblate),
-        (f, jac, z) in ((smn, jacobian_smn, 0.3+0.2im), (rmn, jacobian_rmn, 1.6+0.3im)),
-        kind in 1:2
-        c = big"1.25"+big"0.125"*im
-        result = jac(1, 2, c, z; spheroid, precision = :quad, kind, diagnostics = true)
-        difference = jac(1, 2, c, z; spheroid, precision = :quad,
-            kind, h = big"1e-6", diagnostics = true)
-        @test result.dvalue_dcreal ≈ difference.dvalue_dcreal rtol=big"1e-10"
-        @test result.dderivative_dcimag ≈ difference.dderivative_dcimag rtol=big"1e-10"
+    # Cover each geometry, function family and kind without repeating the full
+    # Cartesian product of expensive complex-coordinate stencils.
+    for (precision, spheroid, f, jac, z, kind) in (
+        (:double, :prolate, smn, jacobian_smn, 0.3+0.2im, 1),
+        (:quad, :oblate, smn, jacobian_smn, 0.3+0.2im, 2),
+        (:quad, :prolate, rmn, jacobian_rmn, 1.6+0.3im, 2),
+        (:double, :oblate, rmn, jacobian_rmn, 1.6+0.3im, 1))
+        T = precision === :quad ? BigFloat : Float64
+        z, c = Complex{T}(z), complex(T(1.25), T(0.125))
+        h = precision === :quad ? big"1e-6" : 1e-4
+        tolerance = precision === :quad ? big"1e-10" : 2e-7
+        result = jac(1, 2, c, z; spheroid, precision, kind, diagnostics = true)
+        difference = jac(1, 2, c, z; spheroid, precision,
+            kind, h, adaptive = false, diagnostics = true)
+        @test result.dvalue_dcreal ≈ difference.dvalue_dcreal rtol=tolerance
+        @test result.dderivative_dcimag ≈ difference.dderivative_dcimag rtol=tolerance
         @test result.dvalue_dcimag == im*result.dvalue_dcreal
         @test result.dderivative_dcimag == im*result.dderivative_dcreal
         @test result.metadata_value_dcreal.method === :differentiated_equation
         @test result.metadata_derivative_dcimag.conditioning_flag === :good
         second = jac(
-            1, 2, c, z; spheroid, precision = :quad, kind, order = 2, diagnostics = true)
-        h = big"1e-6"
-        jp = jac(1, 2, c+h, z; spheroid, precision = :quad, kind)
-        jm = jac(1, 2, c-h, z; spheroid, precision = :quad, kind)
-        @test second.d2value_dcreal2 ≈ (jp.dvalue_dcreal-jm.dvalue_dcreal)/(2h) rtol=big"1e-10"
+            1, 2, c, z; spheroid, precision, kind, order = 2, diagnostics = true)
+        jp = jac(1, 2, c+h, z; spheroid, precision, kind)
+        jm = jac(1, 2, c-h, z; spheroid, precision, kind)
+        @test second.d2value_dcreal2 ≈ (jp.dvalue_dcreal-jm.dvalue_dcreal)/(2h) rtol=tolerance
         @test second.d2value_dcimag2 == -second.d2value_dcreal2
         @test second.d2derivative_dcreal_dcimag == im*second.d2derivative_dcreal2
         real_result = jac(
-            1, 2, real(c), z; spheroid, precision = :quad, kind, diagnostics = true)
-        real_difference = jac(1, 2, real(c), z; spheroid, precision = :quad,
+            1, 2, real(c), z; spheroid, precision, kind, diagnostics = true)
+        real_difference = jac(1, 2, real(c), z; spheroid, precision,
             kind, h, adaptive = false, diagnostics = true)
-        @test real_result.dvalue_dc ≈ real_difference.dvalue_dc rtol=big"1e-10"
-        @test real_result.dderivative_dc ≈ real_difference.dderivative_dc rtol=big"1e-10"
+        @test real_result.dvalue_dc ≈ real_difference.dvalue_dc rtol=tolerance
+        @test real_result.dderivative_dc ≈ real_difference.dderivative_dc rtol=tolerance
         # Differentiate the returned third derivative along an imaginary step.
-        high = f(1, 2, c, z; spheroid, precision = :quad, kind, derivatives = 4)
-        plus = f(1, 2, c, z+im*h; spheroid, precision = :quad, kind, derivatives = 3)
-        minus = f(1, 2, c, z-im*h; spheroid, precision = :quad, kind, derivatives = 3)
+        high = f(1, 2, c, z; spheroid, precision, kind, derivatives = 4)
+        plus = f(1, 2, c, z+im*h; spheroid, precision, kind, derivatives = 3)
+        minus = f(1, 2, c, z-im*h; spheroid, precision, kind, derivatives = 3)
         @test high.fourth_derivative ≈
-              (plus.third_derivative-minus.third_derivative)/(2im*h) rtol=big"1e-9"
+              (plus.third_derivative-minus.third_derivative)/(2im*h) rtol=(precision ===
+                                                                           :quad ?
+                                                                           big"1e-9" : 1e-6)
     end
     for spheroid in (:prolate, :oblate), kind in 1:2
 

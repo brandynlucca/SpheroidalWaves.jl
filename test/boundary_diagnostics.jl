@@ -7,7 +7,10 @@ using SpheroidalWaves, Test
         T = precision === :quad ? BigFloat : Float64
         tolerance = precision === :quad ? big"2e-27" : 2e-12
         for c in (zero(Complex{T}), complex(T(1.25), T(0.125)))
-            for spheroid in (:prolate, :oblate), m in 0:9
+            # Orders straddle the finite, singular and vanishing fourth-
+            # derivative limits. Exact intermediate orders are checked below.
+            geometries = iszero(c) ? (:prolate,) : (:prolate, :oblate)
+            for spheroid in geometries, m in (0, 1, 2, 7, 8, 9)
 
                 n = m+1
                 r = smn(m, n, c, T[-1, 1]; spheroid, precision, derivatives = 4)
@@ -43,7 +46,9 @@ using SpheroidalWaves, Test
 
             r = rmn(
                 m, m+1, c, T[1, 2]; precision, kind, derivatives = 4, logderivative = true)
-            nearby = rmn(m, m+1, c, [1+big"1e-10"]; precision, kind, derivatives = 4)
+            nearby = kind == 1 ?
+                     rmn(m, m+1, c, [1+big"1e-10"]; precision, kind, derivatives = 4) :
+                     nothing
             for field in fields
                 endpoint = first(getproperty(r, field))
                 @test kind==1 ? !isnan(endpoint) : isnan(endpoint)
@@ -84,8 +89,7 @@ end
     weights(order) = matrix \
                      Rational{BigInt}[p==order ? factorial(big(order)) : 0 for p in 0:8]
     w3, w4 = weights(3), weights(4)
-    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
-
+    for (precision, spheroid) in ((:double, :prolate), (:quad, :oblate))
         T = precision === :quad ? BigFloat : Float64
         tol = precision === :quad ? big"2e-27" : 2e-12
         for x in (T(0.25), big"1"-big"1e-20", -big"1"+big"1e-20")

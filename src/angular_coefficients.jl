@@ -182,7 +182,7 @@ function _small_parameter_plan(m, n, c, spheroid, precision)
         plan = _coefficient_plan(m, n, parameter; spheroid, precision,
             eigenvalue_seed = seed, max_terms = max(64, (n-m)÷2+32))
         plan.converged || error("Small-parameter coefficient expansion did not converge")
-        plan
+        return plan
     end
 end
 

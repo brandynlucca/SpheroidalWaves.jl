@@ -132,7 +132,7 @@ function _shared_real_degree_range(m, n, c, points, spheroid, precision, target,
                       for (v, d, x) in zip(result.value, result.derivative, points)]
             converted = (; converted..., logderivative = ratio)
         end
-        converted
+        return converted
     end
     if native_first>first(n)
         refined = [smn(m, degree, c, points; spheroid, precision, normalize = option!=0,

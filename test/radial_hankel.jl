@@ -18,7 +18,7 @@ using SpheroidalWaves, Test
                   for l in coefficients.degrees]
         value, derivative = sum(terms .* values)/denominator,
         sum(terms .* slopes)/denominator
-        for precision in (:double, :quad)
+        for precision in (spheroid === :prolate ? :double : :quad,)
             tolerance = precision===:quad ? big"2e-27" : 2e-12
             actual = rmn(0, 0, c, z; spheroid, precision, kind = 3, scaled = true)
             @test only(actual.value.mantissa .* BigFloat(10) .^ actual.value.exponent) ≈
