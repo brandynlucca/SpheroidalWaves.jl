@@ -4,7 +4,11 @@ using Libdl
 using LinearAlgebra: Tridiagonal
 using SpheroidalWaves_jll
 
-export smn, rmn, radial_wronskian, accuracy, eigenvalue, eigenvalue_sweep, jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
+export smn, rmn
+export dmn, kmn, amn
+export eigenvalue, eigenvalue_sweep
+export jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue
+export radial_wronskian, accuracy 
 
 const _backend_libraries = Dict{Symbol,Union{Nothing,String}}(
     :double => nothing,
@@ -185,7 +189,7 @@ function _combine_split_parts(hi::Vector{Float64}, lo::Vector{Float64})
 end
 
 function _split_real_to_double_pair(x::Real)
-    bx = BigFloat(x)
+    bx = _input_bigfloat(x)
     hi = Float64(bx)
     lo = Float64(bx - BigFloat(hi))
     return hi, lo
@@ -217,10 +221,12 @@ const _QUAD_TEXT_WIDTH = 96
 
 # Bound the decimal payload independently of the caller's BigFloat precision.
 # 192 bits retains ample guard bits above the native binary128 significand.
-_quad_input_text(x::Real) = string(BigFloat(x; precision=192))
+_fortran_decimal_string(x::Real) = _with_swprecision(192) do
+    string(_SWFloat(x))
+end
 
-function _encode_real_text_scalar(x::Real; width::Int=_QUAD_TEXT_WIDTH)
-    s = _quad_input_text(x)
+function _format_fortran_input(x::Real; width::Int=_QUAD_TEXT_WIDTH)
+    s = _fortran_decimal_string(x)
     if ncodeunits(s) > width
         error("Quad text payload overflow for scalar input; increase _QUAD_TEXT_WIDTH.")
     end
@@ -229,11 +235,11 @@ function _encode_real_text_scalar(x::Real; width::Int=_QUAD_TEXT_WIDTH)
     return out
 end
 
-function _encode_real_text_vector(xs::AbstractVector{<:Real}; width::Int=_QUAD_TEXT_WIDTH)
+function _format_fortran_input(xs::AbstractVector{<:Real}; width::Int=_QUAD_TEXT_WIDTH)
     n = length(xs)
     out = fill(UInt8(' '), width * n)
     @inbounds for i in eachindex(xs)
-        s = _quad_input_text(xs[i])
+        s = _fortran_decimal_string(xs[i])
         if ncodeunits(s) > width
             error("Quad text payload overflow for vector input; increase _QUAD_TEXT_WIDTH.")
         end
@@ -243,7 +249,7 @@ function _encode_real_text_vector(xs::AbstractVector{<:Real}; width::Int=_QUAD_T
     return out
 end
 
-function _decode_real_text_vector(buf::Vector{UInt8}, n::Integer; width::Int=_QUAD_TEXT_WIDTH)
+function _parse_fortran_output(buf::Vector{UInt8}, n::Integer; width::Int=_QUAD_TEXT_WIDTH)
     out = Vector{BigFloat}(undef, n)
     @inbounds for i in 1:n
         off = (i - 1) * width + 1
@@ -253,7 +259,7 @@ function _decode_real_text_vector(buf::Vector{UInt8}, n::Integer; width::Int=_QU
     return out
 end
 
-function _decode_scaled_real_text_vector(buf::Vector{UInt8}, exponents::Vector{Cint}, n::Integer; width::Int=_QUAD_TEXT_WIDTH)
+function _parse_fortran_output(buf::Vector{UInt8}, exponents::Vector{Cint}, n::Integer; width::Int=_QUAD_TEXT_WIDTH)
     out = Vector{BigFloat}(undef, n)
     @inbounds for i in 1:n
         off = (i - 1) * width + 1
@@ -274,14 +280,14 @@ end
 
 function _validate_radial_parameter(c)
     iszero(c) && throw(DomainError(c,
-        "radial spheroidal functions require c != 0; the c=0 radial normalization is undefined"))
+        "standard radial normalization requires c != 0; use normalization=:static for the zero-parameter limit"))
     return nothing
 end
 
 function _resolve_jacobian_step(c::Union{Real,Complex}, h, precision::Symbol=:double)
     T = precision === :quad ? BigFloat : Float64
     epsilon = precision === :quad ? T(2)^(-112) : eps(T)
-    step = h === nothing ? cbrt(epsilon)*max(one(T),T(abs(c))) : T(h)
+    step = h === nothing ? cbrt(epsilon)*max(one(T),T(abs(c))) : _input_float(T,h)
     isfinite(step) && step > 0 || error("h must be finite and positive, got $h")
     return step
 end
@@ -394,9 +400,9 @@ function _call_real_smn(prefix::Symbol, m::Integer, n::Integer, c::Real, eta::Ab
     status = Ref{Cint}(0)
 
     if precision === :quad
-        c_text = _encode_real_text_scalar(c)
+        c_text = _format_fortran_input(c)
         endpoint = _angular_endpoint_plan(m,n,c,eta,prefix === :psms ? :prolate : :oblate)
-        eta_text = _encode_real_text_vector(endpoint === nothing ? eta : endpoint.native_points)
+        eta_text = _format_fortran_input(endpoint === nothing ? eta : endpoint.native_points)
         value_text = fill(UInt8(' '), _QUAD_TEXT_WIDTH * Int(n_eta))
         derivative_text = fill(UInt8(' '), _QUAD_TEXT_WIDTH * Int(n_eta))
         value_exp = zeros(Cint, Int(n_eta))
@@ -416,8 +422,8 @@ function _call_real_smn(prefix::Symbol, m::Integer, n::Integer, c::Real, eta::Ab
         end
 
         _check_scalar_status(status[])
-        value = _decode_scaled_real_text_vector(value_text, value_exp, Int(n_eta))
-        derivative = _decode_scaled_real_text_vector(derivative_text, derivative_exp, Int(n_eta))
+        value = _parse_fortran_output(value_text, value_exp, Int(n_eta))
+        derivative = _parse_fortran_output(derivative_text, derivative_exp, Int(n_eta))
         _angular_endpoint_reconstruct!(value,derivative,endpoint,m,n)
         endpoint !== nothing && (estimate[endpoint.indices] .= -1)
         return with_accuracy ? (; value, derivative, accuracy=_reported_accuracy(estimate, value, precision)) : (; value, derivative)
@@ -472,7 +478,7 @@ function _call_real_rmn(prefix::Symbol, m::Integer, n::Integer, c::Real, x::Abst
         c_hi, c_lo = _split_real_to_double_pair(c)
         # Preserve the small boundary distance before converting to the native
         # representation. Sending x first can lose most digits of x-1.
-        coordinates = offset_input ? BigFloat.(x) .- 1 : x
+        coordinates = offset_input ? _input_bigfloat.(x) .- 1 : x
         x_hi, x_lo = _split_real_vector_to_double_pairs(coordinates)
         value_re_hi = zeros(Float64, n_x)
         value_re_lo = zeros(Float64, n_x)
@@ -536,7 +542,7 @@ function _call_complex_smn_raw(prefix::Symbol, m::Integer, n::Integer, c::Comple
         return (;value=complex.(result.value),derivative=complex.(result.derivative))
     end
 
-    points = precision === :quad ? BigFloat.(eta) : Float64.(eta)
+    points = precision === :quad ? _input_bigfloat.(eta) : Float64.(eta)
     if precision === :quad
         result = _call_complex_quad(prefix, m, n, c, points, 1, _bool_to_cint(normalize))
         d = result.data
@@ -545,6 +551,8 @@ function _call_complex_smn_raw(prefix::Symbol, m::Integer, n::Integer, c::Comple
     else
         lib = _require_backend_library(precision)
         fnptr = _symbol_pointer(lib, Symbol(String(prefix) * "_smn_batch_c8"))
+        endpoint = _angular_endpoint_plan(m,n,c,eta,prefix === :cprolate ? :prolate : :oblate;precision)
+        endpoint !== nothing && (points = Float64.(endpoint.native_points))
         n_eta = Cint(length(points))
         value_re = zeros(Float64, n_eta)
         value_im = zeros(Float64, n_eta)
@@ -558,12 +566,13 @@ function _call_complex_smn_raw(prefix::Symbol, m::Integer, n::Integer, c::Comple
         _check_scalar_status(status[])
         value = _complex_parts(value_re, value_im)
         derivative = _complex_parts(deriv_re, deriv_im)
+        _angular_endpoint_reconstruct!(value,derivative,endpoint,m,n)
     end
     return (; value, derivative)
 end
 
 function _call_complex_rmn_raw(prefix::Symbol, m::Integer, n::Integer, c::Complex, x::AbstractVector{<:Real}; precision::Symbol=:double, kind::Integer=1)
-    if _radial_needs_analytic(c,x,kind)
+    if _radial_needs_analytic(c,x,kind) || (prefix === :cprolate && any(isone,x))
         spheroid=prefix===:cprolate ? :prolate : :oblate
         seed=_call_complex_eigenvalue(prefix,m,n,c;precision)
         return _radial_analytic_values(m,n,c,x,spheroid,precision,kind;eigenvalue_seed=seed)
@@ -815,11 +824,10 @@ polynomials when c is small.
         Degree parameter (defines eigenfunction; n ≥ 0)
     c::Real or Complex
         Size parameter (prolate: c = kd/2 with k=wavenumber, d=interfocal distance)
-        - Real c: real-valued functions
-        - Complex c: complex-valued functions (advanced applications)
-    η::Union{Real,AbstractVector{<:Real}}
-        Evaluation point(s) in [-1, 1]
-        Represents cos(θ) where θ is angle in spherical coordinates
+        Real c and real coordinates give real angular values.
+    η::Union{Number,AbstractVector{<:Number}}
+        Real points in [-1, 1], or complex points off the real rays outside [-1, 1].
+        Complex values continue the real-coordinate normalization.
         Scalar inputs are forwarded as a one-point batch
     
     Keyword Arguments:
@@ -850,9 +858,11 @@ polynomials when c is small.
             Return value and derivative as (mantissa, exponent) arrays, with
             value = mantissa * 10^exponent, preserving native scaling.
         logderivative::Bool = false
-            Append S′/S, calculated before output conversion; NaN at a computed zero.
+            Append S′/S with one-sided endpoint limits. Other computed zeros give NaN.
         second_derivative::Bool = false
             Append S″ from the ODE, using one-sided limits at singular endpoints.
+        derivatives::Integer = 1
+            Return coordinate derivatives through order 1–4, with one-sided endpoint limits.
 
 **Returns:**
     NamedTuple with fields:
@@ -875,7 +885,8 @@ polynomials when c is small.
       Singular or unresolved second-kind normalization raises an error.
 
 **Performance:**
-    - First-kind batches use the native Fortran backend.
+    - Real-coordinate first-kind batches use the native Fortran backend.
+    - Complex coordinates use differential-equation continuation.
     - Second-kind batches reuse coefficient data and Taylor propagation across
       sorted coordinates. They are slower, particularly near singular endpoints.
 
@@ -925,9 +936,14 @@ end
 
 function smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::AbstractVector{<:Real};
              spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false,
-             kind::Integer=1, second_derivative::Bool=false, scaled::Bool=false, logderivative::Bool=false)
+             kind::Integer=1, second_derivative::Bool=false, scaled::Bool=false, logderivative::Bool=false,
+             derivatives::Integer=1)
 
     _validate_wave_arguments(m,n,c,eta,spheroid,precision,:angular;kind)
+    derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    derivatives > 2 && return _coordinate_derivatives(m,n,c,eta,spheroid,precision,:angular,
+                                                     kind,normalize,scaled,logderivative,derivatives)
+    second_derivative |= derivatives == 2
     if c isa Complex && iszero(real(c)) && !iszero(c)
         opposite=spheroid===:prolate ? :oblate : :prolate
         r=smn(m,n,abs(imag(c)),eta;spheroid=opposite,precision,normalize,kind,scaled,logderivative,second_derivative)
@@ -963,8 +979,8 @@ Ordinary calls reconstruct the values. `scaled=true` instead preserves native
 mantissas and decimal exponents to avoid reconstruction overflow and underflow.
 
 These are eigenfunction solutions to the radial part of the spheroidal wave equation,
-defined for x >= 1 (prolate) or x >= 0 (oblate). Complex prolate calls require
-x > 1. At the real prolate endpoint, only the first kind is defined.
+defined for x >= 1 (prolate) or x >= 0 (oblate), for real or complex parameters.
+At the prolate endpoint, only the first kind is defined.
 Four kinds of radial functions are available.
 
 **Mathematical Background:**
@@ -977,11 +993,12 @@ Four kinds of radial functions are available.
 
     m, n, c: See smn() documentation
     
-    x::Union{Real,AbstractVector{<:Real}}
+    x::Union{Number,AbstractVector{<:Number}}
         Radial evaluation points
-        - For prolate: x >= 1
-        - For oblate: x >= 0
-        - Vectorized computation: all points evaluated in single Fortran call
+        - Real prolate: x >= 1. Real oblate: x >= 0.
+        - Complex prolate: excludes the real segment [-1, 1).
+        - Complex oblate: excludes imaginary rays z=iy with abs(y) >= 1.
+          Continuation through z=0 fixes the oblate branch.
     
     kind::Integer = 1
         Which radial function kind:
@@ -1004,9 +1021,13 @@ Four kinds of radial functions are available.
     - `scaled=true`: return `(mantissa, exponent)` arrays for values and derivatives,
       representing `mantissa*10^exponent`.
     - `logderivative=true`: append `R′/R`, calculated before output conversion;
-      return NaN at a computed zero.
+      use one-sided endpoint limits and return NaN at other computed zeros.
     - `second_derivative=true`: append R″ from the ODE, with one-sided limits for
       the regular prolate first kind at x=1; undefined kinds retain NaN.
+    - `derivatives=1`: return coordinate derivatives through order 1–4.
+      Endpoint derivatives use finite or infinite one-sided limits.
+    - `normalization=:static`: evaluate c^(-n)*R₁ or c^(n+1)*R₂, including
+      their limits at c=0. Supports kinds 1 and 2. The default is `:standard`.
 
 **Returns (default options):**
     NamedTuple with fields:
@@ -1027,8 +1048,8 @@ Four kinds of radial functions are available.
     - Scaling does not improve the native solver's numerical accuracy
 
 **Special Cases:**
-    - c = 0: Throws DomainError; no zero-parameter radial normalization is defined
-    - x = 1 (real prolate boundary): kinds 2–4 return NaN
+    - c = 0: Requires `normalization=:static`
+    - x = 1 (prolate boundary): kinds 2–4 return NaN
     - Large c or x: Rapid oscillation; may need fine resolution
 
 **Examples:**
@@ -1054,7 +1075,7 @@ Four kinds of radial functions are available.
 
 **Notes:**
     - Return values are complex even when c and x are real
-    - For real c, kind=1 has real values; kind=2 has real values; kinds 3,4 are complex
+    - For real c and x, kinds 1 and 2 are real and kinds 3 and 4 are complex
     - Scalar coordinates return length-one arrays
     - For real c > 0: W = 1/(c*(x²-1)) (prolate), 1/(c*(x²+1)) (oblate)
 
@@ -1069,11 +1090,16 @@ Four kinds of radial functions are available.
 """
 function rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
              spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1,
-             second_derivative::Bool=false, scaled::Bool=false, logderivative::Bool=false)
+             second_derivative::Bool=false, scaled::Bool=false, logderivative::Bool=false,
+             derivatives::Integer=1,normalization::Symbol=:standard)
 
-    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind)
-    if _radial_needs_analytic(c,x,kind)
-        return _radial_analytic_wave(m,n,c,x,spheroid,precision,kind,scaled,logderivative,second_derivative)
+    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind,normalization)
+    derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    derivatives > 2 && return _coordinate_derivatives(m,n,c,x,spheroid,precision,:radial,
+                                                     kind,false,scaled,logderivative,derivatives;normalization)
+    second_derivative |= derivatives == 2
+    if normalization === :static || _radial_needs_analytic(c,x,kind) || (c isa Complex && spheroid === :prolate && any(isone,x))
+        return _radial_analytic_wave(m,n,c,x,spheroid,precision,kind,scaled,logderivative,second_derivative;normalization)
     end
     if scaled || logderivative
         return _extended_wave(m,n,c,x,spheroid,precision,:radial,kind,scaled,logderivative,second_derivative)
@@ -1093,7 +1119,7 @@ end
 rmn(m::Integer,n::Integer,c::Union{Real,Complex},x::Real;kwargs...) = rmn(m,n,c,[x];kwargs...)
 
 """
-    radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double, form=:raw)
+    radial_wronskian(m, n, c, x; spheroid=:prolate, precision=:double, form=:raw, normalization=:standard)
 
 Return `W = R1 .* R2′ - R1′ .* R2` at the radial coordinates `x`.
 Here `R1` and `R2` are [`rmn`](@ref) kinds 1 and 2, and primes denote
@@ -1103,8 +1129,9 @@ or `normalize` keyword.
 ### Arguments and keywords
 
 - `m`, `n`: integer order and degree, `0 <= m <= n`.
-- `c`: finite, nonzero real or complex parameter, with the same domain as `rmn`.
-- `x`: real scalar or nonempty vector of radial coordinates. Use `x>1` for
+- `c`: finite real or complex parameter, with the same domain as `rmn`.
+- `x`: scalar or nonempty vector of radial coordinates, with the same complex
+  cuts as `rmn`. For real coordinates use `x>1` for
   prolate and `x>=0` for oblate geometry. The prolate endpoint `x=1` is singular
   for the second-kind solution, so it cannot give a finite Wronskian check.
 - `spheroid=:prolate`: geometry, `:prolate` or `:oblate`.
@@ -1112,6 +1139,8 @@ or `normalize` keyword.
   components in the result.
 - `form=:raw`: return `W`. `:normalized` returns `c*(x^2-σ)*W` and `:error`
   returns `abs(c*(x^2-σ)*W - 1)`, with `σ=1` for prolate and `σ=-1` for oblate.
+- `normalization=:static`: use the static-normalized pair, with W=1/(x²-σ)
+  and normalized output (x²-σ)*W. Includes c=0.
 
 ### Returns
 
@@ -1121,8 +1150,8 @@ A vector with one entry per coordinate (length one for scalar `x`).
 
 For real `c > 0`, the standard normalization gives `W(x) = 1/(c*(x^2-1))`
 for prolate functions and `W(x) = 1/(c*(x^2+1))` for oblate functions.
-The raw Wronskian therefore varies with position. At `c=0`, this function
-throws `DomainError`, as does `rmn`.
+The raw Wronskian therefore varies with position. At `c=0`, standard
+normalization throws `DomainError`, as for `rmn`.
 
 Use the normalized Wronskian error to check consistency:
 
@@ -1142,11 +1171,21 @@ Normalized forms preserve scaling during intermediate products.
 
 """
 function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
-                          spheroid::Symbol=:prolate, precision::Symbol=:double, form::Symbol=:raw)
+                          spheroid::Symbol=:prolate, precision::Symbol=:double, form::Symbol=:raw,normalization::Symbol=:standard)
 
     form in (:raw,:normalized,:error) || throw(ArgumentError("form must be :raw, :normalized or :error"))
 
-    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial)
+    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;normalization)
+    if normalization === :static
+        r1 = _static_radial_values(m,n,c,x,spheroid,precision,1)
+        r2 = _static_radial_values(m,n,c,x,spheroid,precision,2)
+        W = r1.value.*r2.derivative .- r1.derivative.*r2.value
+        T = precision === :quad ? BigFloat : Float64
+        form === :raw && return Complex{T}.(W)
+        xs = _input_bigfloat.(x)
+        factor = spheroid === :prolate ? (xs.-1).*(xs.+1) : xs.^2 .+ 1
+        return form === :normalized ? Complex{T}.(factor.*W) : T.(abs.(factor.*W.-1))
+    end
     r1 = form === :raw ? rmn(m,n,c,x;spheroid,precision,kind=1) :
                         _scaled_native_values(m,n,c,x,spheroid,precision,:radial,1)
     r2 = form === :raw ? rmn(m,n,c,x;spheroid,precision,kind=2) :
@@ -1157,7 +1196,7 @@ function radial_wronskian(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abs
     
     form === :raw && return W
     T = precision === :quad ? BigFloat : Float64
-    xs = BigFloat.(x)
+    xs = _input_bigfloat.(x)
     factor = spheroid === :prolate ? (xs .- 1).*(xs .+ 1) : xs.^2 .+ 1
     normalized = c .* factor .* W
     return form === :normalized ? Complex{T}.(normalized) : T.(abs.(normalized .- 1))
@@ -1233,7 +1272,7 @@ include("eigenvalue_sweep.jl")
 
 """
     jacobian_eigen(m, n, c; spheroid=:prolate, precision=:double,
-                   operator=:separation, form=:value, h=nothing,
+                   operator=:separation, form=:value, order=1, h=nothing,
                    with_metadata=false, adaptive=true, rtol=1e-6, atol=1e-10)
 
 Differentiate [`eigenvalue`](@ref) with respect to `c`. Order and degree satisfy
@@ -1247,11 +1286,16 @@ selects finite differences.
   components in the result.
 - `operator=:separation`: differentiate the separation constant.
   `:concentration` and `:fourier` require real `c >= 0`, `m=0`, and `:prolate`.
+- `order=1`: use `order=2` for the second parameter derivative. This differences
+  analytic first derivatives with fourth-order stencils and step refinement.
+  Complex results have `d2_dcreal2`, `d2_dcreal_dcimag`, and `d2_dcimag2` fields.
+  `with_metadata=true` appends a shared `metadata` field for order 2.
 - `form=:value`: differentiate the selected eigenvalue. Concentration also
   accepts `:log` and `:complement`, giving derivatives of `log(Λ)` and `1-Λ`.
-- `h=nothing`: analytic differentiation. A positive finite step selects centered
-  differences; integral operators require `h<c` when `c>0` and use forward
-  differences at zero.
+- `h=nothing`: analytic first derivatives or an automatic step for order 2.
+  A positive finite step selects centered differences. Integral operators
+  require `h<c` for order 1 or `2h<c` for order 2 when `c>0`.
+  Integral stencils use forward differences at zero.
 - `with_metadata=false`: include diagnostic fields when `true`; see below.
 - `adaptive=true`: allow smaller finite-difference steps when consistency is poor.
   Has no effect on the default analytic calculation.
@@ -1263,7 +1307,7 @@ selects finite differences.
 For real `c`, return a scalar derivative, or `(derivative, metadata)` when
 `with_metadata=true`. Concentration results are real; Fourier results are complex.
 
-For complex `c=a+ib`, return `(d_dcreal, d_dcimag)`, containing `∂λ/∂a` and `∂λ/∂b`.
+For order 1 and complex `c=a+ib`, return `(d_dcreal, d_dcimag)`, containing `∂λ/∂a` and `∂λ/∂b`.
 With metadata, append `metadata_dcreal` and `metadata_dcimag`.
 On a local analytic branch, `d_dcimag = im*d_dcreal`.
 
@@ -1275,13 +1319,13 @@ tail size, eigenvalue conditioning, and eigenproblem/sensitivity residuals;
 `step_used` and `relative_change_when_halving_step` are `nothing`.
 Finite differences populate those two step fields, with conditioning
 `:good`, `:warning`, or `:poor` and action `:accept`, `:retry_smaller_h`, or `:use_quad`.
-Integral identities use `method=:integral_identity` or `:right_limit`.
+Unresolved curvature returns action `:unresolved` in quad precision. Integral limits use `:right_limit`.
 
 !!! note "Zero bandwidth"
-    Integral derivatives use right-hand limits: `Λ₀′=2/π`, `Λₙ′=0` for `n>0`,
-    `μ₁′=-2im/3`, and all other Fourier derivatives vanish.
-    The logarithmic concentration derivative is `Inf`, with
-    `conditioning_flag=:singular`, and requires `h=nothing` at zero.
+    First derivatives are `Λ₀′=2/π` and `μ₁′=-2im/3`, otherwise zero.
+    Second derivatives are `μ₀″=-2/9` and `μ₂″=-8/45`, otherwise zero.
+    `form=:log` returns `Inf` for order 1 and `-Inf` for order 2, with
+    `conditioning_flag=:singular`. Both require `h=nothing` at zero.
 
 !!! warning "Reliability"
     Metadata supplies diagnostics, not error bounds. Near coalescing complex
@@ -1296,15 +1340,20 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real,Complex};
                                                 spheroid::Symbol=:prolate, precision::Symbol=:double, h=nothing,
                                                 with_metadata::Bool=false, adaptive::Bool=true,
                                                 rtol::Real=1e-6, atol::Real=1e-10,
-                                                operator::Symbol=:separation, form::Symbol=:value)
+                                                operator::Symbol=:separation, form::Symbol=:value,
+                                                order::Integer=1)
 
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
     operator in (:separation,:concentration,:fourier) ||
         throw(ArgumentError("operator must be :separation, :concentration or :fourier"))
+    order in (1,2) || throw(ArgumentError("order must be 1 or 2"))
+    operator === :separation && form !== :value &&
+        throw(ArgumentError("the separation constant supports only form=:value"))
+    order == 2 && return _eigen_curvature(m,n,c,spheroid,precision,operator,form,h,
+                                          with_metadata,adaptive,rtol,atol)
     operator!==:separation && return _integral_eigen_jacobian(m,n,c,spheroid,precision,
         operator,form,h,with_metadata,adaptive,rtol,atol)
-    form===:value || throw(ArgumentError("the separation constant supports only form=:value"))
     h === nothing && return _coefficient_eigen_jacobian(m,n,c,spheroid,precision,with_metadata)
     step = _resolve_jacobian_step(c, h, precision)
     if c isa Real
@@ -1347,12 +1396,17 @@ end
 """
 Numerical Jacobian of `smn` outputs with respect to `c`.
 
+`order=2` returns `d2value_dc2` and `d2derivative_dc2` for real `c`.
+For complex `c`, use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`.
+It differences analytic first derivatives using fourth-order stencils.
+`h` selects the step and `with_metadata=true` appends shared step diagnostics.
+
 By default, differentiate the normalized Legendre coefficient eigenvector and
 evaluate its expansion at the requested coordinates. Eigenvalue and angular
 sensitivities reuse the same internal coefficient calculation. For complex
 parameters this uses the analytic bilinear normalization and the local branch
 selected by `smn`. Imaginary-direction partials follow analyticity on that branch.
-Supplying `h` selects centered finite differences with local phase transport.
+For order 1, supplying `h` selects centered finite differences with local phase transport.
 At first-kind angular endpoints, the mixed coordinate/parameter derivative uses its
 one-sided limit, which can be infinite.
 
@@ -1363,11 +1417,11 @@ derivatives return `NaN`; nearby interior coordinates remain supported.
 Real first-kind derivatives with `abs(c) > n + 1` use extra working precision to
 protect exponentially small interior values from cancellation.
 
-For real `c`, returns:
+For order 1 and real `c`, returns:
 - `dvalue_dc`
 - `dderivative_dc`
 
-For complex `c = a + ib`, returns:
+For order 1 and complex `c = a + ib`, returns:
 - `dvalue_dcreal`, `dvalue_dcimag`
 - `dderivative_dcreal`, `dderivative_dcimag`
 """
@@ -1375,12 +1429,15 @@ function jacobian_smn(m::Integer, n::Integer, c::Union{Real,Complex}, eta::Abstr
                       spheroid::Symbol=:prolate, precision::Symbol=:double, normalize::Bool=false, h=nothing,
                       kind::Integer=1,
                       with_metadata::Bool=false, adaptive::Bool=true,
-                      rtol::Real=1e-6, atol::Real=1e-10)
+                      rtol::Real=1e-6, atol::Real=1e-10, order::Integer=1)
 
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
     _validate_wave_arguments(m,n,c,eta,spheroid,precision,:angular;kind)
     kind == 2 && normalize && throw(ArgumentError("normalize=true is only defined for angular kind=1; Qs uses the DLMF second-kind normalization"))
+    order in (1,2) || throw(ArgumentError("order must be 1 or 2"))
+    order == 2 && return _wave_curvature(m,n,c,eta,spheroid,precision,kind,normalize,:angular,
+                                         h,with_metadata,adaptive,rtol,atol)
     if h === nothing
         return kind == 2 ? _qs_angular_jacobian(m,n,c,eta,spheroid,precision,normalize,with_metadata) :
                            _coefficient_angular_jacobian(m,n,c,eta,spheroid,precision,normalize,with_metadata)
@@ -1464,47 +1521,56 @@ end
 """
 Numerical Jacobian of `rmn` outputs with respect to `c`.
 
+`order=2` returns `d2value_dc2` and `d2derivative_dc2` for real `c`.
+For complex `c`, use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`.
+It differences analytic first derivatives using fourth-order stencils.
+`h` selects the step and `with_metadata=true` appends shared step diagnostics.
+
 By default, differentiate the normalized spherical-Bessel expansions and their
 coefficient eigenproblem. Near boundaries where the second-kind expansion
 converges slowly, propagate the differentiated radial equation from x=2.
 Both geometries, all four kinds, and real/complex parameters are supported.
-Supplying `h` selects centered finite differences with local mode transport.
+For order 1, supplying `h` selects centered finite differences with local mode transport.
 The analytic path reports no finite-difference step. Its coefficient residuals
 and series-tail checks are diagnostics, not rigorous error bounds.
 
-At the prolate boundary x=1, real first-kind derivatives use regular one-sided
-limits; other kinds return NaN. Complex prolate calls require x>1, as for `rmn`.
-Exactly zero c remains undefined.
+At prolate x=1, first-kind derivatives use one-sided limits for real or complex
+parameters. Other kinds return NaN. `normalization=:static` includes c=0 and
+differentiates the static-normalized functions, including their powers of c.
 
-With explicit `h`, function values and coordinate derivatives reuse each native
-evaluation. Metadata then reports step consistency, not a rigorous accuracy bound.
+Order 1 with explicit `h` reuses function values and coordinate derivatives.
+Order 2 with standard normalization requires `2h<abs(c)`.
+Step diagnostics are not accuracy bounds.
 
-For real `c`, returns:
+For order 1 and real `c`, returns:
 - `dvalue_dc`
 - `dderivative_dc`
 
-For complex `c = a + ib`, returns:
+For order 1 and complex `c = a + ib`, returns:
 - `dvalue_dcreal`, `dvalue_dcimag`
 - `dderivative_dcreal`, `dderivative_dcimag`
 """
 function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::AbstractVector{<:Real};
                       spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, h=nothing,
                       with_metadata::Bool=false, adaptive::Bool=true,
-                      rtol::Real=1e-6, atol::Real=1e-10)
+                      rtol::Real=1e-6, atol::Real=1e-10, order::Integer=1,normalization::Symbol=:standard)
 
     _validate_precision(precision)
-    _validate_radial_parameter(c)
+    normalization === :standard && _validate_radial_parameter(c)
     _validate_jacobian_tolerances(rtol, atol)
-    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind)
-    h === nothing && return _radial_analytic_jacobian(m,n,c,x,spheroid,precision,kind,with_metadata)
+    _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind,normalization)
+    order in (1,2) || throw(ArgumentError("order must be 1 or 2"))
+    order == 2 && return _wave_curvature(m,n,c,x,spheroid,precision,kind,false,:radial,
+                                         h,with_metadata,adaptive,rtol,atol;normalization)
+    h === nothing && return _radial_analytic_jacobian(m,n,c,x,spheroid,precision,kind,with_metadata;normalization)
     step = _resolve_jacobian_step(c,h,precision)
     differentiate = _finite_difference_with_metadata
     if c isa Real
         T = precision === :quad ? BigFloat : Float64
-        c = T(c)
+        c = _input_float(T,c)
         cache = Dict{Any,Any}()
         evaluate(parameter) = get!(cache,parameter) do
-            rmn(m,n,parameter,x;spheroid,precision,kind)
+            rmn(m,n,parameter,x;spheroid,precision,kind,normalization)
         end
         calc_value = s -> begin
             rp = evaluate(c+s)
@@ -1529,8 +1595,8 @@ function jacobian_rmn(m::Integer, n::Integer, c::Union{Real,Complex}, x::Abstrac
         end
         return (dvalue_dc=dvalue_dc, dderivative_dc=dderivative_dc)
     else
-        _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind)
-        evaluate = _complex_local_evaluator(m,n,c,spheroid,precision;points=x,kind)
+        _validate_wave_arguments(m,n,c,x,spheroid,precision,:radial;kind,normalization)
+        evaluate = _complex_local_evaluator(m,n,c,spheroid,precision;points=x,kind,normalization)
         calc_value_re = s -> begin
             rp = evaluate(c+s)
             rm = evaluate(c-s)
@@ -1657,8 +1723,8 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
     operator===:separation && form!==:value &&
         throw(ArgumentError("the separation constant supports only form=:value"))
     T = precision===:quad ? BigFloat : Float64
-    atol = atol===nothing ? (operator===:separation ? T(1e-10) : precision===:quad ? T(10)^(-30) : T(1e-12)) : T(atol)
-    rtol = rtol===nothing ? (operator===:separation ? T(1e-8) : precision===:quad ? T(10)^(-28) : T(1e-10)) : T(rtol)
+    atol = atol===nothing ? (operator===:separation ? T(1e-10) : precision===:quad ? T(10)^(-30) : T(1e-12)) : _input_float(T,atol)
+    rtol = rtol===nothing ? (operator===:separation ? T(1e-8) : precision===:quad ? T(10)^(-28) : T(1e-10)) : _input_float(T,rtol)
     if spheroid != :prolate && spheroid != :oblate
         error("spheroid must be :prolate or :oblate, got :$spheroid")
     end
@@ -1674,15 +1740,15 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
     operator===:concentration && return _find_integral_bandwidth(m,n,lambda_target,
         bracket,spheroid,precision,form,atol,rtol,maxiter,use_jacobian)
 
-    a = T(bracket[1])
-    b = T(bracket[2])
+    a = _input_float(T,bracket[1])
+    b = _input_float(T,bracket[2])
     if !(isfinite(a) && isfinite(b) && a < b)
         error("bracket must satisfy bracket[1] < bracket[2]")
     end
 
     f(c) = T(eigenvalue(m, n, c; spheroid=spheroid, precision=precision) - lambda_target)
     jacobian(c) = jacobian_eigen(m, n, c; spheroid, precision, with_metadata=true, adaptive=true)
-    return _find_separation_root(f, jacobian, T(lambda_target), a, b, atol, rtol, maxiter, use_jacobian)
+    return _find_separation_root(f, jacobian, _input_float(T,lambda_target), a, b, atol, rtol, maxiter, use_jacobian)
 end
 
 function _find_separation_root(f, jacobian, lambda_target, a::T, b::T, atol, rtol, maxiter, use_jacobian) where {T}
@@ -1692,7 +1758,7 @@ function _find_separation_root(f, jacobian, lambda_target, a::T, b::T, atol, rto
         error("non-finite residual at bracket endpoints")
     end
 
-    tol_residual = atol + rtol * max(one(T), abs(T(lambda_target)))
+    tol_residual = atol + rtol * max(one(T), abs(_input_float(T,lambda_target)))
     width_tol() = atol + rtol * max(one(T), abs(a), abs(b))
 
     if abs(fa) <= tol_residual
@@ -1784,20 +1850,23 @@ end
 
 """
     accuracy(m, n, c, arg; target=:radial, spheroid=:prolate,
-             precision=:double, kind=1, normalize=false)
+             precision=:double, kind=1, normalize=false, normalization=:standard, diagnostics=false)
 
-Return a vector of backend-estimated decimal digits for the requested function
-values. These are solver diagnostics, not rigorous error bounds or statistical
+Return a vector of estimated decimal digits for the requested function
+values. Real coordinates use backend estimates. Complex coordinates compare
+higher-precision continuation with halved steps and include conditioning and
+output rounding. These are diagnostics, not rigorous error bounds or statistical
 confidence intervals, and do not certify the returned coordinate derivatives.
 
 ### Arguments and keywords
 
 - `m`, `n`: integer order and degree with `0 <= m <= n`.
-- `c`: finite real or complex spheroidal parameter. Radial evaluation requires
-  `c != 0` and follows the parameter domain of [`rmn`](@ref).
-- `arg`: nonempty vector of finite real coordinates, with one estimate returned
+- `c`: finite real or complex spheroidal parameter, following [`rmn`](@ref).
+  Radial `normalization=:static` includes zero. Its real-coordinate calls have no digit estimate.
+- `arg`: nonempty vector of finite coordinates, with one estimate returned
   per entry in the same order. For angular functions use `-1 <= eta <= 1`;
-  for radial functions use prolate `x>=1` or oblate `x>=0`. Singular coordinates
+  for real radial coordinates use prolate `x>=1` or oblate `x>=0`. Complex
+  coordinates follow the cuts of `smn` and `rmn`. Singular coordinates
   follow the behavior of the corresponding wave function. A single coordinate
   must be wrapped in a vector, e.g. `[0.3]`.
 - `target=:radial`: estimate radial values from `rmn`; `:angular` selects [`smn`](@ref).
@@ -1805,18 +1874,26 @@ confidence intervals, and do not certify the returned coordinate derivatives.
 - `precision=:double`: `:double` or `:quad`; evaluate at that precision before
   reporting integer digit estimates. This does not request a particular digit count.
 - `kind=1`: angular first kind (`1`) or second kind (`2`); radial kinds `1:4`.
-  Only radial `kind=2` has a radial digit estimator; the default radial `kind=1`
+  For real coordinates, only radial `kind=2` has a radial digit estimator. The default radial `kind=1`
   therefore returns `-1` at every coordinate.
 - `normalize=false`: use the default angular normalization. For angular `kind=1`,
   `true` selects unit integral normalization for real parameters and its analytic
   continuation for complex parameters. Angular `kind=2` rejects `true`.
   This keyword has no effect on radial estimates.
+- `diagnostics=false`: `true` returns `(; digits, diagnostics)`. For complex
+  coordinates, `diagnostics` contains per-point refinement changes, coordinate,
+  parameter and eigenvalue condition numbers, and convergence flags.
+  For real coordinates, `diagnostics` is `nothing`.
 
 ### Interpreting the result
 
-An entry of `-1` means **no estimate is available**. Zero means the backend
+An entry of `-1` means **no estimate is available**. Zero means the diagnostic
 reports no reliable decimal digits. Positive entries are estimates, not guarantees.
 Invalid inputs raise the same domain/argument errors as `smn` or `rmn`.
+
+For complex coordinates, zeros, endpoint limits, nonfinite outputs and unresolved
+refinement return `-1`. Condition numbers above 100 receive a `:warning` flag.
+The following backend limitations apply to real coordinates:
 
 - Angular `abs(c)<=1e-4`: return `-1`; the spherical-limit and small-parameter
   expansions have no calibrated digit estimator.
@@ -1827,7 +1904,7 @@ Invalid inputs raise the same domain/argument errors as `smn` or `rmn`.
   native estimates do not describe the coefficient-based result.
 - Angular endpoint limits and quad endpoint reconstruction: return `-1`; the native estimate
   describes the normalization point rather than the requested coordinate.
-- Radial `c=0`: throw `DomainError`, as for `rmn`.
+- Radial `c=0`: requires `normalization=:static`, which returns `-1`.
 - Radial `kind=2`: report the native second-kind estimate, which may use
   Wronskian consistency and cancellation diagnostics.
 - Radial `kind=1`, `3`, or `4`: evaluate the requested function, then return `-1`.
@@ -1846,20 +1923,36 @@ accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
 
 """
 function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractVector{<:Real};
-                  spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, target::Symbol=:radial, normalize::Bool=false)
+                  spheroid::Symbol=:prolate, precision::Symbol=:double, kind::Integer=1, target::Symbol=:radial, normalize::Bool=false,
+                  normalization::Symbol=:standard,diagnostics::Bool=false)
 
+    if diagnostics
+        digits = accuracy(m,n,c,arg;spheroid,precision,kind,target,normalize,normalization)
+        return (;digits,diagnostics=nothing)
+    end
     target in (:angular, :radial) || error("target must be :angular or :radial")
-    _validate_wave_arguments(m,n,c,arg,spheroid,precision,target;kind)
+    _validate_wave_arguments(m,n,c,arg,spheroid,precision,target;kind,normalization)
+    if normalization === :static
+        rmn(m,n,c,arg;spheroid,precision,kind,normalization)
+        return fill(-1,length(arg))
+    end
+    if target === :radial && spheroid === :prolate && any(isone,arg)
+        rmn(m,n,c,arg;spheroid,precision,kind)
+        estimates = fill(-1,length(arg))
+        interior = findall(x -> !isone(x),arg)
+        !isempty(interior) && (estimates[interior] = accuracy(m,n,c,arg[interior];spheroid,precision,kind,target))
+        return estimates
+    end
     if target === :angular && (_use_small_parameter_expansion(c) || kind == 2 || _use_angular_expansion(n,c,spheroid) || (c isa Complex && iszero(real(c))))
         smn(m,n,c,arg;spheroid,precision,normalize,kind)
         return fill(-1, length(arg)) # Neither evaluation has a calibrated digit estimator.
     elseif target === :radial && (kind != 2 || _radial_needs_analytic(c,arg,kind))
         rmn(m,n,c,arg;spheroid,precision,kind)
         return fill(-1, length(arg)) # Native naccr does not certify these kinds.
-    elseif target === :angular && any(x -> abs(x)==1,arg)
+    elseif target === :angular && any(x -> abs(x)==1 || _near_angular_endpoint(x),arg)
         smn(m,n,c,arg;spheroid,precision,normalize)
         estimates=fill(-1,length(arg))
-        interior=findall(x -> abs(x)!=1,arg)
+        interior=findall(x -> abs(x)!=1 && !_near_angular_endpoint(x),arg)
         if !isempty(interior)
             estimates[interior]=accuracy(m,n,c,arg[interior];spheroid,precision,target,normalize)
         end
@@ -1885,6 +1978,67 @@ function accuracy(m::Integer, n::Integer, c::Union{Real,Complex}, arg::AbstractV
             return _call_complex_rmn_accuracy(prefix, m, selected_n, c, arg; precision=precision, kind=kind)
         end
     end
+end
+
+jacobian_smn(m::Integer,n::Integer,c::Union{Real,Complex},z::Complex;kwargs...) = jacobian_smn(m,n,c,[z];kwargs...)
+jacobian_rmn(m::Integer,n::Integer,c::Union{Real,Complex},z::Complex;kwargs...) = jacobian_rmn(m,n,c,[z];kwargs...)
+
+function jacobian_smn(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,normalize::Bool=false,kind::Integer=1,h=nothing,
+        with_metadata::Bool=false,adaptive::Bool=true,rtol::Real=1e-6,atol::Real=1e-10,order::Integer=1)
+    _complex_coordinate_jacobian(m,n,c,z,spheroid,precision,:angular,kind,normalize,:standard,
+        h,with_metadata,adaptive,rtol,atol,order)
+end
+
+function jacobian_rmn(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,kind::Integer=1,normalization::Symbol=:standard,h=nothing,
+        with_metadata::Bool=false,adaptive::Bool=true,rtol::Real=1e-6,atol::Real=1e-10,order::Integer=1)
+    _complex_coordinate_jacobian(m,n,c,z,spheroid,precision,:radial,kind,false,normalization,
+        h,with_metadata,adaptive,rtol,atol,order)
+end
+
+smn(m::Integer,n::Integer,c::Union{Real,Complex},z::Complex;kwargs...) = smn(m,n,c,[z];kwargs...)
+rmn(m::Integer,n::Integer,c::Union{Real,Complex},z::Complex;kwargs...) = rmn(m,n,c,[z];kwargs...)
+
+function smn(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,normalize::Bool=false,kind::Integer=1,
+        scaled::Bool=false,logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1)
+    _complex_coordinate_wave(m,n,c,z,spheroid,precision,:angular,kind,normalize,
+        scaled,logderivative,second_derivative,derivatives,:standard)
+end
+
+function rmn(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,kind::Integer=1,normalization::Symbol=:standard,
+        scaled::Bool=false,logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1)
+    _complex_coordinate_wave(m,n,c,z,spheroid,precision,:radial,kind,false,
+        scaled,logderivative,second_derivative,derivatives,normalization)
+end
+
+radial_wronskian(m::Integer,n::Integer,c::Union{Real,Complex},z::Complex;kwargs...) =
+    radial_wronskian(m,n,c,[z];kwargs...)
+
+function radial_wronskian(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,form::Symbol=:raw,normalization::Symbol=:standard)
+    form in (:raw,:normalized,:error) || throw(ArgumentError("form must be :raw, :normalized or :error"))
+    _validate_complex_coordinates(m,n,c,z,spheroid,precision,:radial;normalization)
+    R = precision===:quad ? BigFloat : Float64
+    return _with_swprecision(_coordinate_precision(m,n,c,z)) do
+        first = _complex_coordinate_data(m,n,c,z,spheroid,precision,:radial,1,false,normalization)
+        second = _complex_coordinate_data(m,n,c,z,spheroid,precision,:radial,2,false,normalization)
+        W = [a[1]*b[2]-a[2]*b[1] for (a,b) in zip(first.states,second.states)]
+        form===:raw && return Complex{R}.(W)
+        factor = Complex{_SWFloat}.(z).^2 .- (spheroid===:prolate ? 1 : -1)
+        normalization===:standard && (factor .*= first.plan.c)
+        normalized = factor.*W
+        form===:normalized ? Complex{R}.(normalized) : R.(abs.(normalized.-1))
+    end
+end
+
+function accuracy(m::Integer,n::Integer,c::Union{Real,Complex},z::AbstractVector{<:Number};
+        spheroid::Symbol=:prolate,precision::Symbol=:double,target::Symbol=:radial,
+        kind::Integer=1,normalize::Bool=false,normalization::Symbol=:standard,diagnostics::Bool=false)
+    target in (:angular,:radial) || throw(ArgumentError("target must be :angular or :radial"))
+    return _complex_coordinate_accuracy(m,n,c,z,spheroid,precision,target,kind,normalize,normalization,diagnostics)
 end
 
 include("degree_ranges.jl")
