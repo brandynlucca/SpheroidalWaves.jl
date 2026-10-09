@@ -7,7 +7,7 @@
 [![Yggdrasil](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaPackaging%2FYggdrasil%2Fmaster%2FS%2FSpheroidalWaves%2Fbuild_tarballs.jl&search=version%5Cs%2A%3D%5Cs%2Av%22%28%5B%5E%22%5D%2B%29%22&replace=v%241&label=Yggdrasil&color=forestgreen)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves_jll)
 [![Julia Compatibility](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbrandynlucca%2FSpheroidalWaves.jl%2Fmaster%2FProject.toml&query=%24.compat.julia&suffix=%2B&label=Julia&color=purple)](https://julialang.org)
 [![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/SpheroidalWaves.jl?label=Last%20commit)](https://github.com/brandynlucca/SpheroidalWaves.jl/commits/main)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728040.svg)](https://doi.org/10.5281/zenodo.19728040)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728039.svg)](https://doi.org/10.5281/zenodo.19728039)
 
 
 [![Documentation (stable)](https://img.shields.io/badge/docs-stable-blue?label=Package%20documentation%20(stable))](https://brandynlucca.github.io/SpheroidalWaves.jl/stable/)
@@ -87,4 +87,4 @@ The numerical kernels are based on the spheroidal-wave-function implementations 
 
 ## Citation and license
 
-Use the [Zenodo record](https://doi.org/10.5281/zenodo.19728040) to cite SpheroidalWaves.jl. The package is available under the [GPL-3.0 License](https://www.gnu.org/licenses/gpl-3.0.html). The logo incorporates Julia's dots and is licensed separately under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+Use the [Zenodo record](https://doi.org/10.5281/zenodo.19728039) to cite SpheroidalWaves.jl. The package is available under the [GPL-3.0 License](LICENSE). The [logo artwork](docs/src/assets/LICENSE) incorporates Julia's dots and is licensed separately under CC BY-NC-SA 4.0.
