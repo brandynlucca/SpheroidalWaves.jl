@@ -11,16 +11,15 @@
 ! Local modifications in this copy:
 !   1) Added local `complex_oblate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`coblfcn`) for integration use.
-!   3) Added extensive caching subsystem for Legendre polynomials (pleg_cache),
-!      Associated Legendre quotients (qleg_cache), and Gauss-Legendre quadrature
+!   3) Cache Legendre polynomials (pleg_cache) and Gauss-Legendre quadrature
 !      (gauss_cache) to avoid recomputation on repeated calls.
-!   4) Integrated cached wrappers into all call sites within main coblfcn kernel.
+!   4) Use these caches in the main coblfcn kernel.
 !   5) Retained upstream attribution; numerical corrections are noted below.
 !   6) Include derivative convergence in angular truncation and stabilize
 !      Legendre endpoint factors.
 !   7) Preserve the complex parameter in second-kind origin values/derivatives.
 !
-! Modified by: Brandyn M. Lucca; March 2026
+! Modified by: Brandyn M. Lucca; October 2026
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 
@@ -37,7 +36,6 @@ module complex_oblate_swf
   use complex_oblate_parameters
 
  integer, parameter :: pleg_cache_slots = 48
- integer, parameter :: qleg_cache_slots = 48
 
  type :: pleg_cache_entry
    logical :: valid = .false.
@@ -57,24 +55,6 @@ module complex_oblate_swf
    real(knd), allocatable :: coefa(:), coefb(:), coefc(:), coefd(:), coefe(:)
  end type
 
- type :: qleg_cache_entry
-   logical :: valid = .false.
-   integer :: m = -1
-   integer :: lnum = 0
-   integer :: limq = 0
-   integer :: maxq = 0
-   integer :: ndec = 0
-   integer :: iqdml = 0
-   integer :: iqml = 0
-   integer :: itermpq = 0
-   real(knd) :: x1 = 0.0_knd
-   real(knd) :: qdml = 0.0_knd
-   real(knd) :: qml = 0.0_knd
-   real(knd) :: termpq = 0.0_knd
-   real(knd), allocatable :: qdr(:), qr(:), qdl(:), ql(:)
-   integer, allocatable :: iqdl(:), iql(:)
- end type
-
  type :: gauss_cache_entry
    logical :: valid = .false.
    integer :: ndec = 0
@@ -83,12 +63,10 @@ module complex_oblate_swf
  end type
 
  type(pleg_cache_entry), save :: pleg_cache(pleg_cache_slots)
- type(qleg_cache_entry), save :: qleg_cache(qleg_cache_slots)
  type(gauss_cache_entry), save :: gauss_cache
  integer, save :: pleg_cache_next = 1
- integer, save :: qleg_cache_next = 1
-!$omp threadprivate(pleg_cache, qleg_cache, gauss_cache)
-!$omp threadprivate(pleg_cache_next, qleg_cache_next)
+!$omp threadprivate(pleg_cache, gauss_cache)
+!$omp threadprivate(pleg_cache_next)
 
  contains
 
@@ -267,122 +245,6 @@ module complex_oblate_swf
     coefc(1:lim) = pleg_cache(idx)%coefc(1:lim)
     coefd(1:lim) = pleg_cache(idx)%coefd(1:lim)
     coefe(1:lim) = pleg_cache(idx)%coefe(1:lim)
-  end subroutine
-
-  integer function find_qleg_cache(m, lnum, limq, maxq, x1, ndec)
-    integer, intent(in) :: m, lnum, limq, maxq, ndec
-    real(knd), intent(in) :: x1
-    integer :: i
-    find_qleg_cache = 0
-    do i = 1, qleg_cache_slots
-      if(.not. qleg_cache(i)%valid) cycle
-      if(qleg_cache(i)%m /= m) cycle
-      if(qleg_cache(i)%ndec /= ndec) cycle
-      if(.not. cache_real_equal(qleg_cache(i)%x1, x1)) cycle
-      if(qleg_cache(i)%lnum < lnum) cycle
-      if(qleg_cache(i)%limq < limq) cycle
-      if(qleg_cache(i)%maxq < maxq) cycle
-      find_qleg_cache = i
-      return
-    end do
-  end function
-
-  subroutine clear_qleg_cache_slot(idx)
-    integer, intent(in) :: idx
-    qleg_cache(idx)%valid = .false.
-    qleg_cache(idx)%m = -1
-    qleg_cache(idx)%lnum = 0
-    qleg_cache(idx)%limq = 0
-    qleg_cache(idx)%maxq = 0
-    qleg_cache(idx)%ndec = 0
-    qleg_cache(idx)%iqdml = 0
-    qleg_cache(idx)%iqml = 0
-    qleg_cache(idx)%itermpq = 0
-    qleg_cache(idx)%x1 = 0.0_knd
-    qleg_cache(idx)%qdml = 0.0_knd
-    qleg_cache(idx)%qml = 0.0_knd
-    qleg_cache(idx)%termpq = 0.0_knd
-    if(allocated(qleg_cache(idx)%qdr)) deallocate(qleg_cache(idx)%qdr)
-    if(allocated(qleg_cache(idx)%qr)) deallocate(qleg_cache(idx)%qr)
-    if(allocated(qleg_cache(idx)%qdl)) deallocate(qleg_cache(idx)%qdl)
-    if(allocated(qleg_cache(idx)%ql)) deallocate(qleg_cache(idx)%ql)
-    if(allocated(qleg_cache(idx)%iqdl)) deallocate(qleg_cache(idx)%iqdl)
-    if(allocated(qleg_cache(idx)%iql)) deallocate(qleg_cache(idx)%iql)
-  end subroutine
-
-  subroutine store_qleg_cache(m, lnum, limq, maxq, x1, ndec, qdr, qdml, iqdml, qdl, iqdl, qr, qml, iqml, ql, iql, termpq, itermpq)
-    integer, intent(in) :: m, lnum, limq, maxq, ndec, iqdml, iqml, itermpq
-    real(knd), intent(in) :: x1, qdr(maxq), qdml, qdl(lnum), qr(maxq), qml, ql(lnum), termpq
-    integer, intent(in) :: iqdl(lnum), iql(lnum)
-    integer :: idx
-    idx = find_qleg_cache(m, lnum, limq, maxq, x1, ndec)
-    if(idx == 0) then
-      idx = 1
-      do while(idx <= qleg_cache_slots)
-        if(.not. qleg_cache(idx)%valid) exit
-        idx = idx + 1
-      end do
-      if(idx > pleg_cache_slots) then
-        idx = qleg_cache_next
-        qleg_cache_next = qleg_cache_next + 1
-        if(qleg_cache_next > qleg_cache_slots) qleg_cache_next = 1
-      end if
-    end if
-    call clear_qleg_cache_slot(idx)
-    allocate(qleg_cache(idx)%qdr(maxq))
-    allocate(qleg_cache(idx)%qr(maxq))
-    allocate(qleg_cache(idx)%qdl(lnum))
-    allocate(qleg_cache(idx)%ql(lnum))
-    allocate(qleg_cache(idx)%iqdl(lnum))
-    allocate(qleg_cache(idx)%iql(lnum))
-    qleg_cache(idx)%valid = .true.
-    qleg_cache(idx)%m = m
-    qleg_cache(idx)%lnum = lnum
-    qleg_cache(idx)%limq = limq
-    qleg_cache(idx)%maxq = maxq
-    qleg_cache(idx)%ndec = ndec
-    qleg_cache(idx)%x1 = x1
-    qleg_cache(idx)%qdml = qdml
-    qleg_cache(idx)%iqdml = iqdml
-    qleg_cache(idx)%qml = qml
-    qleg_cache(idx)%iqml = iqml
-    qleg_cache(idx)%termpq = termpq
-    qleg_cache(idx)%itermpq = itermpq
-    qleg_cache(idx)%qdr(1:maxq) = qdr(1:maxq)
-    qleg_cache(idx)%qr(1:maxq) = qr(1:maxq)
-    qleg_cache(idx)%qdl(1:lnum) = qdl(1:lnum)
-    qleg_cache(idx)%ql(1:lnum) = ql(1:lnum)
-    qleg_cache(idx)%iqdl(1:lnum) = iqdl(1:lnum)
-    qleg_cache(idx)%iql(1:lnum) = iql(1:lnum)
-  end subroutine
-
-  subroutine qleg_cached(m, lnum, limq, maxq, x1, ndec, qdr, qdml, iqdml, qdl, iqdl, qr, qml, iqml, ql, iql, termpq, itermpq)
-    integer, intent(in) :: m, lnum, limq, maxq, ndec
-    real(knd), intent(in) :: x1
-    real(knd), intent(out) :: qdr(maxq), qdml, qdl(lnum), qr(maxq), qml, ql(lnum), termpq
-    integer, intent(out) :: iqdml, iqdl(lnum), iqml, iql(lnum), itermpq
-        integer :: idx, nex_local, iflagl1_local
-        real(knd) :: qdqr(maxq), qr1(maxq), qdr1(maxq), qm0, qdm0
-    idx = find_qleg_cache(m, lnum, limq, maxq, x1, ndec)
-    if(idx /= 0) then
-      qdr(1:maxq) = qleg_cache(idx)%qdr(1:maxq)
-      qr(1:maxq) = qleg_cache(idx)%qr(1:maxq)
-      qdl(1:lnum) = qleg_cache(idx)%qdl(1:lnum)
-      ql(1:lnum) = qleg_cache(idx)%ql(1:lnum)
-      iqdl(1:lnum) = qleg_cache(idx)%iqdl(1:lnum)
-      iql(1:lnum) = qleg_cache(idx)%iql(1:lnum)
-      qdml = qleg_cache(idx)%qdml
-      iqdml = qleg_cache(idx)%iqdml
-      qml = qleg_cache(idx)%qml
-      iqml = qleg_cache(idx)%iqml
-      termpq = qleg_cache(idx)%termpq
-      itermpq = qleg_cache(idx)%itermpq
-      return
-    end if
-                nex_local = maxexponent(1.0e0_knd)
-                iflagl1_local = 0
-                call qleg(m, lnum, limq, maxq, maxq, x1, ndec, nex_local, iflagl1_local, qdr, qdqr, qdml, iqdml, qdl, iqdl, qr, qml, iqml, ql, iql, termpq, itermpq, qr1, qdr1, qm0, qdm0)
-    call store_qleg_cache(m, lnum, limq, maxq, x1, ndec, qdr, qdml, iqdml, qdl, iqdl, qr, qml, iqml, ql, iql, termpq, itermpq)
   end subroutine
 
   subroutine gauss_cached(ndec, n, x, w)

@@ -9,7 +9,7 @@
 !   https://github.com/MathieuandSpheroidalWaveFunctions/Prolate_swf
 !
 !
-! Modified by: Brandyn M. Lucca; March 2026
+! Modified by: Brandyn M. Lucca; October 2026
 ! Local modifications in this copy:
 !   1) Added local `prolate_parameters` module defaults with debug/warn/output disabled.
 !   2) Retained in-memory callable API (`profcn`) for integration use.
