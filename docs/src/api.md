@@ -28,6 +28,14 @@ jacobian_smn
 jacobian_rmn
 ```
 
+## Expansion and Connection Quantities
+
+```@docs
+dmn
+kmn
+amn
+```
+
 ## Root Finding
 
 ```@docs

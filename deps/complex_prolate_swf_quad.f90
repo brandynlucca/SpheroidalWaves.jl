@@ -21,7 +21,7 @@
 !   7) Sum radial Neumann series to working precision; retain stable lowest-mode
 !      coefficient seeds and use forward Q ratios close to the boundary.
 !
-! Modified by: Brandyn M. Lucca; March 2026
+! Modified by: Brandyn M. Lucca; October 2026
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 

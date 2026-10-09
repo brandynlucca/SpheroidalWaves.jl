@@ -2,6 +2,30 @@
 
 All examples use ordinary numeric arguments. Add `precision=:quad` for quad precision.
 
+## Expansion coefficients and connection factors
+
+```julia
+d = dmn(1, 2, 1.25)   # angular expansion coefficients
+K = kmn(1, 2, 1.25)   # joining factor
+A = amn(1, 2, 1.25)   # radial factor, also accepts negative order
+```
+
+`dmn` returns `degrees`, `coefficients`, the coefficient derivatives, and convergence metadata. The coefficients expand `smn` in the Ferrers basis:
+
+$$S_{mn}(c,\eta)=\sum_l d_l\,\mathsf P_l^m(\eta).$$
+
+The basis includes the Condon-Shortley phase. `normalize` matches `smn`. In [DLMF 30.8.1](https://dlmf.nist.gov/30.8#E1), $d_l=(-1)^k a_{n,k}^m$ for $l=n+2k$.
+
+`amn` returns $A_n^m(\sigma c^2)$ from [DLMF 30.11.4](https://dlmf.nist.gov/30.11#E4), accepting $-n\le m\le n$. Here $\sigma=1$ for prolate and $\sigma=-1$ for oblate. It uses Meixner-Schäfke normalization. Positive order includes the finite coefficient extension below degree $m$.
+
+`kmn` supplies the exterior angular-radial connection [DLMF 30.11.8](https://dlmf.nist.gov/30.11#E8):
+
+$$S_n^{m(1)}(z,\gamma)=K_n^m(\gamma)\,\mathrm{Ps}_n^m(z,\gamma^2).$$
+
+Use $\gamma=c$, $z=x$ for prolate and $\gamma=ic$, $z=-ix$ for oblate. The exterior Legendre branch uses $[z\sqrt{1-z^{-2}}]^m$ without the Ferrers phase. Oblate joining factors are complex. `normalize=true` gives the factor for a unit-normalized angular expansion.
+
+All three support real or complex parameters, both geometries and precisions. By default at `c=0`, `amn` is one and `kmn` is zero except for $(m,n)=(0,0)$, where it is one. Radial calls at `c=0` require `normalization=:static`. `rtol` and `max_terms` control coefficient convergence, not relative accuracy of every small coefficient.
+
 ## Eigenvalue operators
 
 `eigenvalue(m, n, c; operator=:separation)` selects:
@@ -75,7 +99,10 @@ jacobian_smn(1, 2, 1.25, [0.3]; kind=2, precision=:quad)
 jacobian_rmn(1, 2, 1.25, [2.0]; kind=2, precision=:quad)
 jacobian_eigen(0, 2, 1.0; operator=:concentration, precision=:quad)
 jacobian_eigen(0, 2, 1.0; operator=:fourier, precision=:quad)
+jacobian_smn(1, 2, 1.25, [0.3]; order=2, diagnostics=true)
 ~~~
+
+`order=2` selects second parameter derivatives. Wave results use `d2value_dc2` and `d2derivative_dc2`. Complex results use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`. These calculations difference analytic first derivatives with fourth-order stencils. `h` controls the step and `diagnostics=true` adds shared step-refinement diagnostics. Standard radial and positive-bandwidth integral stencils require `2h<abs(c)`.
 
 `jacobian_eigen` accepts the same operators and forms as `eigenvalue`.
 For a real mode `ψₙ` with unit norm on `[-1,1]` and `c>0`:
@@ -88,23 +115,23 @@ For a real mode `ψₙ` with unit norm on `[-1,1]` and `c>0`:
 \frac{d(1-\Lambda_n)}{dc}=-\frac{d\Lambda_n}{dc}.
 ~~~
 
-For complex `c=a+ib`, results contain separate real- and imaginary-direction
+For order 1 and complex `c=a+ib`, results contain real- and imaginary-direction
 partials (`d_dcreal`/`d_dcimag` for eigenvalues;
 `dvalue_dcreal`/`dvalue_dcimag` and
 `dderivative_dcreal`/`dderivative_dcimag` for functions).
 On a local analytic branch, `∂f/∂b = i ∂f/∂a`.
 
 !!! note "Derivative options and limits"
-    Defaults use analytic parameter differentiation; supplying `h` selects finite differences.
-    `with_metadata=true` adds convergence diagnostics, not error bounds.
+    First derivatives use analytic differentiation unless `h` is supplied.
+    `diagnostics=true` adds convergence diagnostics, not error bounds.
     Angular `kind=2` parameter derivatives return `NaN` at `η=±1`.
-    Radial calls require `c≠0`.
+    Radial calls at `c=0` require `normalization=:static`.
 
 !!! note "Integral derivatives at zero"
-    Right-hand limits are `Λ₀′=2/π`, `Λₙ′=0` for `n>0`,
-    and `μ₁′=-2im/3` (all other Fourier derivatives vanish).
-    `form=:log` returns `Inf`. An explicit finite-difference step
-    requires `h<c` for positive bandwidth; at zero, logarithmic finite differences are unsupported.
+    First derivatives are `Λ₀′=2/π` and `μ₁′=-2im/3`, otherwise zero.
+    Second derivatives are `μ₀″=-2/9` and `μ₂″=-8/45`, otherwise zero.
+    `form=:log` returns `Inf` for order 1 and `-Inf` for order 2.
+    Logarithmic derivatives at zero require `h=nothing`.
 
 ## Inverse bandwidth
 
@@ -227,10 +254,9 @@ zeros and nonfinite values use exponent zero.
 
 !!! warning "Range and zeros"
     Scaling extends the representable magnitude, not the number of accurate digits.
-    `logderivative=true` returns `NaN` at a computed zero; nearby ratios are ill-conditioned.
-    Unscaled values may overflow even when the logarithmic derivative remains finite.
+    `logderivative=true` uses one-sided endpoint limits and returns `NaN` at other computed zeros. Unscaled values may overflow even when the logarithmic derivative remains finite.
 
-## Second coordinate derivatives
+## Higher coordinate derivatives
 
 For `λ=λₘₙ(c)` and `σ=1` (prolate) or `σ=-1` (oblate):
 
@@ -253,13 +279,15 @@ r.second_derivative
 
 Both options also work with scaled outputs and degree ranges.
 
+Use `derivatives=3` or `4` to append `third_derivative` and `fourth_derivative`.
+Endpoint derivatives use one-sided limits. Oblate `x=0` is supported.
+`derivatives=2` is equivalent to `second_derivative=true`.
+
 !!! note "Singular endpoints"
     The formulas above apply away from singular endpoints.
-    First-kind angular and regular first-kind prolate radial endpoints use one-sided limits:
-    finite for `m=0,2,4`, signed infinities for `m=1,3`, and zero for `m>4`.
+    Regular endpoint derivatives use finite or infinite one-sided limits.
     Angular second-kind derivatives diverge at `η=±1`.
-    Undefined prolate radial kinds 2–4 at `x=1` return `NaN`;
-    complex prolate calls require `x>1`.
+    Prolate radial kinds 2–4 at `x=1` return `NaN` for real or complex parameters.
 
 ## Radial Wronskians
 
@@ -279,10 +307,11 @@ W=R_1R_2'-R_1'R_2,\qquad
 
 `radial_wronskian(m,n,c,x; spheroid=:prolate, precision=:double, form=:raw)`
 uses radial kinds 1 and 2 and their coordinate derivatives.
-`m,n` are integer order and degree with `0≤m≤n`; `c` is finite and nonzero.
+`m,n` are integer order and degree with `0≤m≤n`. Standard normalization requires finite `c≠0`.
 `x` is a real scalar or nonempty vector: use prolate `x>1` or oblate `x≥0`.
 `spheroid=:oblate` selects `σ=-1`; `precision=:quad` selects quad precision.
-There is no `kind` or normalization option: the pair is fixed.
+`normalization=:static` includes `c=0`, with $W=1/(x^2-\sigma)$ and
+normalized output $(x^2-\sigma)W$.
 
 Every form returns a vector, including for scalar `x`. Raw and normalized
 entries are complex; error entries are real. Normalized forms preserve scaling
@@ -300,13 +329,13 @@ the oblate factor follows its radial equation and normalization.
 ## Accuracy estimates
 
 `accuracy(m,n,c,arg; target=:radial, spheroid=:prolate, precision=:double,
-kind=1, normalize=false)` returns one integer per coordinate, in input order.
+kind=1, normalize=false, normalization=:standard, diagnostics=false)` returns one integer per coordinate.
 
 | Argument / keyword | Meaning |
 |:--|:--|
 | `m`, `n` | Integer order and degree, `0≤m≤n` |
-| `c` | Finite real or complex parameter; radial calls require `c≠0` |
-| `arg` | Nonempty real coordinate vector: angular `[-1,1]`, prolate radial `[1,∞)`, oblate radial `[0,∞)`; use `[x]` for one point |
+| `c` | Finite real or complex parameter. Radial `c=0` requires `normalization=:static` |
+| `arg` | Nonempty coordinate vector with the domain of `smn` or `rmn`. Use `[x]` for one point |
 | `target=:radial` | `:radial` estimates `rmn` values; `:angular` estimates `smn` values |
 | `spheroid=:prolate` | `:prolate` or `:oblate` geometry |
 | `precision=:double` | `:double` or `:quad` evaluation; results remain integer digit counts |
@@ -318,15 +347,22 @@ Positive entries estimate decimal digits; `0` reports no reliable digits and
 wave-function errors; nonfinite values receive `-1` when evaluation returns them.
 
 !!! note "Available estimates"
-    Only radial `kind=2` has a radial estimator, so the default radial call
-    (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter
-    (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion
-    evaluations also have no calibrated digit estimates. See [`accuracy`](@ref).
+    For real coordinates, only radial `kind=2` has a radial estimator, so the default radial call (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion evaluations and static radial normalization have no calibrated digit estimates. See [`accuracy`](@ref).
 
 ~~~julia
 accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
 accuracy(0, 2, 1.0, [0.3]; target=:angular, normalize=true, precision=:quad)
 accuracy(0, 2, 0.0, [0.3]; target=:angular) # [-1]
+~~~
+
+Complex coordinates use higher precision and halved continuation steps to estimate
+convergence. Add `diagnostics=true` for per-point refinement changes, condition
+numbers, and convergence flags. Zeros, endpoints and unresolved estimates return `-1`.
+
+~~~julia
+a = accuracy(1, 2, 1.25, [0.3 + 0.2im]; target=:angular, diagnostics=true)
+a.digits
+a.diagnostics[1].conditioning_flag
 ~~~
 
 !!! warning "Diagnostics are not error bounds"

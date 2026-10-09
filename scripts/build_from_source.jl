@@ -14,7 +14,7 @@ const SCRIPT_DIR = dirname(@__FILE__)
 const PROJECT_DIR = dirname(SCRIPT_DIR)
 const BUILD_DIR = joinpath(PROJECT_DIR, "build")
 const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
-const SELECTED_FORTRAN = Ref{Union{Nothing,String}}(nothing)
+const SELECTED_FORTRAN = Ref{Union{Nothing, String}}(nothing)
 
 function detect_library_dir()
     candidates = [joinpath(BUILD_DIR, "lib"), joinpath(BUILD_DIR, "bin"), BUILD_DIR]
@@ -123,7 +123,7 @@ end
 function check_cmake()
     cmake_exe = Sys.iswindows() ? "cmake.exe" : "cmake"
     cmake_path = Sys.which(cmake_exe)
-    
+
     if cmake_path === nothing
         error_msg("CMake not found. Please install CMake 3.15 or later.")
         error_msg("  Windows: https://cmake.org/download/")
@@ -131,7 +131,7 @@ function check_cmake()
         error_msg("  Linux: apt-get install cmake (or equivalent)")
         return false
     end
-    
+
     info_msg("Found CMake: $cmake_path")
     return true
 end
@@ -151,7 +151,7 @@ function check_fortran_compiler()
         end
         return true
     end
-    
+
     error_msg("No Fortran compiler found (gfortran, ifort, or ifx).")
     error_msg("  Windows: Install Intel Fortran or MinGW-w64 (gfortran)")
     error_msg("  macOS: brew install gcc")
@@ -167,31 +167,32 @@ function verify_sources()
         "prolate_swf.f90",
         "oblate_swf.f90",
         "complex_prolate_swf.f90",
-        "complex_oblate_swf.f90",
+        "complex_oblate_swf.f90"
     ]
-    
+
     batch_wrappers_double = [
         "psms_batch_fortran.f90",
         "oblate_batch_fortran.f90",
         "complex_prolate_batch_fortran.f90",
-        "complex_oblate_batch_fortran.f90",
+        "complex_oblate_batch_fortran.f90"
     ]
 
     base_solvers_quad = [
         "prolate_swf_quad.f90",
         "oblate_swf_quad.f90",
         "complex_prolate_swf_quad.f90",
-        "complex_oblate_swf_quad.f90",
+        "complex_oblate_swf_quad.f90"
     ]
 
     batch_wrappers_quad = [
         "psms_batch_fortran_quad.f90",
         "oblate_batch_fortran_quad.f90",
         "complex_prolate_batch_fortran_quad.f90",
-        "complex_oblate_batch_fortran_quad.f90",
+        "complex_oblate_batch_fortran_quad.f90"
     ]
 
-    all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad; batch_wrappers_quad; "scaled_batch.f90"]
+    all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad;
+                   batch_wrappers_quad; "scaled_batch.f90"]
     deps_dir = joinpath(PROJECT_DIR, "deps")
 
     for src in all_sources
@@ -201,7 +202,7 @@ function verify_sources()
             return false
         end
     end
-    
+
     info_msg("All $(length(all_sources)) source files verified.")
     return true
 end
@@ -212,13 +213,13 @@ end
 function run_build()
     # Create build directory
     mkpath(BUILD_DIR)
-    
+
     # Run CMake configure
     info_msg("Running CMake configure...")
     configure_cmd = [
         "cmake",
         "-S", PROJECT_DIR,
-        "-B", BUILD_DIR,
+        "-B", BUILD_DIR
     ]
 
     generator = choose_cmake_generator()
@@ -229,25 +230,25 @@ function run_build()
     if SELECTED_FORTRAN[] !== nothing
         push!(configure_cmd, "-DCMAKE_Fortran_COMPILER=$(SELECTED_FORTRAN[])")
     end
-    
+
     info_msg("Command: $(join(configure_cmd, " "))")
-    
+
     try
         run(Cmd(configure_cmd))
     catch e
         error_msg("CMake configure failed: $e")
         return false
     end
-    
+
     # Run CMake build
     info_msg("Running CMake build...")
     build_cmd = ["cmake", "--build", BUILD_DIR, "--config", "Release"]
-    
+
     info_msg("Command: $(join(build_cmd, " "))")
-    
+
     try
         open(BUILD_LOG, "w") do io
-            run(pipeline(Cmd(build_cmd), stdout=io, stderr=io))
+            run(pipeline(Cmd(build_cmd), stdout = io, stderr = io))
         end
     catch e
         error_msg("CMake build failed: $e")
@@ -262,7 +263,7 @@ function run_build()
         end
         return false
     end
-    
+
     info_msg("Build completed successfully.")
     return true
 end
@@ -341,35 +342,35 @@ function main()
     info_msg("SpheroidalWaves Fortran batch build starting...")
     info_msg("Building dual precision backends (double and quad)")
     info_msg("Build directory: $BUILD_DIR")
-    
+
     # Check prerequisites
     if !check_cmake()
         return false
     end
-    
+
     if !check_fortran_compiler()
         return false
     end
-    
+
     if !verify_sources()
         return false
     end
-    
+
     # Run build
     if !run_build()
         return false
     end
-    
+
     # Verify output
     if !verify_libraries_built()
         return false
     end
-    
+
     # Report the library locations. The module probes these known build paths.
     if !report_library_paths()
         return false
     end
-    
+
     info_msg("Build successful!")
     info_msg("")
     info_msg("Next steps:")
@@ -377,7 +378,7 @@ function main()
     info_msg("  2. Use SpheroidalWaves module in Julia")
     info_msg("  3. Call smn/rmn with precision=:double or precision=:quad")
     info_msg("")
-    
+
     return true
 end
 
@@ -409,4 +410,3 @@ if !main()
         warn_msg("  - Windows: install MinGW-w64 (gfortran) and CMake")
     end
 end
-

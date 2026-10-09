@@ -25,6 +25,7 @@ validation/*
 *.swo
 *~
 .DS_Store
+.scratch/
 
 # Julia
 Manifest.toml

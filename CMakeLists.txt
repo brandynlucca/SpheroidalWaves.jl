@@ -104,4 +104,17 @@ install(TARGETS ${SWF_INSTALL_TARGETS}
   RUNTIME DESTINATION bin
 )
 
+option(SWF_BUILD_TESTS "Build native cache regression tests" OFF)
+if(SWF_BUILD_TESTS)
+  enable_testing()
+  add_executable(spheroidal_native_cache_test test/native_cache.f90)
+  target_include_directories(spheroidal_native_cache_test PRIVATE "${CMAKE_BINARY_DIR}/mod_double")
+  target_link_libraries(spheroidal_native_cache_test PRIVATE spheroidal_batch_double OpenMP::OpenMP_Fortran)
+  set_target_properties(spheroidal_native_cache_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  )
+  add_test(NAME native_cache COMMAND spheroidal_native_cache_test)
+  set_tests_properties(native_cache PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=4")
+endif()
+
 

@@ -18,6 +18,7 @@ jobs:
     coverage:
         name: Code Coverage
         runs-on: ubuntu-latest
+        timeout-minutes: 10
         env:
             JULIA_NUM_THREADS: '2'
         steps:
@@ -27,17 +28,18 @@ jobs:
             - name: Set up Julia
               uses: julia-actions/setup-julia@v3
               with:
-                version: '1'
+                version: '1.10'
 
             - name: Cache dependencies
               uses: julia-actions/cache@v3
               with:
-                cache-name: cov-ubuntu-latest-1
+                cache-name: cov-ubuntu-latest-1.10
 
             - name: Coverage test
               uses: julia-actions/julia-runtest@v1
               with:
                 coverage: true
+                optimize: 1
 
             - name: Process coverage test results
               uses: julia-actions/julia-processcoverage@v1
