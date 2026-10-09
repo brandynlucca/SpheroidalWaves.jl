@@ -62,7 +62,7 @@ using SpheroidalWaves, Test
             q1 = smn(1, 1, zero(T), x; kind = 2, precision, spheroid)
             @test only(q1.value) ≈ -sqrt(1-x^2)*atanh(x)-x/sqrt(1-x^2) rtol=tol
             @test only(q1.derivative) ≈
-                  x/sqrt(1-x^2)*atanh(x)-inv(sqrt(1-x^2))-inv((1-x^2)^(3//2)) rtol=tol
+                  x/sqrt(1-x^2)*atanh(x)-inv(sqrt(1-x^2))-inv((1-x^2)^1.5) rtol=tol
         end
 
         xs = T[-1, 0, 1]

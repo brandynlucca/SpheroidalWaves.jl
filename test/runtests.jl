@@ -444,23 +444,26 @@ include("thread_safety.jl")
     end
 end
 
-include("degree_ranges.jl")
-include("degree_batch.jl")
-include("angular_conventions.jl")
-
-include("radial_domain.jl")
+# Run tests that change BigFloat defaults or backend selection serially.
 include("quad_precision.jl")
-
 include("accuracy.jl")
 include("numerical_regressions.jl")
 include("angular_precision.jl")
-include("parameter_derivatives.jl")
-include("angular_second_kind.jl")
-include("oblate_precision.jl")
-include("angular_parameter_derivatives.jl")
-include("radial_parameter_derivatives.jl")
 include("numerical_domain.jl")
-include("boundary_diagnostics.jl")
-include("radial_hankel.jl")
-include("integral_eigenvalues.jl")
-include("integral_sensitivities.jl")
+
+# Independent numerical tests share the process and its compiled methods.
+let files = ["parameter_derivatives.jl", "boundary_diagnostics.jl",
+        "angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
+        "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
+        "oblate_precision.jl", "angular_parameter_derivatives.jl",
+        "radial_parameter_derivatives.jl", "integral_eigenvalues.jl",
+        "integral_sensitivities.jl"]
+    queue = Channel{String}(length(files))
+    foreach(file -> put!(queue, file), files)
+    close(queue)
+    @sync for _ in 1:min(2, Threads.nthreads())
+        Threads.@spawn for file in queue
+            include(joinpath(@__DIR__, file))
+        end
+    end
+end

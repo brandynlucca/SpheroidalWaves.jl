@@ -145,6 +145,27 @@ end
         end
     end
     @test (precision(BigFloat), rounding(BigFloat)) == original
+    # Raw continuation caches are task-local and respect caller precision.
+    @test fetch(Threads.@spawn begin
+        calls = Ref(0)
+        sample(c, quantity = :test) = SW._angular_phase_sample(
+            () -> (calls[] += 1), :cprolate, 0, 0, c, :double, quantity)
+        a = sample(1.0)
+        reused = sample(1.0) == a && calls[] == 1
+        separate = sample(1.0, :other) == 2
+        isolated = fetch(Threads.@spawn sample(1.0)) == 3
+        context = setprecision(BigFloat, precision(BigFloat)+32) do
+            sample(1.0) == 4
+        end
+        retained = sample(1.0) == a
+        for c in 2.0:260.0
+            sample(c)
+        end
+        bounded = length(task_local_storage()[:SpheroidalWaves_angular_phase_samples]) <=
+                  256
+        evicted = sample(1.0) > a
+        reused && separate && isolated && context && retained && bounded && evicted
+    end)
 end
 
 @testset "Concurrent public computations and unrelated BigFloat arithmetic" begin
@@ -236,12 +257,12 @@ end
     tasks = [Threads.@spawn begin
                  wait(release)
                  wait(sampling)
-                 [evaluate(i, parameters[i]) for _ in 1:2]
+                 evaluate(i, parameters[i])
              end for i in 1:8]
     notify(release)
     try
         for (task, expected) in zip(tasks, reference)
-            @test all(isequal(expected), fetch(task))
+            @test isequal(expected, fetch(task))
         end
     finally
         # Join every worker even if a test or worker fails.

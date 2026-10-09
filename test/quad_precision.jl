@@ -186,3 +186,130 @@ end
         end
     end
 end
+
+@testset "Angular spherical limit and Condon–Shortley phase" begin
+    # Closed-form Ferrers polynomials, independently of the implementation's
+    # recurrence. Both normalization choices use the same phase.
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate),
+        complex_c in (false, true), normalize in (false, true)
+        T = precision === :quad ? BigFloat : Float64
+        eta = T.([-0.5, 0.0, 0.25])
+        u = 1 .- eta .^ 2
+        c = complex_c ? complex(zero(T)) : zero(T)
+        cases = (
+            (0, 2, (3eta .^ 2 .- 1) ./ 2, 3eta),
+            (1, 1, -sqrt.(u), eta ./ sqrt.(u)),
+            (1, 2, -3eta .* sqrt.(u), -3 .* (1 .- 2eta .^ 2) ./ sqrt.(u)),
+            (1, 3, -(3//2) .* (5eta .^ 2 .- 1) .* sqrt.(u),
+                (3//2) .* eta .* (15eta .^ 2 .- 11) ./ sqrt.(u)),
+            (1, 4, -(5//2) .* (7eta .^ 3 .- 3eta) .* sqrt.(u),
+                (5//2) .* (28eta .^ 4 .- 27eta .^ 2 .+ 3) ./ sqrt.(u)),
+            (2, 2, 3u, -6eta),
+            (2, 3, 15eta .* u, 15 .* (1 .- 3eta .^ 2)),
+            (3, 3, -15u .* sqrt.(u), 45eta .* sqrt.(u))
+        )
+        for (m, n, values, derivatives) in cases
+            norm_squared = T(2) / (2n + 1) * T(factorial(n + m)) / factorial(n - m)
+            scale = normalize ? inv(sqrt(norm_squared)) : one(T)
+            result = smn(m, n, c, eta; precision, spheroid, normalize)
+            expected_type = complex_c ? Complex{T} : T
+            @test eltype(result.value) == expected_type
+            @test eltype(result.derivative) == expected_type
+            @test result.value≈scale .* values rtol=64eps(T) atol=64eps(T)
+            @test result.derivative≈scale .* derivatives rtol=64eps(T) atol=64eps(T)
+        end
+    end
+
+    # Exact endpoint limits: m=1 really has divergent derivatives; the other
+    # listed cases have finite limits and must not produce 0/0 NaNs.
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+
+        s = smn(0, 2, 0.0, [-1.0, 1.0]; precision, spheroid)
+        @test s.value == [1, 1]
+        @test s.derivative == [-3, 3]
+        @test smn(1, 1, 0.0, [-1.0, 1.0]; precision, spheroid).derivative == [-Inf, Inf]
+        @test smn(1, 2, 0.0, [-1.0, 1.0]; precision, spheroid).derivative == [Inf, Inf]
+        @test smn(2, 2, 0.0, [-1.0, 1.0]; precision, spheroid).derivative == [6, -6]
+        @test smn(3, 3, 0.0, [-1.0, 1.0]; precision, spheroid).derivative == [0, 0]
+        @test smn(2, 2, 0.0, [-1.0, 1.0]; precision, spheroid, normalize = true).derivative ≈
+              [6, -6] ./ sqrt(48 / 5)
+    end
+
+    setprecision(BigFloat, 256) do
+        x = big"0.123456789012345678901234567890123456789"
+        result = smn(1, 1, big"0", [x]; precision = :quad)
+        @test abs(only(result.value) + sqrt(1 - x^2)) < big"1e-70"
+        @test abs(only(result.derivative) - x / sqrt(1 - x^2)) < big"1e-70"
+        # Unit normalization stays representable even when unnormalized P_m^m
+        # would overflow double precision.
+        m = 201
+        expected = -sqrt(BigFloat(2m + 1) * binomial(big(2m), m) / big(2)^(2m + 1))
+        normalized = smn(m, m, 0.0, 0.0; normalize = true)
+        @test only(normalized.value) ≈ Float64(expected) rtol=1e-13
+        @test only(normalized.derivative) == 0
+    end
+
+    @test_throws ErrorException smn(-1, 1, 0.0, 0.3)
+    @test_throws ErrorException smn(2, 1, 0.0, 0.3)
+    @test_throws ErrorException smn(1, 1, 0.0, 1.1)
+    @test_throws ErrorException smn(1, 1, 0.0, NaN)
+end
+
+@testset "Regular endpoint second derivatives" begin
+    SW = SpheroidalWaves
+    setprecision(BigFloat, 256) do
+        # P_3^2(x)=15x(1-x^2), so its endpoint slopes are -30 and its
+        # second derivatives are +90 at -1 and -90 at +1.
+        spherical = SW._evaluate_coefficient_vector((m = 2, degrees = [3]),
+            [sqrt(big"240.0"/7)], [-1, 1]; second_derivative = true)
+        @test spherical.value == [0, 0]
+        @test spherical.derivative ≈ [-30, -30] rtol=big"1e-70"
+        @test spherical.second_derivative ≈ [90, -90] rtol=big"1e-70"
+        for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+            # At m=2, the endpoint limit of the angular equation gives
+            # S''(x)=x*(lambda-sigma*c^2-3)*S'(x)/3 for x=+/-1.
+            # c=5 selects coefficient evaluation through the public API.
+            result = smn(2, 3, 5, [-1, 1]; precision, spheroid, second_derivative = true)
+            lambda = eigenvalue(2, 3, 5; precision, spheroid)
+            sigma = spheroid === :prolate ? 1 : -1
+            expected = [-1, 1] .* (lambda-sigma*25-3) .* result.derivative ./ 3
+            @test result.second_derivative ≈ expected rtol=(precision === :quad ?
+                                                            big"1e-27" : 1e-12)
+        end
+        for precision in (:double, :quad), m in 0:5
+
+            n, c = m+1, big"1.25"
+            points = BigFloat[-1, -1 + big"1e-8", 1 - big"1e-8", 1]
+            # A differentiated Legendre expansion provides an independent
+            # reference for the native endpoint Taylor reconstruction.
+            plan = SW._coefficient_plan(m, n, c; precision = :quad)
+            scale = SW._coefficient_phase(plan, :quad)*sqrt(SW._ferrers_norm2(m, n, BigFloat))
+            reference = SW._evaluate_coefficient_vector(plan, scale .* plan.v, points;
+                second_derivative = true)
+            result = smn(
+                m, n, c, points; precision, second_derivative = true, scaled = true)
+            for field in (:value, :derivative, :second_derivative)
+                encoded = getproperty(result, field)
+                actual = encoded.mantissa .* BigFloat(10) .^ encoded.exponent
+                expected = getproperty(reference, field)
+                @testset "$precision m=$m $field" begin
+                    for i in eachindex(points)
+                        @test actual[i] ≈ expected[i] rtol=(precision === :quad ?
+                                                            big"1e-25" : 1e-11)
+                    end
+                end
+            end
+            # The regular radial solution has the same endpoint power.
+            radial = rmn(
+                m, n, c, BigFloat[1, 1 + big"1e-8"]; precision, second_derivative = true)
+            if isodd(m) && m < 4
+                @test isinf(real(radial.second_derivative[1]))
+            elseif m > 4
+                @test radial.second_derivative[1] == 0
+            else
+                @test isfinite(radial.second_derivative[1])
+                @test radial.second_derivative[2] ≈ radial.second_derivative[1] rtol=1e-5
+            end
+        end
+    end
+end

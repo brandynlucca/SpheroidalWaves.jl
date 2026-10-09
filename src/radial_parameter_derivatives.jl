@@ -188,9 +188,12 @@ function _radial_expansion_data(plan, x, kind; regular_factor = false)
 end
 
 # Polynomial form of the radial equation and its parameter derivative.
+# A two-entry state propagates the value and coordinate slope. A four-entry
+# state also propagates their parameter sensitivities.
 function _radial_sensitivity_step(plan, x, state, h; rtol = _SWFloat("1e-42"),
         max_terms = max(256, cld(Base.precision(_SWFloat), 2)+64))
-    y, dy, z, dz = state
+    y, dy = state[1:2]
+    sensitivity = length(state) == 4
     sigma = plan.spheroid === :prolate ? 1 : -1
     u, q, dq = x^2-sigma, get(plan, :q, plan.c^2), get(plan, :dq, 2plan.c)
     lambda, dlambda = plan.lambda, plan.dlambda
@@ -198,43 +201,59 @@ function _radial_sensitivity_step(plan, x, state, h; rtol = _SWFloat("1e-42"),
     b = (2x*u, 6x^2-2sigma, 6x, _SWFloat("2"))
     d = ((q*x^2-lambda)*u-sigma*plan.m^2, 4q*x^3-2*(sigma*q+lambda)*x,
         6q*x^2-sigma*q-lambda, 4q*x, q)
-    dc = ((dq*x^2-dlambda)*u, 4dq*x^3-2*(sigma*dq+dlambda)*x,
-        6dq*x^2-sigma*dq-dlambda, 4dq*x, dq)
-    values, tangents = [y, dy], [z, dz]
+    dc = sensitivity ?
+         ((dq*x^2-dlambda)*u, 4dq*x^3-2*(sigma*dq+dlambda)*x,
+        6dq*x^2-sigma*dq-dlambda, 4dq*x, dq) : nothing
+    values = [y, dy]
+    tangents = sensitivity ? [state[3], state[4]] : nothing
     for k in 0:(max_terms - 2)
-        rhs, drhs = zero(y), zero(z)
+        rhs = zero(y)
+        drhs = sensitivity ? zero(state[3]) : nothing
         for j in 1:min(4, k)
             factor = a[j + 1]*(k-j+2)*(k-j+1)
             rhs += factor*values[k - j + 3]
-            drhs += factor*tangents[k - j + 3]
+            sensitivity && (drhs += factor*tangents[k - j + 3])
         end
         for j in 0:min(3, k)
             factor = b[j + 1]*(k-j+1)
             rhs += factor*values[k - j + 2]
-            drhs += factor*tangents[k - j + 2]
+            sensitivity && (drhs += factor*tangents[k - j + 2])
         end
         for j in 0:min(4, k)
             rhs += d[j + 1]*values[k - j + 1]
-            drhs += d[j + 1]*tangents[k - j + 1]+dc[j + 1]*values[k - j + 1]
+            sensitivity &&
+                (drhs += d[j + 1]*tangents[k - j + 1]+dc[j + 1]*values[k - j + 1])
         end
         push!(values, -rhs/(a[1]*(k+1)*(k+2)))
-        push!(tangents, -drhs/(a[1]*(k+1)*(k+2)))
+        sensitivity && push!(tangents, -drhs/(a[1]*(k+1)*(k+2)))
         if k>=30 && k%8==6
             order = length(values)-1
-            output = map((values, tangents)) do coefficients
+            radius = abs(h)
+            first_power = radius^(order-8)
+            output = map(sensitivity ? (values, tangents) : (values,)) do coefficients
                 v, dv = last(coefficients), zero(y)
                 for j in (order - 1):-1:0
                     dv = dv*h+v
                     v = v*h+coefficients[j + 1]
                 end
-                tail = sum(abs(coefficients[j + 1]*h^j) for j in (order - 7):order)
-                dtail = sum(abs(j*coefficients[j + 1]*h^(j-1)) for j in (order - 7):order)
+                # Consecutive real powers avoid repeating complex exponentiation
+                # for every term in the value and derivative tail bounds.
+                tail, dtail, power = zero(radius), zero(radius), first_power
+                for j in (order - 7):order
+                    magnitude = abs(coefficients[j + 1])*power
+                    dtail += j*magnitude
+                    tail += radius*magnitude
+                    power *= radius
+                end
                 good = tail<=rtol*max(abs(v), abs(coefficients[1]), abs(h*coefficients[2])) &&
                        dtail<=rtol*max(abs(dv), abs(coefficients[2]), abs(coefficients[1]/h))
                 (; v, dv, good)
             end
-            all(r->r.good, output) &&
-                return (output[1].v, output[1].dv, output[2].v, output[2].dv)
+            if all(r->r.good, output)
+                return sensitivity ?
+                       (output[1].v, output[1].dv, output[2].v, output[2].dv) :
+                       (output[1].v, output[1].dv)
+            end
         end
     end
     error("Differentiated radial equation did not converge")

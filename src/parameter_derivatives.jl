@@ -11,7 +11,7 @@ function _coordinate_parameter_evaluator(
         local_state = _transport_angular_phase(evaluate, center, state, _input_float(Complex{R}, parameter))
         data = _complex_coordinate_data(
             m, n, parameter, points, spheroid, precision, target,
-            kind, normalize, normalization; mode = local_state)
+            kind, normalize, normalization; mode = local_state, sensitivity = false)
         states = [s[1:2] for s in data.states]
         if !isempty(endpoints)
             # Endpoint stencil values must retain the same transported mode.
@@ -74,7 +74,7 @@ function _complex_coordinate_jacobian(
             m, n, c, points, spheroid, precision, target, kind, normalize, normalization) :
                    parameter -> _complex_coordinate_data(
             m, n, parameter, points, spheroid, precision,
-            target, kind, normalize, normalization)
+            target, kind, normalize, normalization; sensitivity = false)
         cache = Dict{Any, Any}()
         sample(parameter) = get!(() -> evaluate(parameter), cache, parameter)
         function difference(direction, index)

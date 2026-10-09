@@ -149,12 +149,14 @@ function _coordinate_batch(initial, points, target, spheroid; step_fraction = 1)
 end
 
 function _complex_coordinate_data(m, n, c, points, spheroid, precision, target, kind,
-        normalize, normalization; mode = nothing, step_fraction = 1)
+        normalize, normalization; mode = nothing, step_fraction = 1, sensitivity = true)
     return _with_swprecision(_coordinate_precision(m, n, c, points)) do
         R = precision===:quad ? BigFloat : Float64
         parameter = c isa Real ? _input_float(R, c) : _input_float(Complex{R}, c)
         initial = _coordinate_initial_data(m, n, parameter, spheroid, precision, target,
             kind, normalize, normalization; mode)
+        # Wave values and explicit parameter stencils only need y and y'.
+        sensitivity || (initial = (; initial..., state = initial.state[1:2]))
         interior = findall(z -> !_coordinate_is_endpoint(z, target, spheroid), points)
         batch = _coordinate_batch(
             initial, Complex{_SWFloat}.(points[interior]), target, spheroid; step_fraction)
@@ -165,11 +167,17 @@ function _complex_coordinate_data(m, n, c, points, spheroid, precision, target, 
                 options = target===:angular ? (; normalize) : (; normalization)
                 f, jac = target===:angular ? (smn, jacobian_smn) : (rmn, jacobian_rmn)
                 value = f(m, n, c, real(point); spheroid, precision, kind, options...)
-                tangent = jac(m, n, c, [real(point)]; spheroid, precision, kind, options...)
-                v, d = c isa Real ? (tangent.dvalue_dc, tangent.dderivative_dc) :
-                       (tangent.dvalue_dcreal, tangent.dderivative_dcreal)
-                states[i] = Complex{_SWFloat}.((
-                    only(value.value), only(value.derivative), only(v), only(d)))
+                if sensitivity
+                    tangent = jac(
+                        m, n, c, [real(point)]; spheroid, precision, kind, options...)
+                    v, d = c isa Real ? (tangent.dvalue_dc, tangent.dderivative_dc) :
+                           (tangent.dvalue_dcreal, tangent.dderivative_dcreal)
+                    states[i] = Complex{_SWFloat}.((
+                        only(value.value), only(value.derivative), only(v), only(d)))
+                else
+                    states[i] = Complex{_SWFloat}.((
+                        only(value.value), only(value.derivative)))
+                end
             end
         end
         return (; states, initial.plan, batch.steps)
@@ -191,7 +199,8 @@ function _complex_coordinate_wave(
         :value, :derivative, :second_derivative, :third_derivative, :fourth_derivative)[1:(order + 1)]
     values = _with_swprecision(_coordinate_precision(m, n, c, points)) do
         data = _complex_coordinate_data(
-            m, n, c, points, spheroid, precision, target, kind, normalize, normalization)
+            m, n, c, points, spheroid, precision, target, kind, normalize, normalization;
+            sensitivity = false)
         arrays = [zeros(Complex{_SWFloat}, length(points)) for _ in fields]
         for (i, point) in enumerate(points)
             if _coordinate_is_endpoint(point, target, spheroid)

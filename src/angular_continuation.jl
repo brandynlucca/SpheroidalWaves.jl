@@ -7,6 +7,22 @@ struct _AngularModeEvaluator{F, G}
 end
 (evaluate::_AngularModeEvaluator)(args...) = evaluate.sample(args...)
 
+# Native samples are independent of the continuation path. Reuse them across
+# parameter stencils while each tracker still chooses its own mode and phase.
+# Storage belongs to the calling task and includes the backend/arithmetic context.
+function _angular_phase_sample(compute, prefix, m, n, c, precision, quantity)
+    cache = get!(task_local_storage(), :SpheroidalWaves_angular_phase_samples) do
+        Dict{Any, Any}()
+    end
+    key = (prefix, m, n, c, precision, quantity, Base.precision(BigFloat),
+        rounding(BigFloat), backend_library(; precision))
+    haskey(cache, key) && return cache[key]
+    result = compute()
+    length(cache) >= 256 && empty!(cache)
+    cache[key] = result
+    return result
+end
+
 function _angular_phase_evaluator(
         prefix, m, n, precision; endpoint_anchor = nothing, endpoint_coordinate = nothing)
     T = precision === :quad ? BigFloat : Float64
@@ -14,13 +30,18 @@ function _angular_phase_evaluator(
     cache = Dict{Any, Any}()
     lambda_cache = Dict{Any, Any}()
     eigen = (c, degree) -> get!(lambda_cache, (c, degree)) do
-        _call_complex_eigenvalue(prefix, m, degree, c; precision)
+        _angular_phase_sample(prefix, m, degree, c, precision, :eigenvalue) do
+            _call_complex_eigenvalue(prefix, m, degree, c; precision)
+        end
     end
     use_endpoint = Ref{Union{Nothing, Bool}}(endpoint_anchor)
     endpoint_point = Ref(endpoint_coordinate === nothing ? zero(T) :
                          _input_float(T, endpoint_coordinate))
     sample = (c, degree = n) -> get!(cache, (c, degree)) do
-        r = _call_complex_smn_raw(prefix, m, degree, c, points; precision, normalize = true)
+        # The cached angular samples always use these four fixed coordinates.
+        r = _angular_phase_sample(prefix, m, degree, c, precision, :angular) do
+            _call_complex_smn_raw(prefix, m, degree, c, points; precision, normalize = true)
+        end
         lambda = eigen(c, degree)
         anchor = iseven(n-m) ? r.value[1] : r.derivative[1]
         profile = [r.value; r.derivative ./ (n+1)]

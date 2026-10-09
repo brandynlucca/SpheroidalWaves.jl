@@ -26,7 +26,7 @@ using SpheroidalWaves, Test
             for (m, n, v, d) in ((0, 0, -angle, 1/u), (
                 0, 1, -3sigma*(x*angle-1), -3sigma*(angle-x/u)),
                 (1, 1, 3sigma/2*sqrt(u)*(angle-x/u),
-                3sigma/2*(x/sqrt(u)*(angle-x/u)+2sigma/u^(3//2))))
+                3sigma/2*(x/sqrt(u)*(angle-x/u)+2sigma/u^1.5)))
                 r = rmn(
                     m, n, 0, [x]; spheroid, precision, kind = 2, normalization = :static)
                 @test only(r.value)≈v rtol=tolerance atol=tolerance

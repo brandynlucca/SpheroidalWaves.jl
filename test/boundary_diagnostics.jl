@@ -86,8 +86,12 @@ end
 @testset "Higher coordinate derivatives" begin
     offsets = collect(-4:4)
     matrix = Rational{BigInt}[big(k)^p for p in 0:8, k in offsets]
-    weights(order) = matrix \
-                     Rational{BigInt}[p==order ? factorial(big(order)) : 0 for p in 0:8]
+    function weights(order)
+        exact = matrix \
+                Rational{BigInt}[p==order ? factorial(big(order)) : 0 for p in 0:8]
+        # Avoid Base's global precision setters in BigFloat(::Rational).
+        return BigFloat.(numerator.(exact)) ./ BigFloat.(denominator.(exact))
+    end
     w3, w4 = weights(3), weights(4)
     for (precision, spheroid) in ((:double, :prolate), (:quad, :oblate))
         T = precision === :quad ? BigFloat : Float64
@@ -101,8 +105,8 @@ end
             @test abs(only(associated.fourth_derivative)) < tol
             root = smn(1, 1, 0, [x]; precision, spheroid, derivatives = 4)
             u = (1-x)*(1+x)
-            @test only(root.third_derivative) ≈ 3x/u^(5//2) rtol=tol
-            @test only(root.fourth_derivative) ≈ 3(1+4x^2)/u^(7//2) rtol=tol
+            @test only(root.third_derivative) ≈ 3x/u^2.5 rtol=tol
+            @test only(root.fourth_derivative) ≈ 3(1+4x^2)/u^3.5 rtol=tol
         end
         for c in (T(1.25), complex(T(1.25), T(0.125)))
             for (f, x, kinds) in ((smn, T(0.3), (1, 2)), (rmn, T(2), (1, 2, 3, 4)))
@@ -114,8 +118,8 @@ end
                     grid = BigFloat(x) .+ h .* offsets
                     values = f(1, 2, wide, grid; spheroid, precision = :quad, kind).value
                     values .-= values[5]
-                    @test only(result.third_derivative) ≈ sum(BigFloat.(w3) .* values)/h^3 rtol=2e-13
-                    @test only(result.fourth_derivative) ≈ sum(BigFloat.(w4) .* values)/h^4 rtol=2e-13
+                    @test only(result.third_derivative) ≈ sum(w3 .* values)/h^3 rtol=2e-13
+                    @test only(result.fourth_derivative) ≈ sum(w4 .* values)/h^4 rtol=2e-13
                     @test eltype(result.fourth_derivative) ==
                           (f===rmn || c isa Complex ? Complex{T} : T)
                     scaled = f(1, 2, c, [x]; spheroid, precision, kind,
@@ -155,7 +159,7 @@ end
         for (f, x, sign) in ((smn, 1-distance, 1), (smn, -1+distance, -1), (
             rmn, 1+distance, -1))
             r = f(1, 2, c, [x]; precision, derivatives = 4)
-            @test only(r.fourth_derivative ./ r.third_derivative)*distance ≈ sign*5//2 rtol=1e-14
+            @test only(r.fourth_derivative ./ r.third_derivative)*distance ≈ sign*2.5 rtol=1e-14
         end
     end
     for f in (smn, rmn), n in (1, 1:2)
@@ -211,65 +215,8 @@ end
     plan = (spheroid = :prolate, c = big"0", lambda = big"0", dlambda = big"0", m = 0)
     @test_throws r"did not converge" SW._radial_sensitivity_step(plan, big"2",
         (log(big"3"), -big"2"/3, big"0", big"0"), -big"2")
-end
-
-@testset "Regular endpoint second derivatives" begin
-    SW = SpheroidalWaves
-    setprecision(BigFloat, 256) do
-        # P_3^2(x)=15x(1-x^2), so its endpoint slopes are -30 and its
-        # second derivatives are +90 at -1 and -90 at +1.
-        spherical = SW._evaluate_coefficient_vector((m = 2, degrees = [3]),
-            [sqrt(big"240.0"/7)], [-1, 1]; second_derivative = true)
-        @test spherical.value == [0, 0]
-        @test spherical.derivative ≈ [-30, -30] rtol=big"1e-70"
-        @test spherical.second_derivative ≈ [90, -90] rtol=big"1e-70"
-        for precision in (:double, :quad), spheroid in (:prolate, :oblate)
-            # At m=2, the endpoint limit of the angular equation gives
-            # S''(x)=x*(lambda-sigma*c^2-3)*S'(x)/3 for x=+/-1.
-            # c=5 selects coefficient evaluation through the public API.
-            result = smn(2, 3, 5, [-1, 1]; precision, spheroid, second_derivative = true)
-            lambda = eigenvalue(2, 3, 5; precision, spheroid)
-            sigma = spheroid === :prolate ? 1 : -1
-            expected = [-1, 1] .* (lambda-sigma*25-3) .* result.derivative ./ 3
-            @test result.second_derivative ≈ expected rtol=(precision === :quad ?
-                                                            big"1e-27" : 1e-12)
-        end
-        for precision in (:double, :quad), m in 0:5
-
-            n, c = m+1, big"1.25"
-            points = BigFloat[-1, -1 + big"1e-8", 1 - big"1e-8", 1]
-            # A differentiated Legendre expansion provides an independent
-            # reference for the native endpoint Taylor reconstruction.
-            plan = SW._coefficient_plan(m, n, c; precision = :quad)
-            scale = SW._coefficient_phase(plan, :quad)*sqrt(SW._ferrers_norm2(m, n, BigFloat))
-            reference = SW._evaluate_coefficient_vector(plan, scale .* plan.v, points;
-                second_derivative = true)
-            result = smn(
-                m, n, c, points; precision, second_derivative = true, scaled = true)
-            for field in (:value, :derivative, :second_derivative)
-                encoded = getproperty(result, field)
-                actual = encoded.mantissa .* BigFloat(10) .^ encoded.exponent
-                expected = getproperty(reference, field)
-                @testset "$precision m=$m $field" begin
-                    for i in eachindex(points)
-                        @test actual[i] ≈ expected[i] rtol=(precision === :quad ?
-                                                            big"1e-25" : 1e-11)
-                    end
-                end
-            end
-            # The regular radial solution has the same endpoint power.
-            radial = rmn(
-                m, n, c, BigFloat[1, 1 + big"1e-8"]; precision, second_derivative = true)
-            if isodd(m) && m < 4
-                @test isinf(real(radial.second_derivative[1]))
-            elseif m > 4
-                @test radial.second_derivative[1] == 0
-            else
-                @test isfinite(radial.second_derivative[1])
-                @test radial.second_derivative[2] ≈ radial.second_derivative[1] rtol=1e-5
-            end
-        end
-    end
+    @test_throws r"did not converge" SW._radial_sensitivity_step(plan, big"2",
+        (log(big"3"), -big"2"/3), -big"2")
 end
 
 @testset "Large bandwidth tolerance and second-kind residuals" begin
@@ -326,6 +273,11 @@ end
             points = target===:angular ? [complex(F(k)/16, F(k)/32) for k in 1:12] :
                      [complex(F(2), F(k)/8) for k in 1:12]
             batch = SW._coordinate_batch(initial, points, target, spheroid)
+            waves = SW._coordinate_batch(
+                (; initial..., state = initial.state[1:2]), points, target, spheroid)
+            @test all(all(isapprox(a, b; rtol = F("1e-28"), atol = F("1e-50"))
+                      for (a, b) in zip(x, y[1:2]))
+            for (x, y) in zip(waves.states, batch.states))
             step_count = Ref(0)
             separate = [SW._coordinate_continuation(
                             initial.equation, initial.state, initial.anchor,

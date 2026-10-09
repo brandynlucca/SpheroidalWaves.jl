@@ -1,5 +1,97 @@
 using SpheroidalWaves, Test
 
+# Quad function-value references for m=1, n=2, c=1.25 or 1.25+0.125im,
+# eta=Float64(0.3) and x=2. Nine-point stencils at h=2e-4 and h=1e-4
+# agree within 5e-23 relative error. These do not use the analytic sensitivities.
+# Curvature entries contain (value_cc, slope_cc). Static entries contain
+# (value_c, slope_c, value_cc, slope_cc), with c=0 for the real cases.
+# First derivatives at c=0 vanish exactly by parity.
+const SECOND_PARAMETER_REFERENCES = Dict(
+    (:prolate, false, :eigenvalue, 1) => (big"0.78543009246741752223885185599879488",),
+    (:prolate, false, :angular, 1) => (big"-0.039947866313695360666659374343801562",
+        big"-0.035730361051561140111881435578142167"),
+    (:prolate, false, :angular, 2) => (big"0.071103089934136772991595609525283281",
+        big"-0.68574303064004687548560599354728146"),
+    (:prolate, false, :radial, 1) =>
+        (complex(big"-0.25550126676475747219562426062397201", big"0.0"),
+            complex(big"-0.80498610328640666564931771889294242", big"0.0")),
+    (:prolate, false, :radial, 2) =>
+        (complex(big"-1.7929932813952239613050397839684317", big"0.0"),
+            complex(big"3.7943452518993771645703982864908150", big"0.0")),
+    (:prolate, true, :eigenvalue, 1) =>
+        (complex(big"0.78607884992606135814950211559631767", big"-0.014091721479854569869162575735486948"),),
+    (:prolate, true, :angular, 1) => (
+        complex(big"-0.039981103328492724474026597682012774",
+            big"0.00038727338104700295111112110371607608"),
+        complex(big"-0.035897631241669981823420861656928048", big"0.0031468048011437278838030645293591938")),
+    (:prolate, true, :radial, 2) => (
+        complex(big"-1.4932160348769024466969731787266130", big"0.92375638109493709170197476300304259"),
+        complex(big"3.3057117690072401149876965522547340", big"-1.8506173161309844558604257638706281")),
+    (:oblate, false, :eigenvalue, 1) => (big"-0.93096035368572077834980692667281694",),
+    (:oblate, false, :angular, 2) => (big"0.28297353789862789043335826566671687",
+        big"0.32534953604720277134875995667805139"),
+    (:oblate, false, :radial, 1) =>
+        (complex(big"-0.48385131149176606392253290527671113", big"0.0"),
+            complex(big"-0.86652458807997240964648612955473412", big"0.0")),
+    (:oblate, true, :eigenvalue, 1) =>
+        (complex(big"-0.93018725359314101998697214165667078", big"-0.014922357165933636147676866841608321"),),
+    (:oblate, true, :angular, 1) => (
+        complex(big"0.042318769789247271644012738882605097",
+            big"0.000071841893009937632235212298763490867"),
+        complex(big"0.065459296688649579552082638993403373", big"0.0027588317782073058612070969043935021")),
+    (:oblate, true, :angular, 2) => (
+        complex(big"0.28132756704398440910982792406987781", big"0.031041433470022897674688870417596648"),
+        complex(big"0.32050821693004973494663854616553271", big"0.017887343804712000533077043671511502")),
+    (:oblate, true, :radial, 1) => (
+        complex(big"-0.49757734798576072713042642398996791", big"-0.097894279144335422349992017215902070"),
+        complex(big"-0.90311515453671632985773908416340722", big"-0.012572350904677601168218104821721680")),
+    (:oblate, true, :radial, 2) => (
+        complex(big"-0.83764894331294577207027248820261093", big"0.51153263655280442207966764099971516"),
+        complex(big"1.3042313421906488120604349221108946", big"-1.0147099101020288012645877871979578"))
+)
+
+const STATIC_PARAMETER_REFERENCES = Dict(
+    (:prolate, 1, false) => (complex(big"0.0", big"0.0"),
+        complex(big"0.0", big"0.0"),
+        complex(big"-0.11311352212694708855689445495548554", big"0.0"),
+        complex(big"-0.26393155162954320663275372822946625", big"0.0")),
+    (:prolate, 1, true) => (
+        complex(big"-0.10447845038479703262625331316521850", big"-0.0037564223610635719544588646489638229"),
+        complex(big"-0.20673964895935289715995602734177855", big"0.00060806104574487478852732790107546107"),
+        complex(big"-0.030066879795711426497389518337169983", big"0.013139251782268592339928572874856415"),
+        complex(big"0.0053515130546976874771570492179475498", big"0.038668869178392583711516051266542103")),
+    (:prolate, 2, false) =>
+        (complex(big"0.0", big"0.0"),
+            complex(big"0.0", big"0.0"),
+            complex(big"-0.55307413483768416695450724389801038", big"0.0"),
+            complex(big"0.34004544106070999142698935371434613", big"0.0")),
+    (:prolate, 2, true) => (
+        complex(big"-0.78920704802298078927940884596220945", big"0.16771204442217157928819799293320309"),
+        complex(big"1.8178053555356010570241334695081995", big"0.70620844791076627699415347661212155"),
+        complex(big"1.2732676613959238419135554279869245", big"1.0921866770032940551042822535979545"),
+        complex(big"5.7245346737395230827953881795430020", big"1.2446154276202788324728042939331547")),
+    (:oblate, 1, false) =>
+        (complex(big"0.0", big"0.0"),
+            complex(big"0.0", big"0.0"),
+            complex(big"-0.19470523885712454499345185686911792", big"0.0"),
+            complex(big"-0.34560179897139606736337704594268425", big"0.0")),
+    (:oblate, 1, true) => (
+        complex(big"-0.16223670726526839200193001316152413", big"-0.0021716189836061879404305249366681843"),
+        complex(big"-0.22860999072488352342592013178677957", big"0.010053859614570509769268165920592455"),
+        complex(big"-0.017084461901764693828086641740782989", big"0.025673255691634827494628142296899622"),
+        complex(big"0.082223878818273762179368434257748966", big"0.053247748652178566865172250680598482")),
+    (:oblate, 2, false) =>
+        (complex(big"0.0", big"0.0"),
+            complex(big"0.0", big"0.0"),
+            complex(big"-0.46115094381985241044849472572323369", big"0.0"),
+            complex(big"0.19664340518981829213565178630221981", big"0.0")),
+    (:oblate, 2, true) => (
+        complex(big"-0.27360405463225337515702286302826729", big"0.34112560767281341272847675282044173"),
+        complex(big"1.6623243960811316634861026943096038", big"0.56861738186250953245597241054992590"),
+        complex(big"2.7015492704473421630183632744651651", big"1.2881601275907097243051858825837662"),
+        complex(big"4.7423017753628788724617921504625972", big"0.43434453105820343957978247903150205"))
+)
+
 @testset "Jacobian diagnostics keyword" begin
     for c in (1.25, 1.25+0.125im),
         options in ((;), (; h = 1e-4, adaptive = false), (;
@@ -12,7 +104,9 @@ using SpheroidalWaves, Test
             (jacobian_rmn, (0, 0, c, [2+0.125im])))
             ordinary = jac(args...; options...)
             reported = jac(args...; options..., diagnostics = true)
-            @test isequal(ordinary, jac(args...; options..., diagnostics = false))
+            values = ordinary isa Number ? reported.derivative :
+                     NamedTuple{keys(ordinary)}(reported)
+            @test isequal(ordinary, values)
             @test any(name -> startswith(string(name), "metadata"), keys(reported))
             @test_throws MethodError jac(args...; options..., with_metadata = true)
             @test_throws MethodError jac(args...; options..., diagnostics = true, with_metadata = false)
@@ -21,8 +115,6 @@ using SpheroidalWaves, Test
 end
 
 @testset "Static radial sensitivities" begin
-    offsets = collect(-4:4)
-    first_weights, second_weights = SpheroidalWaves._difference_weights(offsets)
     for precision in (:double, :quad), spheroid in (:prolate, :oblate), kind in 1:2
         T = precision === :quad ? BigFloat : Float64
         tolerance = precision === :quad ? big"2e-20" : 2e-9
@@ -31,27 +123,21 @@ end
         parameters = (precision === :quad) == (kind == 2) ?
                      (complex(T(1.25), T(0.125)),) : (zero(T),)
         for c in parameters
-            h = precision === :quad ? big"0.001" : big"0.02"
-            wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
-            samples = [rmn(1, 2, wide+k*h, [big"2"]; spheroid,
-                           precision, kind, normalization = :static)
-                       for k in offsets]
+            reference = STATIC_PARAMETER_REFERENCES[(spheroid, kind, c isa Complex)]
             first = jacobian_rmn(1, 2, c, [T(2)]; spheroid, precision, kind,
                 normalization = :static, diagnostics = true)
             second = jacobian_rmn(1, 2, c, [T(2)]; spheroid, precision, kind,
                 normalization = :static, order = 2, diagnostics = true)
-            for (field, a, b) in ((:value, :dvalue_dc, :d2value_dc2),
-                (:derivative, :dderivative_dc, :d2derivative_dc2))
+            for (index, field, a, b) in ((1, :value, :dvalue_dc, :d2value_dc2),
+                (2, :derivative, :dderivative_dc, :d2derivative_dc2))
                 first_value = c isa Real ? getproperty(first, a) :
                               getproperty(first, field===:value ? :dvalue_dcreal :
                                                  :dderivative_dcreal)
                 second_value = c isa Real ? getproperty(second, b) :
                                getproperty(second, field===:value ? :d2value_dcreal2 :
                                                    :d2derivative_dcreal2)
-                values = [only(getproperty(r, field)) for r in samples]
-                @test only(first_value)≈sum(BigFloat.(first_weights) .* values)/h rtol=tolerance atol=tolerance
-                @test only(second_value)≈sum(BigFloat.(second_weights) .*
-                                             (values .- values[5]))/h^2 rtol=tolerance atol=tolerance
+                @test only(first_value)≈reference[index] rtol=tolerance atol=tolerance
+                @test only(second_value)≈reference[index + 2] rtol=tolerance atol=tolerance
             end
             @test second.metadata.finite_flag
             if spheroid === :prolate
@@ -101,13 +187,6 @@ end
 end
 
 @testset "Second parameter derivatives" begin
-    # Nine function values supply an independent second-derivative stencil.
-    offsets = collect(-4:4)
-    weights = last(SpheroidalWaves._difference_weights(offsets))
-    function reference(f, c, h)
-        center = f(c)
-        sum(BigFloat(w) .* (f(c+k*h) .- center) for (k, w) in zip(offsets, weights)) ./ h^2
-    end
     for precision in (:double, :quad), spheroid in (:prolate, :oblate)
 
         T = precision === :quad ? BigFloat : Float64
@@ -117,12 +196,10 @@ end
         parameters = (precision === :double) == (spheroid === :prolate) ?
                      (T(1.25),) : (complex(T(1.25), T(0.125)),)
         for c in parameters
-            wide = c isa Real ? BigFloat(c) : Complex{BigFloat}(c)
-            h = precision === :quad ? big"0.0001" : big"0.02"
             e = jacobian_eigen(1, 2, c; spheroid, precision, order = 2, diagnostics = true)
             ev = c isa Real ? e.derivative : e.d2_dcreal2
-            @test ev ≈
-                  reference(z -> eigenvalue(1, 2, z; spheroid, precision), wide, h) rtol=tol
+            @test ev ≈ only(SECOND_PARAMETER_REFERENCES[(
+                spheroid, c isa Complex, :eigenvalue, 1)]) rtol=tol
             @test e.metadata.method === :differenced_sensitivity && e.metadata.finite_flag
             @test e.metadata.step_used > 0
             @test ev isa (c isa Real ? T : Complex{T})
@@ -143,19 +220,11 @@ end
                     v = c isa Real ? j.d2value_dc2 : j.d2value_dcreal2
                     d = c isa Real ? j.d2derivative_dc2 : j.d2derivative_dcreal2
                     if kind <= 2
-                        # Each reference call returns both value and slope.
-                        # A wider double angular stencil avoids cancellation
-                        # in the small curvature of the coordinate derivative.
-                        step = precision === :double && f === smn ? big"0.04" : h
-                        samples = [f(1, 2, wide+k*step, [BigFloat(point)];
-                                       spheroid, precision, kind) for k in offsets]
-                        for (field, actual) in ((:value, v), (:derivative, d))
-                            center = getproperty(samples[5], field)
-                            expected = sum(BigFloat(w) .*
-                                           (getproperty(sample, field) .- center)
-                            for (w, sample) in zip(weights, samples)) ./ step^2
-                            @test actual ≈ expected rtol=tol
-                        end
+                        target = f === smn ? :angular : :radial
+                        reference = SECOND_PARAMETER_REFERENCES[(
+                            spheroid, c isa Complex, target, kind)]
+                        @test only(v) ≈ reference[1] rtol=tol
+                        @test only(d) ≈ reference[2] rtol=tol
                     else
                         a, b = curvatures[1], curvatures[2]
                         av, bv = c isa Real ? (a.d2value_dc2, b.d2value_dc2) :
@@ -239,7 +308,7 @@ end
                 offsets = collect(-4:4)
                 weights = last(SpheroidalWaves._difference_weights(offsets))
                 f(z) = eigenvalue(0, n, z; operator, precision = :quad)
-                expected = sum(BigFloat(w)*(f(c+k*h)-f(c))
+                expected = sum(BigFloat(numerator(w))/BigFloat(denominator(w))*(f(c+k*h)-f(c))
                 for (k, w) in zip(offsets, weights))/h^2
                 a = jacobian_eigen(0, n, T(c); operator, precision, order = 2)
                 @test a ≈ expected rtol=tol
@@ -630,13 +699,13 @@ end
         @test real_result.dvalue_dc ≈ real_difference.dvalue_dc rtol=tolerance
         @test real_result.dderivative_dc ≈ real_difference.dderivative_dc rtol=tolerance
         # Differentiate the returned third derivative along an imaginary step.
-        high = f(1, 2, c, z; spheroid, precision, kind, derivatives = 4)
-        plus = f(1, 2, c, z+im*h; spheroid, precision, kind, derivatives = 3)
-        minus = f(1, 2, c, z-im*h; spheroid, precision, kind, derivatives = 3)
-        @test high.fourth_derivative ≈
-              (plus.third_derivative-minus.third_derivative)/(2im*h) rtol=(precision ===
-                                                                           :quad ?
-                                                                           big"1e-9" : 1e-6)
+        samples = f(
+            1, 2, c, [z, z+im*h, z-im*h]; spheroid, precision, kind, derivatives = 4)
+        @test samples.fourth_derivative[1] ≈
+              (samples.third_derivative[2]-samples.third_derivative[3])/(2im*h) rtol=(precision ===
+                                                                                      :quad ?
+                                                                                      big"1e-9" :
+                                                                                      1e-6)
     end
     for spheroid in (:prolate, :oblate), kind in 1:2
 
