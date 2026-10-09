@@ -61,13 +61,18 @@ jobs:
       # caught immediately, rather than only when Yggdrasil.yml is run by hand.
       - name: Build backends from source
         run: julia --project=. scripts/build_from_source.jl
+      - name: Check native quadrature cache bounds and concurrency
+        run: |
+          cmake -S . -B build -DSWF_BUILD_TESTS=ON
+          cmake --build build --parallel 2
+          ctest --test-dir build --output-on-failure
       - name: Point tests at the freshly built backends
         shell: bash
         run: |
           echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
           echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
       - uses: julia-actions/julia-runtest@v1
-        timeout-minutes: 10
+        timeout-minutes: 15
 
   jll-backends:
     name: SpheroidalWaves_jll backends - ${{ matrix.os }}
