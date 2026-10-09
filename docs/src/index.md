@@ -33,7 +33,7 @@ lambda = eigenvalue(0, 2, 20.0; spheroid=:prolate, precision=:double)
 acc = accuracy(0, 2, 20.0, eta; target=:angular)
 W = radial_wronskian(0, 1, 20.0, x; spheroid=:prolate, precision=:double)
 
-j_lambda = jacobian_eigen(0, 1, 20.0; with_metadata=true)
+j_lambda = jacobian_eigen(0, 1, 20.0; diagnostics=true)
 root = find_c_for_eigenvalue(0, 1, lambda; bracket=(1.0, 40.0))
 ```
 
