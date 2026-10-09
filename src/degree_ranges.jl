@@ -1,14 +1,24 @@
-smn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::Complex;kwargs...) = smn(m,n,c,[z];kwargs...)
-rmn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::Complex;kwargs...) = rmn(m,n,c,[z];kwargs...)
-
-function smn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::AbstractVector{<:Number};kwargs...)
-    _validate_degree_range(m,n,z,get(kwargs,:spheroid,:prolate),get(kwargs,:precision,:double))
-    _stack_wave_results([smn(m,degree,c,z;kwargs...) for degree in n])
+function smn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, z::Complex; kwargs...)
+    smn(m, n, c, [z]; kwargs...)
+end
+function rmn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, z::Complex; kwargs...)
+    rmn(m, n, c, [z]; kwargs...)
 end
 
-function rmn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},z::AbstractVector{<:Number};kwargs...)
-    _validate_degree_range(m,n,z,get(kwargs,:spheroid,:prolate),get(kwargs,:precision,:double))
-    _stack_wave_results([rmn(m,degree,c,z;kwargs...) for degree in n])
+function smn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, z::AbstractVector{<:Number}; kwargs...)
+    _validate_degree_range(
+        m, n, z, get(kwargs, :spheroid, :prolate), get(kwargs, :precision, :double))
+    _stack_wave_results([smn(m, degree, c, z; kwargs...) for degree in n])
+end
+
+function rmn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, z::AbstractVector{<:Number}; kwargs...)
+    _validate_degree_range(
+        m, n, z, get(kwargs, :spheroid, :prolate), get(kwargs, :precision, :double))
+    _stack_wave_results([rmn(m, degree, c, z; kwargs...) for degree in n])
 end
 
 function _validate_degree_range(m, n, points, spheroid, precision)
@@ -21,8 +31,10 @@ function _validate_degree_range(m, n, points, spheroid, precision)
     return nothing
 end
 
-rmn(m::Integer,n::AbstractUnitRange{<:Integer},c::Union{Real,Complex},x::Real;kwargs...) =
-    rmn(m,n,c,[x];kwargs...)
+function rmn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, x::Real; kwargs...)
+    rmn(m, n, c, [x]; kwargs...)
+end
 
 function _degree_range_pointer(symbol, c, spheroid, precision)
     if spheroid === :prolate && precision === :quad && c isa Real && c > 0
@@ -34,29 +46,31 @@ end
 
 # One native expansion returns every requested degree. Keep mantissas scaled
 # until combinations and optional ratios have been formed in a wide type.
-function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option,
-                                   scaled,logderivative,second_derivative)
+function _shared_real_degree_range(m, n, c, points, spheroid, precision, target, option,
+        scaled, logderivative, second_derivative)
     c isa Real && c>0 || return nothing
     target === :angular && _use_small_parameter_expansion(c) && return nothing
     # The earlier quad prolate ABI already shares degrees and transfers fewer
     # channels for ordinary output. Retain it when no extended fields are needed.
-    if spheroid===:prolate && precision===:quad && !scaled && !logderivative && !second_derivative &&
-       (target===:radial || !_use_angular_expansion(first(n),c,spheroid))
+    if spheroid===:prolate && precision===:quad && !scaled && !logderivative &&
+       !second_derivative &&
+       (target===:radial || !_use_angular_expansion(first(n), c, spheroid))
         return nothing
     end
     if target===:angular
-        any(x->_near_angular_endpoint(x) || abs(x)==1,points) && return nothing
+        any(x->_near_angular_endpoint(x) || abs(x)==1, points) && return nothing
     else
-        _radial_needs_analytic(c,points,option) && return nothing
-        spheroid===:prolate && any(x->x<=1,points) && return nothing
+        _radial_needs_analytic(c, points, option) && return nothing
+        spheroid===:prolate && any(x->x<=1, points) && return nothing
     end
     lib = _require_backend_library(precision)
-    symbol = precision===:quad ? :spheroidal_degrees_scaled_text : :spheroidal_degrees_scaled_double
-    pointer = Libdl.dlsym_e(_require_backend_handle(lib),symbol)
+    symbol = precision===:quad ? :spheroidal_degrees_scaled_text :
+             :spheroidal_degrees_scaled_double
+    pointer = Libdl.dlsym_e(_require_backend_handle(lib), symbol)
     pointer==C_NULL && return nothing
     native_first = first(n)
     if target===:angular
-        while native_first<=last(n) && _use_angular_expansion(native_first,c,spheroid)
+        while native_first<=last(n) && _use_angular_expansion(native_first, c, spheroid)
             native_first+=1
         end
         native_first>last(n) && return nothing
@@ -64,58 +78,67 @@ function _shared_real_degree_range(m,n,c,points,spheroid,precision,target,option
     native_degrees = native_first:last(n)
     native_points = _input_bigfloat.(points)
     target===:radial && spheroid===:prolate && (native_points .-= 1)
-    ctext = _format_fortran_input([c,zero(c)])
+    ctext = _format_fortran_input([c, zero(c)])
     xtext = _format_fortran_input(native_points)
     count = 8length(points)*length(native_degrees)
-    exponents = zeros(Cint,count)
+    exponents = zeros(Cint, count)
     status = Ref{Cint}(0)
     if precision===:quad
-        output = fill(UInt8(' '),_QUAD_TEXT_WIDTH*count)
-        ccall(pointer,Cvoid,(Cint,Cint,Cint,Cint,Cint,Cint,Cint,Cint,
-              Ptr{UInt8},Ptr{UInt8},Ptr{UInt8},Ptr{Cint},Ref{Cint}),
-              spheroid===:oblate,target===:angular ? 1 : 2,option,m,native_first,last(n),length(points),
-              _QUAD_TEXT_WIDTH,ctext,xtext,output,exponents,status)
+        output = fill(UInt8(' '), _QUAD_TEXT_WIDTH*count)
+        ccall(pointer,
+            Cvoid,
+            (Cint, Cint, Cint, Cint, Cint, Cint, Cint, Cint,
+                Ptr{UInt8}, Ptr{UInt8}, Ptr{UInt8}, Ptr{Cint}, Ref{Cint}),
+            spheroid===:oblate, target===:angular ? 1 : 2, option, m, native_first, last(n), length(points),
+            _QUAD_TEXT_WIDTH, ctext, xtext, output, exponents, status)
         _check_scalar_status(status[])
-        data = _parse_fortran_output(output,exponents,count)
+        data = _parse_fortran_output(output, exponents, count)
     else
-        output = zeros(Float64,count)
-        ccall(pointer,Cvoid,(Cint,Cint,Cint,Cint,Cint,Cint,Cint,Cint,
-              Ptr{UInt8},Ptr{UInt8},Ptr{Cdouble},Ptr{Cint},Ref{Cint}),
-              spheroid===:oblate,target===:angular ? 1 : 2,option,m,native_first,last(n),length(points),
-              _QUAD_TEXT_WIDTH,ctext,xtext,output,exponents,status)
+        output = zeros(Float64, count)
+        ccall(pointer,
+            Cvoid,
+            (Cint, Cint, Cint, Cint, Cint, Cint, Cint, Cint,
+                Ptr{UInt8}, Ptr{UInt8}, Ptr{Cdouble}, Ptr{Cint}, Ref{Cint}),
+            spheroid===:oblate, target===:angular ? 1 : 2, option, m, native_first, last(n), length(points),
+            _QUAD_TEXT_WIDTH, ctext, xtext, output, exponents, status)
         _check_scalar_status(status[])
-        data = [BigFloat(v)*BigFloat(10)^e for (v,e) in zip(output,exponents)]
+        data = [BigFloat(v)*BigFloat(10)^e for (v, e) in zip(output, exponents)]
     end
-    channels = reshape(data,8,length(points),:)
+    channels = reshape(data, 8, length(points), :)
     R = precision===:quad ? BigFloat : Float64
     T = target===:angular ? R : Complex{R}
-    results = map(enumerate(native_degrees)) do (column,degree)
-        value,derivative = channels[1,:,column],channels[3,:,column]
+    results = map(enumerate(native_degrees)) do (column, degree)
+        value, derivative = channels[1, :, column], channels[3, :, column]
         if target===:radial
             if option==2
-                value,derivative = channels[5,:,column],channels[7,:,column]
+                value, derivative = channels[5, :, column], channels[7, :, column]
             elseif option>=3
                 sign = option==3 ? 1 : -1
-                value = complex.(value,sign.*channels[5,:,column])
-                derivative = complex.(derivative,sign.*channels[7,:,column])
+                value = complex.(value, sign .* channels[5, :, column])
+                derivative = complex.(derivative, sign .* channels[7, :, column])
             end
-            value,derivative = complex.(value),complex.(derivative)
+            value, derivative = complex.(value), complex.(derivative)
         end
-        result = (;value,derivative)
-        target===:angular && _angular_phase!(result,m)
-        _fix_regular_endpoints!(result,m,degree,c,points,spheroid,precision,target,option)
-        second_derivative && (result = _wave_second_derivative(result,m,degree,c,points,spheroid,precision,target;option))
-        converted = map(v->scaled ? _decimal_scaled(v,T) : T.(v),result)
+        result = (; value, derivative)
+        target===:angular && _angular_phase!(result, m)
+        _fix_regular_endpoints!(
+            result, m, degree, c, points, spheroid, precision, target, option)
+        second_derivative && (result = _wave_second_derivative(
+            result, m, degree, c, points, spheroid, precision, target; option))
+        converted = map(v->scaled ? _decimal_scaled(v, T) : T.(v), result)
         if logderivative
-            ratio = T[_wave_logderivative(v,d,x,m,spheroid,target,target===:angular ? 1 : option) for (v,d,x) in zip(result.value,result.derivative,points)]
-            converted = (;converted...,logderivative=ratio)
+            ratio = T[_wave_logderivative(
+                          v, d, x, m, spheroid, target, target===:angular ? 1 : option)
+                      for (v, d, x) in zip(result.value, result.derivative, points)]
+            converted = (; converted..., logderivative = ratio)
         end
         converted
     end
     if native_first>first(n)
-        refined = [smn(m,degree,c,points;spheroid,precision,normalize=option!=0,
-                       scaled,logderivative,second_derivative) for degree in first(n):native_first-1]
-        return _stack_wave_results(vcat(refined,results))
+        refined = [smn(m, degree, c, points; spheroid, precision, normalize = option!=0,
+                       scaled, logderivative, second_derivative)
+                   for degree in first(n):(native_first - 1)]
+        return _stack_wave_results(vcat(refined, results))
     end
     return _stack_wave_results(results)
 end
@@ -130,32 +153,37 @@ single-degree method; a scalar `eta` gives one row.
 
 Use `precision=:quad` to request quad precision with the same numeric arguments.
 """
-function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
-        eta::AbstractVector{<:Real}; spheroid::Symbol=:prolate,
-        precision::Symbol=:double, normalize::Bool=false, kind::Integer=1, scaled::Bool=false,
-        logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1)
+function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex},
+        eta::AbstractVector{<:Real}; spheroid::Symbol = :prolate,
+        precision::Symbol = :double, normalize::Bool = false, kind::Integer = 1, scaled::Bool = false,
+        logderivative::Bool = false, second_derivative::Bool = false, derivatives::Integer = 1)
     _validate_degree_range(m, n, eta, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     all(x -> abs(x) <= 1, eta) || throw(ArgumentError("eta must lie in [-1, 1]"))
-    kind in (1,2) || throw(ArgumentError("angular kind must be 1 or 2"))
+    kind in (1, 2) || throw(ArgumentError("angular kind must be 1 or 2"))
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
-    derivatives > 2 && return _stack_wave_results([smn(m,degree,c,eta;
-        spheroid,precision,normalize,kind,scaled,logderivative,derivatives) for degree in n])
+    derivatives > 2 && return _stack_wave_results([smn(m, degree, c, eta;
+                                    spheroid, precision, normalize, kind, scaled,
+                                    logderivative, derivatives) for degree in n])
     second_derivative |= derivatives == 2
     if kind==1
-        shared = _shared_real_degree_range(m,n,c,eta,spheroid,precision,:angular,Int(normalize),
-                                           scaled,logderivative,second_derivative)
+        shared = _shared_real_degree_range(
+            m, n, c, eta, spheroid, precision, :angular, Int(normalize),
+            scaled, logderivative, second_derivative)
         shared!==nothing && return shared
     end
-    if kind == 2 || scaled || logderivative || second_derivative || _use_angular_expansion(first(n),c,spheroid) || _use_small_parameter_expansion(c)
-        return _stack_wave_results([smn(m,degree,c,eta;spheroid,precision,normalize,kind,scaled,logderivative,second_derivative) for degree in n])
+    if kind == 2 || scaled || logderivative || second_derivative ||
+       _use_angular_expansion(first(n), c, spheroid) || _use_small_parameter_expansion(c)
+        return _stack_wave_results([smn(m, degree, c, eta; spheroid, precision, normalize,
+                                        kind, scaled, logderivative, second_derivative)
+                                    for degree in n])
     end
     pointer = _degree_range_pointer(:psms_smn_degrees_quad_text, c, spheroid, precision)
-    any(x -> _near_angular_endpoint(x) || abs(x)==1,eta) && (pointer = C_NULL)
+    any(x -> _near_angular_endpoint(x) || abs(x)==1, eta) && (pointer = C_NULL)
     if pointer == C_NULL
         results = [smn(m, degree, c, eta; spheroid, precision, normalize) for degree in n]
-        return (; value=hcat((r.value for r in results)...),
-            derivative=hcat((r.derivative for r in results)...))
+        return (; value = hcat((r.value for r in results)...),
+            derivative = hcat((r.derivative for r in results)...))
     end
     count = length(eta)*length(n)
     c_text = _format_fortran_input(c)
@@ -167,18 +195,21 @@ function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
     status = Ref{Cint}(0)
     ccall(pointer, Cvoid,
         (Cint, Cint, Cint, Cint, Cint, Ptr{UInt8}, Cint, Ptr{UInt8},
-         Ptr{UInt8}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint}, Ref{Cint}),
+            Ptr{UInt8}, Ptr{Cint}, Ptr{UInt8}, Ptr{Cint}, Ref{Cint}),
         Cint(m), Cint(first(n)), Cint(last(n)), Cint(length(eta)),
         _bool_to_cint(normalize), c_text, Cint(_QUAD_TEXT_WIDTH), eta_text,
         value_text, value_exp, derivative_text, derivative_exp, status)
     _check_scalar_status(status[])
-    result = (; value=reshape(_parse_fortran_output(value_text, value_exp, count), length(eta), :),
-        derivative=reshape(_parse_fortran_output(derivative_text, derivative_exp, count), length(eta), :))
+    result = (;
+        value = reshape(_parse_fortran_output(value_text, value_exp, count), length(eta), :),
+        derivative = reshape(_parse_fortran_output(derivative_text, derivative_exp, count), length(eta), :))
     return _angular_phase!(result, m)
 end
 
-smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}, eta::Real; kwargs...) =
+function smn(m::Integer, n::AbstractUnitRange{<:Integer},
+        c::Union{Real, Complex}, eta::Real; kwargs...)
     smn(m, n, c, [eta]; kwargs...)
+end
 
 """
     rmn(m, n::AbstractUnitRange{<:Integer}, c, x; kwargs...)
@@ -189,30 +220,38 @@ to `n`. All four radial kinds and the spheroid and precision keywords are
 supported. A scalar `x` gives one row. Use `precision=:quad` to request quad
 precision with the same numeric arguments.
 """
-function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex},
-        x::AbstractVector{<:Real}; spheroid::Symbol=:prolate,
-        precision::Symbol=:double, kind::Integer=1,scaled::Bool=false,
-        logderivative::Bool=false,second_derivative::Bool=false,derivatives::Integer=1,normalization::Symbol=:standard)
+function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex},
+        x::AbstractVector{<:Real}; spheroid::Symbol = :prolate,
+        precision::Symbol = :double, kind::Integer = 1, scaled::Bool = false,
+        logderivative::Bool = false, second_derivative::Bool = false, derivatives::Integer = 1,
+        normalization::Symbol = :standard)
     _validate_degree_range(m, n, x, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     kind in 1:4 || throw(ArgumentError("kind must be in 1:4"))
-    _validate_wave_arguments(m,first(n),c,x,spheroid,precision,:radial;kind,normalization)
+    _validate_wave_arguments(
+        m, first(n), c, x, spheroid, precision, :radial; kind, normalization)
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
-    (derivatives > 2 || normalization === :static) && return _stack_wave_results([rmn(m,degree,c,x;
-        spheroid,precision,kind,scaled,logderivative,second_derivative,derivatives,normalization) for degree in n])
+    (derivatives > 2 || normalization === :static) &&
+        return _stack_wave_results([rmn(m, degree, c, x;
+                                        spheroid, precision, kind, scaled, logderivative,
+                                        second_derivative, derivatives, normalization)
+                                    for degree in n])
     second_derivative |= derivatives == 2
-    shared = _shared_real_degree_range(m,n,c,x,spheroid,precision,:radial,kind,
-                                       scaled,logderivative,second_derivative)
+    shared = _shared_real_degree_range(m, n, c, x, spheroid, precision, :radial, kind,
+        scaled, logderivative, second_derivative)
     shared!==nothing && return shared
     if scaled || logderivative || second_derivative
-        return _stack_wave_results([rmn(m,degree,c,x;spheroid,precision,kind,scaled,logderivative,second_derivative) for degree in n])
+        return _stack_wave_results([rmn(m, degree, c, x; spheroid, precision, kind,
+                                        scaled, logderivative, second_derivative)
+                                    for degree in n])
     end
     pointer = all(t -> t > 1, x) ?
-        _degree_range_pointer(:psms_rmn_degrees_quad_text, c, spheroid, precision) : C_NULL
+              _degree_range_pointer(:psms_rmn_degrees_quad_text, c, spheroid, precision) :
+              C_NULL
     if pointer == C_NULL
         results = [rmn(m, degree, c, x; spheroid, precision, kind) for degree in n]
-        return (; value=hcat((r.value for r in results)...),
-            derivative=hcat((r.derivative for r in results)...))
+        return (; value = hcat((r.value for r in results)...),
+            derivative = hcat((r.derivative for r in results)...))
     end
     count = 4*length(x)*length(n)
     c_text = _format_fortran_input(c)
@@ -222,16 +261,17 @@ function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real,Complex}
     status = Ref{Cint}(0)
     ccall(pointer, Cvoid,
         (Cint, Cint, Cint, Cint, Ptr{UInt8}, Cint, Ptr{UInt8}, Cint,
-         Ptr{UInt8}, Ptr{Cint}, Ref{Cint}),
+            Ptr{UInt8}, Ptr{Cint}, Ref{Cint}),
         Cint(m), Cint(first(n)), Cint(last(n)), Cint(kind), c_text,
         Cint(length(x)), x_text, Cint(_QUAD_TEXT_WIDTH), output, exponents, status)
     _check_scalar_status(status[])
     data = reshape(_parse_fortran_output(output, exponents, count), 4, length(x), :)
     if kind == 1 || kind == 2
         channel = kind == 1 ? 1 : 3
-        return (; value=complex.(data[channel, :, :]), derivative=complex.(data[channel+1, :, :]))
+        return (; value = complex.(data[channel, :, :]),
+            derivative = complex.(data[channel + 1, :, :]))
     end
     sign = kind == 3 ? 1 : -1
-    return (; value=complex.(data[1, :, :], sign .* data[3, :, :]),
-        derivative=complex.(data[2, :, :], sign .* data[4, :, :]))
+    return (; value = complex.(data[1, :, :], sign .* data[3, :, :]),
+        derivative = complex.(data[2, :, :], sign .* data[4, :, :]))
 end

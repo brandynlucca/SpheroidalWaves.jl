@@ -11,7 +11,8 @@ end
 # Associated Legendre functions WITHOUT the phase, matching the native
 # backends. Differentiate the recurrence rather than dividing by x^2 - 1.
 # Unity-normalized recurrences avoid factorial overflow at large orders.
-function _spherical_angular_point(m::Integer, n::Integer, x::T, normalize::Bool) where {T<:AbstractFloat}
+function _spherical_angular_point(m::Integer, n::Integer, x::T, normalize::Bool) where {T <:
+                                                                                        AbstractFloat}
     if abs(x) == one(T)
         nn = T(n)
         value = m == 0 ? one(T) : zero(T)
@@ -73,18 +74,18 @@ function _spherical_angular_point(m::Integer, n::Integer, x::T, normalize::Bool)
 end
 
 function _spherical_smn_real(m::Integer, n::Integer, eta::AbstractVector{<:Real};
-                             normalize::Bool=false, precision::Symbol=:double)
+        normalize::Bool = false, precision::Symbol = :double)
     T = precision === :quad ? BigFloat : Float64
     value = Vector{T}(undef, length(eta))
     derivative = similar(value)
     for (i, x) in enumerate(eta)
-        value[i], derivative[i] = _spherical_angular_point(m, n, _input_float(T,x), normalize)
+        value[i], derivative[i] = _spherical_angular_point(m, n, _input_float(T, x), normalize)
     end
     return (; value, derivative)
 end
 
 function _spherical_smn_complex(m::Integer, n::Integer, eta::AbstractVector{<:Real};
-                                normalize::Bool=false, precision::Symbol=:double)
+        normalize::Bool = false, precision::Symbol = :double)
     result = _spherical_smn_real(m, n, eta; normalize, precision)
-    return (; value=complex.(result.value), derivative=complex.(result.derivative))
+    return (; value = complex.(result.value), derivative = complex.(result.derivative))
 end

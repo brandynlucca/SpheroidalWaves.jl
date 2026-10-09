@@ -5,7 +5,7 @@ version = v"0.5.0"
 
 sources = [
     GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
-              "70874f2eb281ccc09f7367014d41411fdd83ddfb"),
+    "70874f2eb281ccc09f7367014d41411fdd83ddfb"),
 ]
 
 script = raw"""
@@ -30,11 +30,11 @@ filter!(p -> !(arch(p) in ("armv6l", "armv7l", "powerpc64le")), platforms)
 platforms = expand_gfortran_versions(platforms)
 
 products = [
-    LibraryProduct(["libspheroidal_batch_double","spheroidal_batch_double"],:libspheroidal_batch_double),
-    LibraryProduct(["libspheroidal_batch_quad","spheroidal_batch_quad"],:libspheroidal_batch_quad),
+    LibraryProduct(["libspheroidal_batch_double", "spheroidal_batch_double"], :libspheroidal_batch_double),
+    LibraryProduct(["libspheroidal_batch_quad", "spheroidal_batch_quad"], :libspheroidal_batch_quad)
 ]
 
 dependencies = [Dependency("CompilerSupportLibraries_jll")]
 
-build_tarballs(ARGS,name,version,sources,script,platforms,products,dependencies;
-               preferred_gcc_version=v"12",julia_compat="1.10")
+build_tarballs(ARGS, name, version, sources, script, platforms, products, dependencies;
+    preferred_gcc_version = v"12", julia_compat = "1.10")
