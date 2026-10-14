@@ -37,7 +37,7 @@ end
 # Multiplication by x in the orthonormal Ferrers basis has entries a_l.
 # H = diag(l(l+1)) + sigma*c^2*x^2 uses the package's separation constant.
 # For complex c this is symmetric under transpose, not Hermitian.
-function _coefficient_matrix(m, n, c, terms, spheroid)
+function _coefficient_matrix(m, n, c, terms, spheroid; derivatives = true)
     degrees = collect((m + mod(n - m, 2)):2:(m + mod(n - m, 2) + 2terms - 2))
     a(l) = l < m ? zero(_SWFloat) :
            sqrt((_SWFloat(l+1)^2-_SWFloat(m)^2) /
@@ -47,12 +47,13 @@ function _coefficient_matrix(m, n, c, terms, spheroid)
     sigma = spheroid === :prolate ? 1 : -1
     diagonal = [_SWFloat(l)*(l+1) for l in degrees] .+ sigma*c^2 .* b
     off = sigma*c^2 .* e
-    return degrees, Tridiagonal(off, diagonal, copy(off)),
-    Tridiagonal(2sigma*c .* e, 2sigma*c .* b, 2sigma*c .* e)
+    derivative = derivatives ? Tridiagonal(2sigma*c .* e, 2sigma*c .* b, 2sigma*c .* e) :
+                 nothing
+    return degrees, Tridiagonal(off, diagonal, copy(off)), derivative
 end
 
-function _solve_coefficient_mode(m, n, c, terms, spheroid, seed)
-    degrees, H, dH = _coefficient_matrix(m, n, c, terms, spheroid)
+function _solve_coefficient_mode(m, n, c, terms, spheroid, seed; derivatives = true)
+    degrees, H, dH = _coefficient_matrix(m, n, c, terms, spheroid; derivatives)
     v = zeros(eltype(H), terms)
     v[min(terms, (n-m)÷2+1)] = 1
     target = eps(_SWFloat)^(2//3)
@@ -72,6 +73,13 @@ function _solve_coefficient_mode(m, n, c, terms, spheroid, seed)
         residual = maximum(abs, product-lambda*v)/((1+abs(lambda))*maximum(abs, v))
         residual <= target && break
         iteration == max_iterations && error("Coefficient eigenvector did not converge")
+    end
+    if !derivatives
+        tail = iszero(c) ? zero(_SWFloat) :
+               sqrt(sum(abs2, v[max(1, end - 3):end]))/sqrt(sum(abs2, v))
+        return (; m, n, c, spheroid, degrees, v, dv = nothing, lambda,
+            dlambda = nothing, residual, derivative_residual = zero(_SWFloat), tail,
+            eigenvalue_condition = sum(abs2, v)/abs(sum(v .* v)))
     end
     # Hellmann-Feynman with the analytic bilinear normalization v^T v = 1.
     dlambda = sum(v .* (dH*v))
@@ -101,7 +109,7 @@ end
 # to select the eigenvalue branch. Cached vectors are never returned to callers.
 function _coefficient_plan(
         m, n, c; spheroid = :prolate, precision = :double, rtol = nothing,
-        max_terms = 512, eigenvalue_seed = nothing, min_terms = 0)
+        max_terms = 512, eigenvalue_seed = nothing, min_terms = 0, derivatives = true)
     _validate_wave_arguments(m, n, c, [0], spheroid, precision, :angular)
     tolerance = rtol === nothing ?
                 (precision === :quad ? _SWFloat("1e-29") : _SWFloat("1e-14")) :
@@ -118,7 +126,7 @@ function _coefficient_plan(
     end
     key = (m, n, typeof(parameter), parameter, spheroid, precision, tolerance,
         max_terms, eigenvalue_seed, min_terms, Base.precision(_SWFloat),
-        rounding(_SWFloat), backend_library(; precision))
+        rounding(_SWFloat), backend_library(; precision), derivatives)
     haskey(cache, key) && return cache[key]
     seed = eigenvalue_seed === nothing ? eigenvalue(m, n, parameter; spheroid, precision) :
            eigenvalue_seed
@@ -127,17 +135,20 @@ function _coefficient_plan(
         terms = min(max_terms, max(16, minimum_terms+ceil(Int, abs(z))+8))
         previous = nothing
         while true
-            result = _solve_coefficient_mode(m, n, z, terms, spheroid, seed)
+            result = _solve_coefficient_mode(m, n, z, terms, spheroid, seed; derivatives)
             change = _SWFloat(Inf)
             if previous !== nothing
                 k = length(previous.v)
                 sign = real(sum(conj.(previous.v) .* result.v[1:k])) < 0 ? -1 : 1
                 result.v .*= sign
-                result.dv .*= sign
-                change = max(
-                    sqrt(sum(abs2, result.v[1:k]-previous.v))/sqrt(sum(abs2, result.v)),
-                    sqrt(sum(abs2, result.dv[1:k]-previous.dv))/max(one(_SWFloat), sqrt(sum(abs2, result.dv))),
-                    abs(result.dlambda-previous.dlambda)/max(one(_SWFloat), abs(result.dlambda)))
+                change = sqrt(sum(abs2, result.v[1:k]-previous.v))/sqrt(sum(abs2, result.v))
+                if derivatives
+                    result.dv .*= sign
+                    change = max(change,
+                        sqrt(sum(abs2, result.dv[1:k]-previous.dv))/max(
+                            one(_SWFloat), sqrt(sum(abs2, result.dv))),
+                        abs(result.dlambda-previous.dlambda)/max(one(_SWFloat), abs(result.dlambda)))
+                end
             elseif iszero(z)
                 change = zero(_SWFloat)
             end
@@ -204,12 +215,21 @@ function _evaluate_coefficient_vector(
     derivatives = similar(values)
     seconds = similar(values)
     m = plan.m
+    initial = inv(sqrt(_SWFloat("2")))
+    for k in 1:m
+        initial *= -sqrt(_SWFloat(2k+1)/(2k))
+    end
+    # These normalized recurrence factors depend on order and precision only.
+    # Compute them once for the whole point batch, retaining the same arithmetic.
+    factors = map(m:(last(plan.degrees) - 1)) do l
+        k = _SWFloat(l+1)
+        a = sqrt((4k^2-1)/((k-m)*(k+m)))
+        b = l == m ? zero(k) : sqrt((2k+1)*(k-1-m)*(k-1+m)/((2k-3)*(k-m)*(k+m)))
+        (a, b)
+    end
     for (i, point) in enumerate(points)
         x = _SWFloat(point)
-        p = inv(sqrt(_SWFloat("2")))
-        for k in 1:m
-            p *= -sqrt(_SWFloat(2k+1)/(2k))
-        end
+        p = initial
         previous, dp, dprevious = zero(p), zero(p), zero(p)
         ddp, ddprevious = zero(p), zero(p)
         f, df = zero(eltype(coefficients)), zero(eltype(coefficients))
@@ -223,9 +243,7 @@ function _evaluate_coefficient_vector(
                 index += 1
                 index > length(coefficients) && break
             end
-            k = _SWFloat(l+1)
-            a = sqrt((4k^2-1)/((k-m)*(k+m)))
-            b = l == m ? zero(k) : sqrt((2k+1)*(k-1-m)*(k-1+m)/((2k-3)*(k-m)*(k+m)))
+            a, b = factors[l - m + 1]
             second_derivative && ((ddprevious, ddp) = (ddp, a*(2dp+x*ddp)-b*ddprevious))
             previous, p, dprevious, dp = p, a*x*p-b*previous, dp, a*(p+x*dp)-b*dprevious
         end
@@ -308,13 +326,15 @@ _use_angular_expansion(n, c, spheroid) = c isa Real && abs(c)>n+1
 
 _angular_precision(c) = max(Base.precision(_SWFloat)+64, 256+ceil(Int, 5abs(c)))
 
-function _guarded_angular_plan(m, n, c, spheroid, precision; eigenvalue_seed = nothing)
+function _guarded_angular_plan(
+        m, n, c, spheroid, precision; eigenvalue_seed = nothing, derivatives = true)
     # Form the exponential in the working type, before it can underflow in
     # Float64 for a large ordinary (or complex-double) bandwidth.
     tolerance = min(_SWFloat("1e-40"), exp(-2_SWFloat(abs(c)))*_SWFloat("1e-40"))
     max_terms = max(512, (n-m)÷2+2ceil(Int, abs(c))+32)
     plan = _coefficient_plan(
-        m, n, c; spheroid, precision, rtol = tolerance, max_terms, eigenvalue_seed)
+        m, n, c; spheroid, precision, rtol = tolerance,
+        max_terms, eigenvalue_seed, derivatives)
     plan.converged || error("Angular coefficient expansion did not converge")
     return plan
 end
@@ -329,7 +349,8 @@ function _coefficient_smn(m, n, c, points, spheroid, precision, normalize,
     wide = _with_swprecision(bits) do
         # The truncation error must shrink along with the smallest interior
         # values; a fixed absolute coefficient tolerance is insufficient.
-        plan = _guarded_angular_plan(m, n, parameter, spheroid, precision)
+        plan = _guarded_angular_plan(
+            m, n, parameter, spheroid, precision; derivatives = false)
         scale = _coefficient_phase(plan, precision)*(normalize ? one(_SWFloat) :
                                                      sqrt(_ferrers_norm2(m, n, _SWFloat)))
         _evaluate_coefficient_vector(plan, scale .* plan.v, coordinates; second_derivative)
