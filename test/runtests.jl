@@ -16,6 +16,7 @@ include("thread_safety.jl")
 
     @testset "Public API Surface" begin
         exported = names(SpheroidalWaves)
+        @test :spheroidal in exported
         @test :smn in exported
         @test :rmn in exported
         @test :radial_wronskian in exported
