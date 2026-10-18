@@ -25,6 +25,8 @@
 !      the capped backward recurrence cannot reach its convergence depth.
 !   6) Include derivative convergence in angular truncation and stabilize
 !      Legendre endpoint factors.
+!   7) Optional normalized Ferrers coefficient blocks share the native recurrence.
+!   8) Preserve angular normalization and truncation across value-only zeros.
 !
 ! Note: This file is NOT a pristine upstream copy.
 ! -----------------------------------------------------------------------------
@@ -448,7 +450,7 @@ module prolate_swf
   subroutine profcn(c, m, lnum, ioprad, x1, iopang, iopnorm, narg, arg, &
            r1c, ir1e, r1dc, ir1de, r2c, &
            ir2e, r2dc, ir2de, naccr, &
-           s1c, is1e, s1dc, is1de, naccs, eigout)
+           s1c, is1e, s1dc, is1de, naccs, eigout, coefficients, coefficient_count)
 
 !      version 1.15 Dec 2023
 !
@@ -585,6 +587,9 @@ module prolate_swf
     real(knd), intent (out) :: r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), &
                   s1c(lnum, narg), s1dc(lnum, narg)
     real(knd), intent (out) :: eigout(lnum)
+    ! Optional coefficient columns reuse the wave expansion without changing existing calls.
+    real(knd), optional, intent(out) :: coefficients(:,:)
+    integer, optional, intent(out) :: coefficient_count(:)
     integer, intent (out)  :: ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), &
                   is1e(lnum, narg), is1de(lnum, narg), naccr(lnum), &
                   naccs(lnum, narg)
@@ -671,7 +676,7 @@ module prolate_swf
           x1, ngau, arg, narg, neta, maxd, maxdr, maxint, maxj, maxlp, &
           maxm, maxmp, maxn, maxp, maxpdr, maxq, maxt, jnenmax, &
           kindd, kindq, ndec, nex, r1c, ir1e, r1dc, ir1de, r2c, ir2e, &
-        r2dc, ir2de, naccr, s1c, is1e, s1dc, is1de, naccs, eigout)
+        r2dc, ir2de, naccr, s1c, is1e, s1dc, is1de, naccs, eigout, coefficients, coefficient_count)
 
     end subroutine
 
@@ -680,7 +685,7 @@ module prolate_swf
              maxint, maxj, maxlp, maxm, maxmp, maxn, maxp, maxpdr, &
              maxq, maxt, jnenmax, kindd, kindq, ndec, nex, qr1, ir1, &
              qr1d, ir1d, qr2, ir2, qr2d, ir2d, nar, s1, is1, s1d, is1d, &
-             nas, eig)
+             nas, eig, coefficients, coefficient_count)
 
 !  purpose:     To coordinate the calculation of both the prolate
 !               spheroidal radial and angular functions and their
@@ -842,6 +847,8 @@ module prolate_swf
 !  integer and real(knd) arrays with dimension lnum
     dimension iqdl(lnum), iql(lnum), ifajo(lnum), nar(lnum)
     real(knd) qdl(lnum), ql(lnum), fajo(lnum), eig(lnum)
+    real(knd), optional, intent(out) :: coefficients(:,:)
+    integer, optional, intent(out) :: coefficient_count(:)
     dimension ir1(lnum), ir1d(lnum), ir2(lnum), ir2d(lnum)
     real(knd) qr1(lnum), qr1d(lnum), qr2(lnum), qr2d(lnum)
 !
@@ -1209,6 +1216,10 @@ end if
 176      call dnorm (l, m, c, ndec, nex, limd, maxd, enr, sgn, d01, id01, &
              dmfnorm, idmfe, dmlmf, idmlmfe, dmsnorm, idmse, &
              dmlms, idmlmse, jmf, jsub)
+       ! Export the ratios and phase after dnorm has fixed their angular normalization.
+       if (present(coefficients) .and. present(coefficient_count)) then
+         call normalized_coefficients(m, l, limd, enr, sgn, coefficients(:,li), coefficient_count(li))
+       end if
        if(li /= 1 .and. eigval <= eigvalp) go to 900
        if(l == m .and. jsub > jtest .and. iopneu /= 0) iopneu = 0
        if(l == m .and. jsub > jtest .and. iopleg /= 0) iopleg = 0
@@ -2173,6 +2184,11 @@ end if
         ipdtempe(maxt), iptempe(maxt), ipdtempo(maxt), &
         iptempo(maxt), is1de(maxt), is1e(maxt), naccs(maxt)
 !
+    ! Keep omitted derivative buffers defined for callers and thread-local caches.
+    if (iopang /= 2) then
+      s1dc = 0.0_knd
+      is1de = 0
+    end if
     dec = 10.0e0_knd ** (-ndec - 1)
     dcon = dec
     adec = 1000.0e0_knd * dec
@@ -2242,7 +2258,8 @@ end if
 110   continue
     lim = lims1 / 2 - ix
     jlow = lm2 + 1
-    jang = 0
+    ! Preserve the last converged extent through parity zeros when derivatives are omitted.
+    if (iopang == 2 .or. l == m) jang = 0
 !
 !  compute the associated Legendre function normalization factor
     factor = 1.0e0_knd
@@ -4432,6 +4449,65 @@ end if
     end subroutine
 !
 !
+    ! Export unit Euclidean coefficients in the L2-orthonormal Ferrers basis.
+    subroutine normalized_coefficients(m, l, limd, ratios, phase, values, count)
+      integer, intent(in) :: m, l, limd
+      real(knd), intent(in) :: ratios(:), phase
+      real(knd), intent(out) :: values(:)
+      integer, intent(out) :: count
+      integer :: parity, center, j, degree
+      real(knd) :: ratio, scale, bound, norm
+      ! Only degrees matching l-m parity occur, with the anchor at degree l.
+      parity = mod(l-m,2)
+      center = (l-m)/2+1
+      count = min(size(values),limd/2-parity+1)
+      values = 0.0_knd
+      ! A zero count marks a block that the caller must recompute with its guarded solver.
+      if (count < center) then
+        count = 0
+        return
+      end if
+      bound = sqrt(huge(1.0_knd))*0.01_knd
+      ! The dnorm sign matches s1leg while the Ferrers basis supplies its own phase.
+      values(center) = phase
+      ! Ratios of Ferrers norms convert the recurrence without factorial overflow.
+      do j=center+1,count
+        degree = m+parity+2*(j-1)
+        ratio = ratios(j-1)*sqrt((real(degree+m,knd)/real(degree-m,knd))* &
+          (real(degree+m-1,knd)/real(degree-m-1,knd))* &
+          (real(2*degree-3,knd)/real(2*degree+1,knd)))
+        ! Rescale completed entries before a product approaches the native exponent limit.
+        if (abs(ratio) > 1.0_knd) then
+          if (abs(values(j-1)) > bound/abs(ratio)) &
+            values(1:j-1) = values(1:j-1)/abs(values(j-1))
+        end if
+        values(j) = values(j-1)*ratio
+      end do
+      ! Reconstruct lower degrees by reciprocal ratios with the same overflow protection.
+      do j=center-1,1,-1
+        degree = m+parity+2*j
+        ratio = ratios(j)*sqrt((real(degree+m,knd)/real(degree-m,knd))* &
+          (real(degree+m-1,knd)/real(degree-m-1,knd))* &
+          (real(2*degree-3,knd)/real(2*degree+1,knd)))
+        if (ratio == 0.0_knd) then
+          count = 0
+          return
+        end if
+        if (abs(ratio) < 1.0_knd .and. abs(values(j+1)) > bound*abs(ratio)) &
+          values(j+1:count) = values(j+1:count)/abs(values(j+1))
+        values(j) = values(j+1)/ratio
+      end do
+      ! Scale the entire vector before squaring to obtain a safe Euclidean normalization.
+      scale = maxval(abs(values(1:count)))
+      if (.not. (scale > 0.0_knd .and. scale <= huge(scale))) then
+        count = 0
+        return
+      end if
+      values(1:count) = values(1:count)/scale
+      norm = sqrt(sum(values(1:count)**2))
+      values(1:count) = values(1:count)/norm
+    end subroutine normalized_coefficients
+!
     subroutine dnorm (l, m, c, ndec, nex, limd, maxd, enr, sgn, d01, id01, &
              dmfnorm, idmfe, dmlmf, idmlmfe, dmsnorm, idmse, &
              dmlms, idmlmse, jnorm, jsub)
@@ -5014,6 +5090,8 @@ end if
 !  integer array
     dimension ipdnorm(maxt), ipnorm(maxt)
 !
+    ! Value-only calls must not read or cache undefined derivative ratios.
+    if (iopd == 0) pdr = 0.0_knd
     ten = 10.0e0_knd
     adec = ten ** (-ndec + 2)
     nfac = nex / 2
@@ -5189,7 +5267,8 @@ end if
      jterm = int(ajterm)
      ipnorm(k) = ipnorm(k) + jterm
      pnorm(k) = pnorm(k) * (ten ** (ajterm - jterm))
-     if(iopd == 0) go to 130
+     ! Value-only calls retain the valid function normalization and skip derivative work.
+     if(iopd == 0) go to 140
      ajterm = log10(rm * abs(barg(k))) + (rm - 2.0e0_knd)* &
          log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
      jterm = int(ajterm)

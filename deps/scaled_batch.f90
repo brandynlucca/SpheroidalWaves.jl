@@ -199,4 +199,148 @@ contains
       end do
     end subroutine
   end subroutine
+  ! This additive real-prolate ABI is available in both precision libraries.
+  subroutine spheroidal_prolate_block_text(m,n_min,n_max,n_eta,n_x,normalize,kind,derivatives,terms,width, &
+      ctext,etatext,xtext,angular,aexp,radial,rexp,coefficients,counts,eigenvalues,status) &
+      bind(C,name="spheroidal_prolate_block_text")
+    integer(c_int), value :: m,n_min,n_max,n_eta,n_x,normalize,kind,derivatives,terms,width
+    character(c_char), intent(in) :: ctext(*),etatext(*),xtext(*)
+    character(c_char), intent(out) :: angular(*),radial(*),coefficients(*),eigenvalues(*)
+    integer(c_int), intent(out) :: aexp(*),rexp(*),counts(*),status
+    real(knd) :: c,x
+    real(knd), allocatable :: arg(:),xs(:),r(:,:),s(:,:),ds(:,:),eig(:),d(:,:)
+    integer, allocatable :: er(:,:),es(:,:),eds(:,:),acc(:),ac(:,:),dc(:)
+    integer :: lnum,narg,i,j,li,column,irad,iang,channels,index,k
+    logical :: ok
+    ! Reject invalid dimensions and output selections before allocating work arrays.
+    status=0
+    if (m<0 .or. n_min<m .or. n_max<n_min .or. n_eta<0 .or. n_x<0 .or. &
+        normalize<0 .or. normalize>1 .or. kind<1 .or. kind>4 .or. &
+        derivatives<0 .or. derivatives>1 .or. terms<0 .or. width<70 .or. &
+        (n_eta==0 .and. n_x==0 .and. terms==0)) then
+      status=-4
+      return
+    end if
+    ! Decimal input preserves the caller precision without a double intermediary.
+    call read_number(ctext,1,c,ok)
+    if (.not. ok) return
+    if (c<=0.0_knd) then
+      status=-5
+      return
+    end if
+    ! The recurrence includes degrees m:n_max even when only n_min:n_max are returned.
+    narg=max(1,n_eta)
+    lnum=n_max-m+1
+    ! Internal arrays store degree rows, with separate mantissa and exponent buffers.
+    allocate(arg(narg),xs(n_x),r(lnum,4),s(lnum,narg),ds(lnum,narg),eig(lnum),d(terms,lnum))
+    allocate(er(lnum,4),es(lnum,narg),eds(lnum,narg),acc(lnum),ac(lnum,narg),dc(lnum))
+    arg=0.0_knd
+    do i=1,n_eta
+      call read_number(etatext,i,arg(i),ok)
+      if (.not. ok) return
+      if (abs(arg(i))>1.0_knd) then
+        status=-3
+        return
+      end if
+    end do
+    ! Prolate radial coordinates arrive as x-1 to preserve boundary distance.
+    do i=1,n_x
+      call read_number(xtext,i,xs(i),ok)
+      if (.not. ok) return
+      if (xs(i)<=0.0_knd) then
+        status=-3
+        return
+      end if
+    end do
+    ! Select radial values by kind, while retaining derivatives needed internally.
+    irad=0
+    if (n_x>0) irad=2
+    if (n_x>0 .and. kind==1) irad=1
+    do j=1,max(1,n_x)
+      ! Angular work is shared on the first coordinate and can omit its derivatives.
+      iang=0
+      if (j==1 .and. n_eta>0) iang=1+derivatives
+      x=1.0_knd
+      if (n_x>0) x=xs(j)
+      r=0.0_knd; er=0; s=0.0_knd; ds=0.0_knd; es=0; eds=0
+      ! Export coefficients from the same normalized recurrence on the first call.
+      if (j==1 .and. terms>0) then
+        d=0.0_knd; dc=0
+        call profcn(c,m,lnum,irad,x,iang,normalize,narg,arg,r(:,1),er(:,1),r(:,2),er(:,2), &
+          r(:,3),er(:,3),r(:,4),er(:,4),acc,s,es,ds,eds,ac,eig,d,dc)
+      else
+        ! Additional radial coordinates need their own radial work but no coefficient export.
+        call profcn(c,m,lnum,irad,x,iang,normalize,narg,arg,r(:,1),er(:,1),r(:,2),er(:,2), &
+          r(:,3),er(:,3),r(:,4),er(:,4),acc,s,es,ds,eds,ac,eig)
+      end if
+      do li=n_min-m+1,lnum
+        ! Output columns begin at n_min and omit the recurrence prefix below it.
+        column=li-(n_min-m+1)
+        if (j==1) then
+          call write_number(eigenvalues,column+1,eig(li))
+          if (terms>0) then
+            ! Each coefficient column contains term rows and its independently valid count.
+            counts(column+1)=dc(li)
+            do i=1,terms
+              call write_number(coefficients,column*terms+i,d(i,li))
+            end do
+          end if
+          ! Julia wave buffers flatten channels first, then coordinates, then degrees.
+          channels=1+derivatives
+          do i=1,n_eta
+            index=(column*n_eta+i-1)*channels+1
+            call write_number(angular,index,s(li,i))
+            aexp(index)=es(li,i)
+            if (derivatives==1) then
+              call write_number(angular,index+1,ds(li,i))
+              aexp(index+1)=eds(li,i)
+            end if
+          end do
+        end if
+        if (n_x>0) then
+          channels=2*(1+derivatives)
+          index=(column*n_x+j-1)*channels
+          ! Transfer R1 and R2 with adjacent derivatives only when requested.
+          do i=1,2
+            k=2*i-1
+            call write_number(radial,index+(i-1)*(1+derivatives)+1,r(li,k))
+            rexp(index+(i-1)*(1+derivatives)+1)=er(li,k)
+            if (derivatives==1) then
+              call write_number(radial,index+(i-1)*(1+derivatives)+2,r(li,k+1))
+              rexp(index+(i-1)*(1+derivatives)+2)=er(li,k+1)
+            end if
+          end do
+        end if
+      end do
+    end do
+  contains
+    subroutine read_number(buffer,index,value,ok)
+      character(c_char), intent(in) :: buffer(*)
+      integer, intent(in) :: index
+      real(knd), intent(out) :: value
+      logical, intent(out) :: ok
+      character(len=width) :: text
+      integer :: k,ios
+      do k=1,width
+        text(k:k)=buffer((index-1)*width+k)
+      end do
+      ! Parsing and nonfinite failures use one status checked before Julia reads outputs.
+      read(text,*,iostat=ios) value
+      ok=ios==0
+      if (ok) ok=(value==value) .and. abs(value)<=huge(value)
+      if (.not. ok) status=-5
+    end subroutine
+    subroutine write_number(buffer,index,value)
+      character(c_char), intent(out) :: buffer(*)
+      integer, intent(in) :: index
+      real(knd), intent(in) :: value
+      character(len=width) :: text
+      integer :: k
+      ! Fixed-width decimal text retains quad significands and their exponent range.
+      write(text,'(ES70.60E4)') value
+      do k=1,width
+        buffer((index-1)*width+k)=text(k:k)
+      end do
+    end subroutine
+  end subroutine spheroidal_prolate_block_text
 end module
