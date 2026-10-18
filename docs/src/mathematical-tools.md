@@ -26,6 +26,50 @@ Use $\gamma=c$, $z=x$ for prolate and $\gamma=ic$, $z=-ix$ for oblate. The exter
 
 All three support real or complex parameters, both geometries and precisions. By default at `c=0`, `amn` is one and `kmn` is zero except for $(m,n)=(0,0)$, where it is one. Radial calls at `c=0` require `normalization=:static`. `rtol` and `max_terms` control coefficient convergence, not relative accuracy of every small coefficient.
 
+
+Use `basis=:orthonormal` for coefficients multiplying
+$\mathsf P_l^m/\sqrt{2(l+m)!/((2l+1)(l-m)!)}$. This changes the basis,
+independently of the wave normalization selected by `normalize`. Set
+`derivatives=false` when parameter sensitivities are not needed. The derivative
+fields then contain `nothing`. A degree range returns a vector of coefficient
+results and shares native expansion work when available.
+
+```julia
+coefficients = dmn(1, 2:8, 10.0; normalize=true,
+                   basis=:orthonormal, derivatives=false, precision=:quad)
+```
+
+## Combined evaluation
+
+Request angular, radial, and coefficient results together when they share the
+same order and parameter. Use `spheroid=:prolate` (the default) or
+`spheroid=:oblate` to select the geometry:
+
+```julia
+result = spheroidal(1, 2:8, 10.0; eta=[-0.4, 0.25], x=1.2,
+                    coefficients=true, normalize=true, kind=3,
+                    basis=:orthonormal, precision=:quad)
+result.angular.value    # coordinate rows, degree columns
+result.radial.derivative
+result.coefficients[1].coefficients
+
+oblate = spheroidal(1, 2:8, 10.0; spheroid=:oblate,
+                    eta=[-0.4, 0.25], x=[0.0, 0.5], kind=3, precision=:quad)
+```
+
+Omit `eta`, `x`, or `coefficients` to omit that result. Set `derivatives=false`
+to omit coordinate derivatives, or `parameter_derivatives=true` to request
+coefficient sensitivities. Scalar degrees produce the same vector shapes as
+`smn` and `rmn`. Coordinates and the parameter are dimensionless.
+
+Real prolate evaluations can share a native expansion. Additional radial
+coordinates require separate radial work. Oblate evaluations use the existing
+oblate evaluators, including their radial domain `x >= 0`. Other supported
+cases and older libraries retain the individual evaluation paths. Coefficient residual and
+tail checks remain active, as does guarded angular evaluation where cancellation
+requires extra precision. Native coefficient results report `relative_change=NaN`
+because they do not compare successive Julia truncations.
+
 ## Eigenvalue operators
 
 `eigenvalue(m, n, c; operator=:separation)` selects:
