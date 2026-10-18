@@ -59,11 +59,13 @@ function _solve_coefficient_mode(m, n, c, terms, spheroid, seed; derivatives = t
     target = eps(_SWFloat)^(2//3)
     shift = target^(1//2)*(1+abs(seed))
     shifted = Tridiagonal(copy(H.dl), H.d .- (seed+shift), copy(H.du))
+    # The inverse-iteration shift stays fixed, so reuse its tridiagonal factorization.
+    factorization = iszero(c) ? nothing : lu(shifted)
     lambda = seed
     residual = _SWFloat(Inf)
     max_iterations = max(16, cld(Base.precision(_SWFloat), 32))
     for iteration in 1:max_iterations
-        w = iszero(c) ? v : shifted \ v
+        w = iszero(c) ? v : factorization \ v
         norm2 = sum(w .* w)
         abs(norm2) > sqrt(eps(_SWFloat))*sum(abs2, w) ||
             error("Coefficient eigenvector is nearly self-orthogonal; the mode is unresolved")
@@ -86,14 +88,14 @@ function _solve_coefficient_mode(m, n, c, terms, spheroid, seed; derivatives = t
     rhs = dlambda*v-dH*v
     pivot = argmax(abs.(v))
     dv = zero(v)
-    # Pin one nonzero component, solve the two tridiagonal blocks, then impose
-    # v^T dv = 0. This avoids an ill-conditioned shifted inverse for sensitivities.
+    # Pin a nonzero component to avoid a singular sensitivity solve.
     for indices in (1:(pivot - 1), (pivot + 1):terms)
         isempty(indices) && continue
         lo, hi = first(indices), last(indices)
         dv[indices] = Tridiagonal(H.dl[lo:(hi - 1)], H.d[indices] .- lambda, H.du[lo:(hi - 1)]) \
                       rhs[indices]
     end
+    # Enforce bilinear orthogonality after solving the unpinned blocks.
     dv .-= v*sum(v .* dv)
     derivative_residual = maximum(abs, (H*dv-lambda*dv)-rhs) /
                           max(one(_SWFloat), maximum(abs, rhs), (1+abs(lambda))*maximum(abs, dv))
@@ -373,14 +375,17 @@ function _angular_coefficients(m::Integer, n::Integer, c::Union{Real, Complex};
 end
 
 function _with_coefficient_expansion(
-        f, m, n, c, spheroid, precision, normalize, rtol, max_terms)
+        f, m, n, c, spheroid, precision, normalize, rtol, max_terms; derivatives = true)
     _validate_wave_arguments(m, n, c, [0], spheroid, precision, :angular)
     return _with_swprecision(max(320, _angular_precision(c))) do
         small = _use_small_parameter_expansion(c)
         seed = small ? _small_parameter_plan(m, n, c, spheroid, precision).lambda : nothing
+        # Preserve guard precision even when optional parameter sensitivities are omitted.
         plan = _coefficient_plan(
-            m, n, c; spheroid, precision, rtol, max_terms, eigenvalue_seed = seed)
+            m, n, c; spheroid, precision, rtol, max_terms,
+            eigenvalue_seed = seed, derivatives)
         plan.converged || error("Coefficient expansion did not converge within max_terms")
+        # Match the angular phase before applying the requested wave normalization.
         phase = small ? (real(plan.v[(n - m) ÷ 2 + 1]) < 0 ? -1 : 1) :
                 _coefficient_phase(plan, precision)
         scale = phase*(normalize ? one(_SWFloat) : sqrt(_ferrers_norm2(m, n, _SWFloat)))
@@ -390,7 +395,8 @@ end
 
 """
     dmn(m, n, c; spheroid=:prolate, precision=:double,
-                           normalize=false, rtol=nothing, max_terms=512)
+                           normalize=false, rtol=nothing, max_terms=512,
+                           derivatives=true, basis=:ferrers)
 
 Return the Ferrers expansion of `smn(m,n,c,x; kind=1, normalize, ...)`:
 `S(x) = sum(coefficients[i] * P_degrees[i]^m(x))`, with Condon–Shortley phase
@@ -409,20 +415,137 @@ Supports integers `0 ≤ m ≤ n`, real or complex `c`, both geometries, and `c=
 with complex counterparts for complex `c`. `rtol` controls coefficient-vector
 convergence, not relative accuracy of every tiny coefficient. An unresolved
 mode or exhausted `max_terms` raises an error.
+
+`basis=:orthonormal` uses `P_l^m / sqrt(2(l+m)!/((2l+1)(l-m)!))` instead.
+The `normalize` keyword specifies the wave function normalization independently
+of this basis choice. `derivatives=false` omits parameter sensitivities and
+returns `nothing` for both derivative fields. It permits native coefficient
+blocks when their residual and tail satisfy `rtol`. These blocks report
+`relative_change=NaN` because no successive Julia truncations are compared.
+Existing libraries without that capability use the guarded Julia solver.
 """
 function dmn(m::Integer, n::Integer, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
-        rtol = nothing, max_terms::Integer = 512)
+        rtol = nothing, max_terms::Integer = 512, derivatives::Bool = true,
+        basis::Symbol = :ferrers)
+    _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, basis)
+    # Sensitivities retain the guarded solver and its existing public defaults.
+    if !derivatives
+        native = _native_prolate_coefficient_block(m, n:n, c, spheroid, precision,
+            normalize, basis, rtol, max_terms)
+        native !== nothing && native[1] !== nothing && return native[1]
+    end
+    # Unsupported geometry or insufficient native accuracy uses the general solver.
+    return _julia_dmn(m, n, c; spheroid, precision, normalize, rtol, max_terms,
+        derivatives, basis)
+end
+
+function _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, basis)
+    _validate_wave_arguments(m, n, c, [0], spheroid, precision, :angular)
+    basis in (:ferrers, :orthonormal) ||
+        throw(ArgumentError("basis must be :ferrers or :orthonormal"))
+    rtol === nothing || (isfinite(rtol) && rtol > 0) ||
+        throw(ArgumentError("rtol must be finite and positive"))
+    # A truncation must contain the requested degree before convergence can be assessed.
+    max_terms >= div(n-m, 2)+1 ||
+        throw(ArgumentError("max_terms must include the requested degree"))
+    return nothing
+end
+
+function _julia_dmn(m, n, c; spheroid, precision, normalize, rtol, max_terms,
+        derivatives, basis)
     T = precision === :quad ? BigFloat : Float64
     V = c isa Real ? T : Complex{T}
     return _with_coefficient_expansion(
-        m, n, c, spheroid, precision, normalize, rtol, max_terms) do plan, scale
-        factors = [scale/sqrt(_ferrers_norm2(m, l, _SWFloat)) for l in plan.degrees]
+        m, n, c, spheroid, precision, normalize, rtol, max_terms; derivatives) do plan,
+    scale
+        # Basis conversion is independent of the angular wave normalization.
+        factors = basis === :orthonormal ? fill(scale, plan.terms) :
+                  [scale/sqrt(_ferrers_norm2(m, l, _SWFloat)) for l in plan.degrees]
+        # Materialize independent arrays and omit only the requested sensitivity outputs.
         (; coefficients = V.(plan.v .* factors),
-            dcoefficients_dc = V.(plan.dv .* factors),
-            degrees = copy(plan.degrees), eigenvalue = V(plan.lambda), deigenvalue_dc = V(plan.dlambda),
+            dcoefficients_dc = derivatives ? V.(plan.dv .* factors) : nothing,
+            degrees = copy(plan.degrees), eigenvalue = V(plan.lambda),
+            deigenvalue_dc = derivatives ? V(plan.dlambda) : nothing,
             terms = plan.terms, tail_norm = T(plan.tail),
             relative_change = T(plan.relative_change), converged = true)
+    end
+end
+
+"""
+    dmn(m, n::AbstractUnitRange, c; kwargs...)
+
+Return a vector of coefficient results, in degree order. Keywords and each
+result's fields match the single-degree method. With `derivatives=false`,
+compatible native libraries share the expansion across degrees. Unsupported
+cases or insufficient native accuracy use the guarded coefficient solver.
+"""
+function dmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex};
+        spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
+        rtol = nothing, max_terms::Integer = 512, derivatives::Bool = true,
+        basis::Symbol = :ferrers)
+    _validate_degree_range(m, n, [0], spheroid, precision)
+    _validate_coefficient_options(
+        m, last(n), c, spheroid, precision, rtol, max_terms, basis)
+    # Request one native degree block when parameter sensitivities are unnecessary.
+    native = derivatives ? nothing :
+             _native_prolate_coefficient_block(m, n, c, spheroid,
+        precision, normalize, basis, rtol, max_terms)
+    # Validate each native degree independently and recompute only rejected modes.
+    return map(enumerate(n)) do (i, degree)
+        native !== nothing && native[i] !== nothing && return native[i]
+        _julia_dmn(m, degree, c; spheroid, precision, normalize, rtol, max_terms,
+            derivatives, basis)
+    end
+end
+
+function _native_prolate_coefficient_block(m, n, c, spheroid, precision,
+        normalize, basis, rtol, max_terms; block = nothing)
+    # The recurrence export is real-prolate only, unlike the public dmn interface.
+    c isa Real && c > 0 && spheroid === :prolate &&
+    !_use_small_parameter_expansion(c) || return nothing
+    capacity = min(max_terms, max(32, div(last(n)-m, 2)+ceil(Int, abs(c))+32))
+    # A combined evaluation can supply its expansion without another native call.
+    if block === nothing
+        block = _native_prolate_block(m, n, c, Real[], Real[], precision,
+            normalize, 1, false, capacity)
+    end
+    block === nothing && return nothing
+    T = precision === :quad ? BigFloat : Float64
+    return _with_swprecision(max(192, Base.precision(_SWFloat))) do
+        parameter = _SWFloat(c)
+        tolerance = rtol === nothing ?
+                    (precision === :quad ? _SWFloat("1e-29") : _SWFloat("1e-14")) :
+                    _SWFloat(rtol)
+        # Reuse parity-specific operators across degrees with the same truncation.
+        matrices = Dict{Tuple{Int, Int}, Any}()
+        map(enumerate(n)) do (i, degree)
+            count = Int(block.counts[i])
+            # Require a trailing coefficient window beyond the requested degree.
+            count >= div(degree-m, 2)+5 || return nothing
+            degrees, H, _ = get!(matrices, (mod(degree-m, 2), count)) do
+                _coefficient_matrix(
+                    m, degree, parameter, count, :prolate; derivatives = false)
+            end
+            # Assess recurrence accuracy in the orthonormal basis before any Ferrers scaling.
+            v = _SWFloat.(block.coefficients[1:count, i])
+            lambda = _SWFloat(block.eigenvalues[i])
+            all(isfinite, v) && isfinite(lambda) || return nothing
+            norm = sqrt(sum(abs2, v))
+            iszero(norm) && return nothing
+            residual = maximum(abs, H*v-lambda*v)/((1+abs(lambda))*maximum(abs, v))
+            tail = sqrt(sum(abs2, v[max(1, count - 3):count]))/norm
+            # Residual, tail, and norm errors must all meet the requested tolerance.
+            max(residual, tail, abs(norm-1)) <= tolerance || return nothing
+            # The native phase matches the coefficients multiplying the phased Ferrers basis.
+            scale = normalize ? one(_SWFloat) : sqrt(_ferrers_norm2(m, degree, _SWFloat))
+            factors = basis === :orthonormal ? fill(scale, count) :
+                      [scale/sqrt(_ferrers_norm2(m, l, _SWFloat)) for l in degrees]
+            # No successive Julia truncations were compared, so relative_change is unavailable.
+            (; coefficients = T.(v .* factors), dcoefficients_dc = nothing,
+                degrees = copy(degrees), eigenvalue = T(lambda), deigenvalue_dc = nothing,
+                terms = count, tail_norm = T(tail), relative_change = T(NaN), converged = true)
+        end
     end
 end
 
