@@ -64,6 +64,7 @@ Pass arrays to `smn` and `rmn` for batch evaluation. Calls are [thread-safe](htt
 
 - `smn`: angular function and derivative
 - `rmn`: radial function and derivative
+- `spheroidal`: combined angular, radial, and coefficient evaluation
 - `eigenvalue` and `eigenvalue_sweep`: characteristic values
 - `accuracy`: estimated numerical accuracy
 - `radial_wronskian`: radial Wronskian

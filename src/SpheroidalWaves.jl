@@ -1,10 +1,10 @@
 module SpheroidalWaves
 
 using Libdl
-using LinearAlgebra: Tridiagonal
+using LinearAlgebra: Tridiagonal, lu
 using SpheroidalWaves_jll
 
-export smn, rmn
+export smn, rmn, spheroidal
 export dmn, kmn, amn
 export eigenvalue, eigenvalue_sweep
 export jacobian_eigen, jacobian_smn, jacobian_rmn, find_c_for_eigenvalue

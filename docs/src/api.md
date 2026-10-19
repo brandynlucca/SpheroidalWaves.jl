@@ -9,6 +9,7 @@ For mathematical definitions and worked usage examples, see [Math and Usage](mat
 ```@docs
 smn
 rmn
+spheroidal
 ```
 
 ## Analysis and Diagnostics
