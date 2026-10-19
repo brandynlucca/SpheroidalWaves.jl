@@ -223,6 +223,52 @@ end
     end
 end
 
+@testset "Coefficient degree ranges preserve sensitivities and fallback" begin
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+
+        tolerance = precision === :quad ? big"1e-26" : 3e-12
+        # Default parameter sensitivities require the guarded solver for every degree.
+        results = dmn(1, 2:4, 1.25; spheroid, precision, normalize = true)
+        @test length(results) == 3
+        for (degree, actual) in zip(2:4, results)
+            reference = dmn(1, degree, 1.25; spheroid, precision, normalize = true)
+            @test actual.degrees == reference.degrees
+            for field in (:coefficients, :dcoefficients_dc, :eigenvalue, :deigenvalue_dc)
+                @test isapprox(getproperty(actual, field), getproperty(reference, field);
+                    rtol = tolerance)
+            end
+        end
+        # Returned sensitivities must not alias the cached expansion or another degree.
+        saved = deepcopy(results)
+        fill!(results[1].coefficients, 0)
+        fill!(results[1].dcoefficients_dc, 0)
+        @test results[2] == saved[2]
+        @test dmn(1, 2:4, 1.25; spheroid, precision, normalize = true) == saved
+    end
+    for precision in (:double, :quad)
+        # Fixed native precision cannot meet this tolerance. Each degree must fall back.
+        results = dmn(1, 2:4, 1.25; precision, derivatives = false,
+            basis = :orthonormal, rtol = big"1e-45")
+        for (degree, actual) in zip(2:4, results)
+            reference = dmn(1, degree, 1.25; precision,
+                basis = :orthonormal, rtol = big"1e-45")
+            @test isfinite(actual.relative_change)
+            @test actual.relative_change <= big"1e-45"
+            @test actual.tail_norm <= big"1e-45"
+            @test actual.dcoefficients_dc === nothing
+            @test actual.deigenvalue_dc === nothing
+            # Sensitivity convergence can retain more terms than values-only evaluation.
+            count = min(actual.terms, reference.terms)
+            @test actual.degrees[1:count] == reference.degrees[1:count]
+            difference = sum(abs2, actual.coefficients[1:count]-reference.coefficients[1:count]) +
+                         sum(abs2, actual.coefficients[(count + 1):end]) +
+                         sum(abs2, reference.coefficients[(count + 1):end])
+            @test sqrt(difference/sum(abs2, reference.coefficients)) <= big"1e-45"
+            @test actual.eigenvalue == reference.eigenvalue
+        end
+    end
+end
+
 @testset "Combined oblate geometry dispatch" begin
     for precision in (:double, :quad)
         tolerance = precision === :quad ? big"1e-26" : 3e-12
