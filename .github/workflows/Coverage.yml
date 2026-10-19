@@ -35,6 +35,15 @@ jobs:
               with:
                 cache-name: cov-ubuntu-latest-1.10
 
+            - name: Build backends from source
+              run: julia --project=. scripts/build_from_source.jl
+
+            - name: Point tests at the freshly built backends
+              shell: bash
+              run: |
+                echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
+                echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
+
             - name: Coverage test
               uses: julia-actions/julia-runtest@v1
               with:
