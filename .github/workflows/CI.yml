@@ -1,6 +1,6 @@
 name: CI
 env:
-  JULIA_NUM_THREADS: 4
+  JULIA_NUM_THREADS: 2
 
 on:
   push:
@@ -136,6 +136,11 @@ jobs:
         run: |
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           using Pkg
+          # Test normal startup once per Julia/platform combination. Other groups
+          # compile the methods they exercise without repeating the startup workload.
+          if ENV["SPHEROIDALWAVES_TEST_GROUP"] != "api-and-precision"
+              write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
+          end
           Pkg.Registry.add("General")
           Pkg.resolve()
           Pkg.instantiate()
@@ -190,6 +195,7 @@ jobs:
             Pkg.instantiate()
             using SpheroidalWaves_jll, SpheroidalWaves
             @assert !isdir("build") "Consumer checks must not use a local build"
+            @assert isempty(SpheroidalWaves._backend_handles)
             for precision in (:double, :quad)
                 path = SpheroidalWaves.backend_library(; precision)
                 @assert path !== nothing
@@ -197,6 +203,9 @@ jobs:
                     SpheroidalWaves_jll.libspheroidal_batch_double_path :
                     SpheroidalWaves_jll.libspheroidal_batch_quad_path
                 @assert realpath(path) == realpath(expected)
+                endpoint = smn(2,3,0.65,1; precision)
+                @assert only(endpoint.value) == 0
+                @assert isapprox(only(endpoint.derivative), -29.533616783570416; rtol=1e-13)
                 if Sys.isapple()
                     for line in split(read(`otool -L $path`, String), "\n")[2:end]
                         isempty(strip(line)) && continue

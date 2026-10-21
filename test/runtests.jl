@@ -536,7 +536,7 @@ let file_groups = (
     queue = Channel{Expr}(length(testsets))
     foreach(expression -> put!(queue, expression), testsets)
     close(queue)
-    @sync for _ in 1:min(2, Threads.nthreads())
+    @sync for _ in 1:min(4, Threads.nthreads())
         Threads.@spawn for expression in queue
             Core.eval(@__MODULE__, expression)
             flush(stdout)
