@@ -39,6 +39,29 @@ include("thread_safety.jl")
         @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
     end
 
+    @testset "Precompiled package runtime state" begin
+        # A new process must reopen native handles and honor runtime overrides.
+        code = """
+        using SpheroidalWaves
+        SW = SpheroidalWaves
+        @assert isempty(SW._backend_handles)
+        for precision in (:double, :quad)
+            key = "SPHEROIDALWAVES_LIBRARY_" * uppercase(string(precision))
+            @assert SW.backend_library(; precision) == ENV[key]
+            r = smn(2, 3, 0.65, 1; precision)
+            @assert iszero(only(r.value))
+            @assert isapprox(only(r.derivative), -29.533616783570416; rtol=1e-13)
+        end
+        @assert !isempty(SW._backend_handles)
+        """
+        command = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) -e $code`
+        command = addenv(command,
+            "SPHEROIDALWAVES_LIBRARY_DOUBLE" => SpheroidalWaves.backend_library(),
+            "SPHEROIDALWAVES_LIBRARY_QUAD" =>
+                SpheroidalWaves.backend_library(; precision = :quad))
+        @test success(command)
+    end
+
     @testset "Backend configuration and ABI failures" begin
         SW = SpheroidalWaves
         saved = copy(SW._backend_libraries)
