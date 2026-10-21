@@ -79,6 +79,24 @@ smn(1, 1, 0.0, 0.3).value  # approximately [-0.953939201416946]
 smn(1, 2, 1.25, [-0.3, 0.3]; normalize=true, precision=:quad)
 ~~~
 
+### First-kind endpoints
+
+`smn` accepts $\eta=\pm1$ and returns the one-sided value and coordinate-derivative limits from inside $[-1,1]$. This applies to both geometries and supported real or complex parameters, including $c=0$.
+
+The regular angular solution factors as $S_{mn}(c,\eta)=(1-\eta^2)^{m/2}F(\eta)$, where $F$ is analytic at the endpoints. See [DLMF 30.3(i)](https://dlmf.nist.gov/30.3#i). The first derivative therefore has the following limits:
+
+| Order | Value at $\eta=\pm1$ | First derivative |
+|:--|:--|:--|
+| $m=0$ | Finite | Finite |
+| $m=1$ | Zero | Divergent |
+| $m=2$ | Zero | Finite, generally nonzero |
+| $m>2$ | Zero | Zero |
+
+For $m=2$, differentiation gives $S'_{2n}(c,1)=-2F(1)$ and $S'_{2n}(c,-1)=2F(-1)$. For example, `smn(2,3,0.65,1)` returns a zero value and a derivative of approximately $-29.53$. At $c=0$, $S_{23}(0,\eta)=15\eta(1-\eta^2)$ has the endpoint derivative $-30$. The singular coefficients of the differential equation do not require the
+regular solution's derivative to diverge. Other evaluators may omit these limits or return zero at an endpoint where the slope is nonzero.
+
+Higher coordinate derivatives have their own finite or divergent limits. `accuracy(...; target=:angular)` returns `-1` at endpoints because no calibrated digit estimate is available there.
+
 ### Second kind
 
 `kind=2` selects the Ferrers-branch `Qs`:
