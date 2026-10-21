@@ -491,10 +491,12 @@ end
 # Independent numerical testsets share the process and its compiled methods.
 # Queue individual testsets so long files cannot leave the other workers idle.
 let file_groups = (
-        "functions-and-coefficients" => ["accuracy.jl", "numerical_regressions.jl",
-            "angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
-            "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
-            "oblate_precision.jl", "integral_eigenvalues.jl"],
+        # Accuracy and regression checks reuse the API/precision group's methods.
+        "api-and-precision" => ["accuracy.jl", "numerical_regressions.jl"],
+        "functions-and-coefficients" =>
+            ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
+                "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
+                "oblate_precision.jl", "integral_eigenvalues.jl"],
         "derivatives-and-boundaries" =>
             ["parameter_derivatives.jl", "boundary_diagnostics.jl",
                 "angular_parameter_derivatives.jl", "radial_parameter_derivatives.jl",
@@ -502,6 +504,7 @@ let file_groups = (
     testsets = Expr[]
     serial_testsets = Set(["Accuracy tracks the requested native evaluation",
         "Coordinate zeros and stationary points"])
+    current_group = Ref("")
     function collect_testsets(expression)
         if expression isa Expr && expression.head === :macrocall &&
            expression.args[1] === Symbol("@testset")
@@ -509,21 +512,23 @@ let file_groups = (
                 delete!(serial_testsets, expression.args[3])
                 return TEST_GROUP in ("all", "api-and-precision") ? expression : nothing
             end
-            push!(testsets, expression)
+            # This test exercises jacobian_smn alongside complex wave values.
+            # Keep it with parameter sensitivities to reuse their compiled methods.
+            group = expression.args[3] == "Complex angular coordinates" ?
+                    "derivatives-and-boundaries" : current_group[]
+            if TEST_GROUP == "all" || TEST_GROUP == group
+                push!(testsets, expression)
+            end
             return nothing
         end
         # Load imports and shared reference constants before starting workers.
         return expression
     end
     for (group, files) in file_groups
-        previous_count = length(testsets)
+        current_group[] = group
         # Each include can introduce bindings needed by subsequent file loads.
         foreach(files) do file
             Base.invokelatest(include, collect_testsets, joinpath(@__DIR__, file))
-        end
-        # Always load shared definitions. Queue only this job's test group.
-        if TEST_GROUP != "all" && TEST_GROUP != group
-            resize!(testsets, previous_count)
         end
     end
     # Renaming a test that changes global state must update its serial entry.
@@ -531,7 +536,7 @@ let file_groups = (
     queue = Channel{Expr}(length(testsets))
     foreach(expression -> put!(queue, expression), testsets)
     close(queue)
-    @sync for _ in 1:min(4, Threads.nthreads())
+    @sync for _ in 1:min(2, Threads.nthreads())
         Threads.@spawn for expression in queue
             Core.eval(@__MODULE__, expression)
             flush(stdout)
