@@ -22,19 +22,21 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 10
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.group }}
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 48
       matrix:
+        group: ['api-and-precision', 'derivatives-and-boundaries', 'functions-and-coefficients']
         version:
           - '1'
           - 'pre'
@@ -60,9 +62,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: fortran-lang/setup-fortran@v1
+        if: runner.os != 'Linux'
         with:
           compiler: gcc
           version: '15'
+      - name: Use the runner's Fortran compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
