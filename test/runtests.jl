@@ -452,19 +452,32 @@ include("numerical_regressions.jl")
 include("angular_precision.jl")
 include("numerical_domain.jl")
 
-# Independent numerical tests share the process and its compiled methods.
+# Independent numerical testsets share the process and its compiled methods.
+# Queue individual testsets so long files cannot leave the other workers idle.
 let files = ["parameter_derivatives.jl", "boundary_diagnostics.jl",
         "angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
         "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
         "oblate_precision.jl", "angular_parameter_derivatives.jl",
         "radial_parameter_derivatives.jl", "integral_eigenvalues.jl",
         "integral_sensitivities.jl"]
-    queue = Channel{String}(length(files))
-    foreach(file -> put!(queue, file), files)
+    testsets = Expr[]
+    function collect_testsets(expression)
+        if expression isa Expr && expression.head === :macrocall &&
+           expression.args[1] === Symbol("@testset")
+            push!(testsets, expression)
+            return nothing
+        end
+        # Load imports and shared reference constants before starting workers.
+        return expression
+    end
+    foreach(file -> include(collect_testsets, joinpath(@__DIR__, file)), files)
+    queue = Channel{Expr}(length(testsets))
+    foreach(expression -> put!(queue, expression), testsets)
     close(queue)
     @sync for _ in 1:min(4, Threads.nthreads())
-        Threads.@spawn for file in queue
-            include(joinpath(@__DIR__, file))
+        Threads.@spawn for expression in queue
+            Core.eval(@__MODULE__, expression)
+            flush(stdout)
         end
     end
 end
