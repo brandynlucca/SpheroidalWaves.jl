@@ -1,5 +1,6 @@
 using SpheroidalWaves
 using Test
+using LinearAlgebra: norm
 
 @testset "Explicit working precision" begin
     SW = SpheroidalWaves
@@ -79,6 +80,9 @@ end
     F = SW._SWFloat
     original = (precision(BigFloat), rounding(BigFloat))
     for bits in (96, 320)
+        bounds = setprecision(BigFloat, bits) do
+            (floatmin(BigFloat), floatmax(BigFloat))
+        end
         SW._with_swprecision(bits) do
             x = F("2.5")
             @test Float32(x) === 2.5f0
@@ -107,6 +111,30 @@ end
             @test log10(F(100)) == 2
             @test nextfloat(x, 2) == nextfloat(x.value, 2)
             @test prevfloat(x, 2) == prevfloat(x.value, 2)
+            for (bound, reference) in zip((floatmin(F), floatmax(F)), bounds)
+                @test bound isa F
+                @test precision(bound) == bits
+                @test bound.value == reference
+            end
+            @test floatmin(x) == floatmin(F)
+            @test floatmax(x) == floatmax(F)
+            @test iszero(prevfloat(floatmin(F)))
+            @test isinf(nextfloat(floatmax(F)))
+
+            # Exercise norm's ordinary and rescaled paths, including the
+            # internal/public complex-array comparison used by radial tests.
+            small = ldexp(sqrt(floatmin(F)), -8)
+            large = ldexp(sqrt(floatmax(F)), 8)
+            @test iszero(small^2)
+            @test isinf(large^2)
+            for scale in (one(F), small, large)
+                @test norm(F[3, 4] .* scale) ≈ 5scale rtol = 8eps(F)
+                @test norm(Complex{F}[3 + 4im, 12] .* scale) ≈ 13scale rtol = 8eps(F)
+            end
+            @test iszero(norm(F[0, 0]))
+            @test iszero(norm(Complex{F}[0, 0]))
+            @test Complex{F}[3 + 4im, 12] ≈ ComplexF64[3 + 4im, 12]
+            @test !(Complex{F}[3 + 4im, 12] ≈ ComplexF64[3 + 4im, 13])
             @test isless(F(-1), x)
             @test F(2) <= x
             @test isone(one(x)) && iszero(zero(x))
