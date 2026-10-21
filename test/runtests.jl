@@ -462,7 +462,7 @@ let files = ["parameter_derivatives.jl", "boundary_diagnostics.jl",
     queue = Channel{String}(length(files))
     foreach(file -> put!(queue, file), files)
     close(queue)
-    @sync for _ in 1:min(2, Threads.nthreads())
+    @sync for _ in 1:min(4, Threads.nthreads())
         Threads.@spawn for file in queue
             include(joinpath(@__DIR__, file))
         end
