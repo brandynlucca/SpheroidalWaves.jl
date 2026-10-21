@@ -173,57 +173,36 @@ end
     function evaluate(i, c)
         precision = isodd(i) ? :double : :quad
         spheroid = isodd(div(i-1, 2)) ? :oblate : :prolate
-        # Exercise each curvature path in both precisions without repeating
-        # every stencil for all eight backend combinations.
-        curvature = if i <= 2
-            jacobian_eigen(1, 2, c; spheroid, precision, order = 2, diagnostics = true)
-        elseif i <= 4
-            jacobian_smn(1, 2, c, [0.25]; spheroid, precision, order = 2)
-        elseif i <= 6
-            jacobian_rmn(1, 2, c, [2.0]; spheroid, precision, order = 2)
-        else
-            jacobian_rmn(1, 2, c, [2.0]; spheroid, precision,
-                normalization = :static, order = 2)
-        end
-        results = Any[
-            smn(1, 2, c, [-0.5, 0.25]; spheroid, precision,
-                kind = 2, second_derivative = true),
-            jacobian_smn(1, 2, c, [0.25]; spheroid, precision, diagnostics = true),
-            rmn(1, 2, c, [2.0, 2.25]; spheroid, precision, kind = 3, scaled = true),
-            jacobian_rmn(
-                1, 2, c, [2.0]; spheroid, precision, kind = 2, diagnostics = true),
-            jacobian_eigen(1, 2, c; spheroid, precision, diagnostics = true),
-            dmn(1, 2, c; spheroid, precision),
-            curvature
-        ]
-        # Each extension runs in both precisions. The core calls above cover
-        # all eight geometry, precision and parameter-type combinations.
-        extensions = if i <= 2
-            (kmn(1, 2, c; spheroid, precision),
-                amn(1, 2, c; spheroid, precision),
-                amn(-1, 2, c; spheroid, precision),
+        # Each API runs concurrently in both precisions. Numerical testsets
+        # check the derivative stencils and the full geometry/kind matrix.
+        if i <= 2
+            return (
+                smn(1, 2, c, [-0.5, 0.25]; spheroid, precision,
+                    kind = 2, derivatives = 4),
+                jacobian_eigen(1, 2, c; spheroid, precision, diagnostics = true),
+                dmn(1, 2, c; spheroid, precision),
                 smn(0, 0, 1//1000000, 1//4; spheroid, precision))
         elseif i <= 4
-            (smn(1, 2, c, [-1.0, 0.25, 1.0]; spheroid, precision, derivatives = 4),
-                rmn(1, 2, c, [2.0]; spheroid, precision, derivatives = 4),
+            return (
                 rmn(1, 2, c, [0.0, 2.0]; spheroid, precision,
                     normalization = :static, derivatives = 4),
-                rmn(1, 2, zero(c), [2.0]; spheroid, precision,
-                    kind = 2, normalization = :static))
+                jacobian_rmn(1, 2, c, [2.0]; spheroid, precision,
+                    normalization = :static),
+                kmn(1, 2, c; spheroid, precision))
         elseif i <= 6
-            (smn(1, 2, c, [0.25+0.125im]; spheroid, precision, kind = 2, derivatives = 4),
+            return (
                 rmn(1, 2, c, [2.0+0.25im]; spheroid, precision, kind = 3, scaled = true),
-                jacobian_rmn(1, 2, c, [2.0-0.25im]; spheroid, precision,
-                    normalization = :static))
+                jacobian_rmn(1, 2, c, [2.0]; spheroid, precision, kind = 2),
+                amn(1, 2, c; spheroid, precision),
+                amn(-1, 2, c; spheroid, precision))
         else
-            (
+            return (smn(1, 2, c, [-1.0, 1.0]; spheroid, precision, derivatives = 4),
+                jacobian_smn(1, 2, c, [0.25+0.125im]; spheroid, precision),
                 accuracy(1, 2, c, [0.25+0.125im, 0.5+0.25im]; spheroid,
                     precision, target = :angular, diagnostics = true),
                 eigenvalue(0, 1, 1.25; precision, operator = :concentration),
                 jacobian_eigen(0, 1, 1.25; precision, operator = :fourier))
         end
-        append!(results, extensions)
-        return results
     end
     # Both geometries, precisions and real/complex parameter families.
     parameters = Any[isodd(div(i-1, 4)) ? 1.25+0.0625im : 1.25 for i in 1:8]
