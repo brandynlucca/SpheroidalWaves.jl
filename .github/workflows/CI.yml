@@ -1,6 +1,6 @@
 name: CI
 env:
-  JULIA_NUM_THREADS: 2
+  JULIA_NUM_THREADS: 4
 
 on:
   push:
@@ -22,37 +22,59 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 10
+    continue-on-error: ${{ matrix.version == 'nightly' }}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 16
       matrix:
         version:
-          - '1.10'
-          - '1.12'
+          - '1'
           - 'pre'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
+          - '1.10'
+          - 'nightly'
+        platform:
+          - os: ubuntu-latest
+            arch: x64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: so
+          - os: windows-latest
+            arch: x64
+            library-prefix: build/bin/spheroidal_batch_
+            library-extension: dll
+          - os: macos-26-intel
+            arch: x64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: dylib
+          - os: macos-latest
+            arch: aarch64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: dylib
     steps:
       - uses: actions/checkout@v7
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gfortran cmake build-essential
+      - uses: fortran-lang/setup-fortran@v1
+        with:
+          compiler: gcc
+          version: '15'
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
+          arch: ${{ matrix.platform.arch }}
       - uses: julia-actions/cache@v2
       - name: Resolve and instantiate dependencies
         shell: julia --color=yes --project=. {0}
+        env:
+          # Pkg.test precompiles with its own bounds-checking and optimization flags.
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
         run: |
+          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           using Pkg
           Pkg.Registry.add("General")
           Pkg.resolve()
@@ -60,24 +82,28 @@ jobs:
       # Compile the Fortran sources on every push so source regressions are
       # caught immediately, rather than only when Yggdrasil.yml is run by hand.
       - name: Build backends from source
-        run: julia --project=. scripts/build_from_source.jl
-      - name: Check native quadrature cache bounds and concurrency
+        shell: julia --color=yes --project=. {0}
         run: |
-          cmake -S . -B build -DSWF_BUILD_TESTS=ON
-          cmake --build build --parallel 2
-          ctest --test-dir build --output-on-failure
+          generator = Sys.iswindows() ? "MinGW Makefiles" : "Unix Makefiles"
+          run(`cmake -S . -B build -G $generator -DCMAKE_Fortran_COMPILER=$(ENV["FC"]) -DSWF_BUILD_TESTS=ON`)
+          run(`cmake --build build --parallel 2`)
+      - name: Check native quadrature cache bounds and concurrency
+        run: ctest --test-dir build --output-on-failure
       - name: Point tests at the freshly built backends
         shell: bash
+        env:
+          LIBRARY_PREFIX: ${{ matrix.platform.library-prefix }}
+          LIBRARY_EXTENSION: ${{ matrix.platform.library-extension }}
         run: |
-          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
-          echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}double.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}quad.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
 
   jll-backends:
-    name: SpheroidalWaves_jll backends - ${{ matrix.os }}
+    name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -88,7 +114,7 @@ jobs:
             arch: x64
           - os: windows-latest
             arch: x64
-          - os: macos-latest
+          - os: macos-26-intel
             arch: x64
           - os: macos-latest
             arch: aarch64
