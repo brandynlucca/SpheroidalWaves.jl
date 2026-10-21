@@ -470,24 +470,44 @@ end
 
 # Run tests that change BigFloat defaults or backend selection serially.
 include("quad_precision.jl")
-include("accuracy.jl")
-include("numerical_regressions.jl")
 include("angular_precision.jl")
 include("numerical_domain.jl")
 
-# Independent numerical tests share the process and its compiled methods.
-let files = ["parameter_derivatives.jl", "boundary_diagnostics.jl",
+# Independent numerical testsets share the process and its compiled methods.
+# Queue individual testsets so long files cannot leave the other workers idle.
+let files = ["accuracy.jl", "numerical_regressions.jl",
+        "parameter_derivatives.jl", "boundary_diagnostics.jl",
         "angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
         "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
         "oblate_precision.jl", "angular_parameter_derivatives.jl",
         "radial_parameter_derivatives.jl", "integral_eigenvalues.jl",
         "integral_sensitivities.jl"]
-    queue = Channel{String}(length(files))
-    foreach(file -> put!(queue, file), files)
+    testsets = Expr[]
+    serial_testsets = Set(["Accuracy tracks the requested native evaluation",
+        "Coordinate zeros and stationary points"])
+    function collect_testsets(expression)
+        if expression isa Expr && expression.head === :macrocall &&
+           expression.args[1] === Symbol("@testset")
+            if expression.args[3] in serial_testsets
+                delete!(serial_testsets, expression.args[3])
+                return expression
+            end
+            push!(testsets, expression)
+            return nothing
+        end
+        # Load imports and shared reference constants before starting workers.
+        return expression
+    end
+    foreach(file -> include(collect_testsets, joinpath(@__DIR__, file)), files)
+    # Renaming a test that changes global state must update its serial entry.
+    @assert isempty(serial_testsets) serial_testsets
+    queue = Channel{Expr}(length(testsets))
+    foreach(expression -> put!(queue, expression), testsets)
     close(queue)
-    @sync for _ in 1:min(2, Threads.nthreads())
-        Threads.@spawn for file in queue
-            include(joinpath(@__DIR__, file))
+    @sync for _ in 1:min(4, Threads.nthreads())
+        Threads.@spawn for expression in queue
+            Core.eval(@__MODULE__, expression)
+            flush(stdout)
         end
     end
 end

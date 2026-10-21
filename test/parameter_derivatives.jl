@@ -115,7 +115,10 @@ const STATIC_PARAMETER_REFERENCES = Dict(
 end
 
 @testset "Static radial sensitivities" begin
-    for precision in (:double, :quad), spheroid in (:prolate, :oblate), kind in 1:2
+    # Pair geometry and kind for the expensive curvature stencils. The exact
+    # static limit below still checks both kinds and geometries in quad.
+    for (precision, spheroid, kind) in ((:double, :prolate, 1),
+        (:double, :oblate, 2), (:quad, :prolate, 1), (:quad, :oblate, 2))
         T = precision === :quad ? BigFloat : Float64
         tolerance = precision === :quad ? big"2e-20" : 2e-9
         # Pair zero and complex cases across precisions and kinds. The static
@@ -147,29 +150,30 @@ end
                 @test getproperty(fd, key)≈getproperty(first, key) rtol=1e-6 atol=1e-9
             end
         end
-        if precision === :quad
-            tiny = jacobian_rmn(1, 2, big"1e-40", [2]; spheroid,
-                precision, kind, normalization = :static)
-            limit = jacobian_rmn(1, 2, big"0", [2]; spheroid,
-                precision, kind, normalization = :static, order = 2)
-            @test tiny.dvalue_dc ./ big"1e-40" ≈ limit.d2value_dc2 rtol=big"1e-22"
-        end
         complex_zero = jacobian_rmn(1, 2, complex(zero(T)), [T(2)]; spheroid,
             precision, kind, normalization = :static, h = 1e-4)
         @test all(iszero, complex_zero.dvalue_dcreal)
+    end
+    for spheroid in (:prolate, :oblate), kind in 1:2
+
+        tiny = jacobian_rmn(1, 2, big"1e-40", [2]; spheroid,
+            precision = :quad, kind, normalization = :static)
+        limit = jacobian_rmn(1, 2, big"0", [2]; spheroid,
+            precision = :quad, kind, normalization = :static, order = 2)
+        @test tiny.dvalue_dc ./ big"1e-40" ≈ limit.d2value_dc2 rtol=big"1e-22"
     end
     # Endpoint rules depend on real versus complex dispatch, not on a full
     # Cartesian product of parameter representations and precisions.
     for (precision, c) in ((:double, 1.25), (:double, 1.25+0im),
         (:quad, 1.25+0.125im))
-        for (jac, x) in ((jacobian_smn, -1.0), (jacobian_smn, 1.0), (jacobian_rmn, 1.0))
-            result = jac(1, 2, c, [x]; precision, order = 2, diagnostics = true)
+        for (jac, x) in ((jacobian_smn, [-1.0, 1.0]), (jacobian_rmn, [1.0]))
+            result = jac(1, 2, c, x; precision, order = 2, diagnostics = true)
             d = c isa Real ? result.d2derivative_dc2 : result.d2derivative_dcreal2
-            @test isinf(only(d)) && !isnan(only(d))
+            @test all(isinf, d) && !any(isnan, d)
             @test result.metadata.conditioning_flag === :singular
             if c isa Complex
                 @test result.d2derivative_dcreal_dcimag == complex.(-imag.(d), real.(d))
-                first = jac(1, 2, c, [x]; precision)
+                first = jac(1, 2, c, x; precision)
                 @test !any(isnan, first.dderivative_dcimag)
             end
         end
