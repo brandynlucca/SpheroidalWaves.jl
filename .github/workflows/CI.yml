@@ -21,8 +21,64 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
+  native-backends:
+    name: Build and check native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            arch: x64
+            library-pattern: build/lib/libspheroidal_batch_*.so
+          - os: windows-latest
+            arch: x64
+            library-pattern: build/bin/spheroidal_batch_*.dll
+          - os: macos-26-intel
+            arch: x64
+            library-pattern: build/lib/libspheroidal_batch_*.dylib
+          - os: macos-latest
+            arch: aarch64
+            library-pattern: build/lib/libspheroidal_batch_*.dylib
+    steps:
+      - uses: actions/checkout@v7
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os != 'Linux'
+        with:
+          compiler: gcc
+          version: '15'
+      - name: Use the runner's Fortran compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
+      # Build this checkout once per platform, then share only its libraries
+      # with the Julia version and test-group jobs in this workflow run.
+      - name: Build backends from source
+        shell: bash
+        run: |
+          generator="Unix Makefiles"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            generator="MinGW Makefiles"
+          fi
+          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DSWF_BUILD_TESTS=ON
+          cmake --build build --parallel 2
+      - name: Check native quadrature cache bounds and concurrency
+        run: ctest --test-dir build --output-on-failure
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: ${{ matrix.platform.library-pattern }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
+    needs: native-backends
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 10
     continue-on-error: ${{ matrix.version == 'nightly' }}
@@ -61,15 +117,12 @@ jobs:
             library-extension: dylib
     steps:
       - uses: actions/checkout@v7
+      # Match the build job's Fortran/OpenMP runtime libraries and search path.
       - uses: fortran-lang/setup-fortran@v1
         if: runner.os != 'Linux'
         with:
           compiler: gcc
           version: '15'
-      - name: Use the runner's Fortran compiler
-        if: runner.os == 'Linux'
-        shell: bash
-        run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
@@ -86,16 +139,11 @@ jobs:
           Pkg.Registry.add("General")
           Pkg.resolve()
           Pkg.instantiate()
-      # Compile the Fortran sources on every push so source regressions are
-      # caught immediately, rather than only when Yggdrasil.yml is run by hand.
-      - name: Build backends from source
-        shell: julia --color=yes --project=. {0}
-        run: |
-          generator = Sys.iswindows() ? "MinGW Makefiles" : "Unix Makefiles"
-          run(`cmake -S . -B build -G $generator -DCMAKE_Fortran_COMPILER=$(ENV["FC"]) -DSWF_BUILD_TESTS=ON`)
-          run(`cmake --build build --parallel 2`)
-      - name: Check native quadrature cache bounds and concurrency
-        run: ctest --test-dir build --output-on-failure
+      - name: Download this platform's source-built backends
+        uses: actions/download-artifact@v8
+        with:
+          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: build/${{ runner.os == 'Windows' && 'bin' || 'lib' }}
       - name: Point tests at the freshly built backends
         shell: bash
         env:
