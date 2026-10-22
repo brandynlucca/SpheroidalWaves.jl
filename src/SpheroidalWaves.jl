@@ -2,6 +2,7 @@ module SpheroidalWaves
 
 using Libdl
 using LinearAlgebra: Tridiagonal, lu
+using PrecompileTools: @setup_workload, @compile_workload
 using SpheroidalWaves_jll
 
 export smn, rmn, spheroidal
@@ -939,7 +940,11 @@ polynomials when c is small.
 
 **Special Cases:**
     - c = 0: Returns Ferrers P_n^m (kind=1) or Q_n^m (kind=2)
-    - kind=1, c = 0, η = ±1: Uses one-sided endpoint derivatives; m = 1 gives signed infinities
+    - kind=1, η = ±1: Returns one-sided limits for all supported c.
+      Values vanish for m > 0. First derivatives are finite for m = 0 and m = 2,
+      divergent for m = 1, and zero for m > 2. A zero value can have a nonzero slope.
+      The regular factorization S = (1-η²)^(m/2)F(η), with F analytic at the
+      endpoints, gives S′(1) = -2F(1) when m = 2.
     - c → ∞: Functions oscillate rapidly; use appropriate η resolution
     - Parity in η is (-1)^(n-m) for kind=1 and (-1)^(n-m+1) for kind=2
     - Qs is logarithmically singular at ±1 for m=0 and algebraically singular
@@ -2232,5 +2237,42 @@ function _initialize_backends!(configure_jll = _configure_backends_from_jll!,
 end
 
 __init__() = _initialize_backends!()
+
+@setup_workload begin
+    # Use the distributed libraries while building a portable package cache.
+    # Runtime initialization still applies local and environment overrides.
+    _configure_backends_from_jll!()
+    try
+        @compile_workload begin
+            # Default scalar calls also cover integer endpoint coordinates.
+            smn(2, 3, 0.65, 1)
+            smn(2, 3, 0.65, 1.0)
+            rmn(0, 1, 1.25, 2)
+            rmn(0, 1, 1.25, 2.0)
+            eigenvalue(0, 1, 1.25)
+            for precision in (:double, :quad), spheroid in (:prolate, :oblate)
+                # Exercise native, spherical, guarded, and endpoint angular paths.
+                smn(2, 3, 0.65, [-1.0, 0.3, 1.0]; spheroid, precision)
+                smn(0, 1, 0.0, [0.3]; spheroid, precision)
+                smn(0, 0, 2.0, [0.3]; spheroid, precision)
+                smn(0, 0:2, 1.25, [0.3]; spheroid, precision)
+                rmn(0, 1, 1.25, [2.0]; spheroid, precision, kind = 3)
+                rmn(0, 0:2, 1.25, [2.0]; spheroid, precision)
+                eigenvalue(0, 1, 1.25; spheroid, precision)
+                smn(0, 1, 1.25+0.125im, [0.3]; spheroid, precision)
+                rmn(0, 1, 1.25+0.125im, [2.0]; spheroid, precision)
+                eigenvalue(0, 1, 1.25+0.125im; spheroid, precision)
+            end
+        end
+    finally
+        # Dynamic-library handles and paths belong to this process only.
+        for handle in values(_backend_handles)
+            Libdl.dlclose(handle)
+        end
+        empty!(_backend_handles)
+        _backend_libraries[:double] = nothing
+        _backend_libraries[:quad] = nothing
+    end
+end
 
 end

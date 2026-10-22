@@ -21,63 +21,149 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
-  test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }}
-    runs-on: ${{ matrix.os }}
+  native-backends:
+    name: Build and check native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 10
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        platform:
+          - os: ubuntu-latest
+            arch: x64
+            library-pattern: build/lib/libspheroidal_batch_*.so
+          - os: windows-latest
+            arch: x64
+            library-pattern: build/bin/spheroidal_batch_*.dll
+          - os: macos-26-intel
+            arch: x64
+            library-pattern: build/lib/libspheroidal_batch_*.dylib
+          - os: macos-latest
+            arch: aarch64
+            library-pattern: build/lib/libspheroidal_batch_*.dylib
+    steps:
+      - uses: actions/checkout@v7
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os != 'Linux'
+        with:
+          compiler: gcc
+          version: '15'
+      - name: Use the runner's Fortran compiler
+        if: runner.os == 'Linux'
+        shell: bash
+        run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
+      # Build this checkout once per platform, then share only its libraries
+      # with the Julia version and test-group jobs in this workflow run.
+      - name: Build backends from source
+        shell: bash
+        run: |
+          generator="Unix Makefiles"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            generator="MinGW Makefiles"
+          fi
+          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DSWF_BUILD_TESTS=ON
+          cmake --build build --parallel 2
+      - name: Check native quadrature cache bounds and concurrency
+        run: ctest --test-dir build --output-on-failure
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: ${{ matrix.platform.library-pattern }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
+    needs: native-backends
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 10
+    continue-on-error: ${{ matrix.version == 'nightly' }}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.group }}
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read
     strategy:
       fail-fast: false
+      max-parallel: 48
       matrix:
+        group: ['api-and-precision', 'derivatives-and-boundaries', 'functions-and-coefficients']
         version:
-          - '1.10'
-          - '1.12'
+          - '1'
           - 'pre'
-        os:
-          - ubuntu-latest
-        arch:
-          - x64
+          - '1.10'
+          - 'nightly'
+        platform:
+          - os: ubuntu-latest
+            arch: x64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: so
+          - os: windows-latest
+            arch: x64
+            library-prefix: build/bin/spheroidal_batch_
+            library-extension: dll
+          - os: macos-26-intel
+            arch: x64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: dylib
+          - os: macos-latest
+            arch: aarch64
+            library-prefix: build/lib/libspheroidal_batch_
+            library-extension: dylib
     steps:
       - uses: actions/checkout@v7
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gfortran cmake build-essential
+      # Match the build job's Fortran/OpenMP runtime libraries and search path.
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os != 'Linux'
+        with:
+          compiler: gcc
+          version: '15'
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.arch }}
+          arch: ${{ matrix.platform.arch }}
       - uses: julia-actions/cache@v2
       - name: Resolve and instantiate dependencies
         shell: julia --color=yes --project=. {0}
+        env:
+          # Pkg.test precompiles with its own bounds-checking and optimization flags.
+          JULIA_PKG_PRECOMPILE_AUTO: '0'
         run: |
+          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           using Pkg
+          # Test normal startup once per Julia/platform combination. Other groups
+          # compile the methods they exercise without repeating the startup workload.
+          if ENV["SPHEROIDALWAVES_TEST_GROUP"] != "api-and-precision"
+              write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
+          end
           Pkg.Registry.add("General")
           Pkg.resolve()
           Pkg.instantiate()
-      # Compile the Fortran sources on every push so source regressions are
-      # caught immediately, rather than only when Yggdrasil.yml is run by hand.
-      - name: Build backends from source
-        run: julia --project=. scripts/build_from_source.jl
-      - name: Check native quadrature cache bounds and concurrency
-        run: |
-          cmake -S . -B build -DSWF_BUILD_TESTS=ON
-          cmake --build build --parallel 2
-          ctest --test-dir build --output-on-failure
+      - name: Download this platform's source-built backends
+        uses: actions/download-artifact@v8
+        with:
+          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: build/${{ runner.os == 'Windows' && 'bin' || 'lib' }}
       - name: Point tests at the freshly built backends
         shell: bash
+        env:
+          LIBRARY_PREFIX: ${{ matrix.platform.library-prefix }}
+          LIBRARY_EXTENSION: ${{ matrix.platform.library-extension }}
         run: |
-          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
-          echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}double.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}quad.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
 
   jll-backends:
-    name: SpheroidalWaves_jll backends - ${{ matrix.os }}
+    name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -88,7 +174,7 @@ jobs:
             arch: x64
           - os: windows-latest
             arch: x64
-          - os: macos-latest
+          - os: macos-26-intel
             arch: x64
           - os: macos-latest
             arch: aarch64
@@ -109,6 +195,7 @@ jobs:
             Pkg.instantiate()
             using SpheroidalWaves_jll, SpheroidalWaves
             @assert !isdir("build") "Consumer checks must not use a local build"
+            @assert isempty(SpheroidalWaves._backend_handles)
             for precision in (:double, :quad)
                 path = SpheroidalWaves.backend_library(; precision)
                 @assert path !== nothing
@@ -116,6 +203,9 @@ jobs:
                     SpheroidalWaves_jll.libspheroidal_batch_double_path :
                     SpheroidalWaves_jll.libspheroidal_batch_quad_path
                 @assert realpath(path) == realpath(expected)
+                endpoint = smn(2,3,0.65,1; precision)
+                @assert only(endpoint.value) == 0
+                @assert isapprox(only(endpoint.derivative), -29.533616783570416; rtol=1e-13)
                 if Sys.isapple()
                     for line in split(read(`otool -L $path`, String), "\n")[2:end]
                         isempty(strip(line)) && continue
