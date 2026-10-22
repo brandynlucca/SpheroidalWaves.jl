@@ -3,7 +3,7 @@
 Use integer order and degree `0≤m≤n`.
 The parameter `c` and evaluation coordinates may be real or complex. Write `σ=1` for prolate and `σ=-1` for oblate geometry.
 
-## Precision and outputs
+## [Precision and outputs](@id precision-and-outputs)
 
 ~~~julia
 s = smn(1, 2, 1.25, [-0.3, 0.3]; precision=:quad)
@@ -20,10 +20,38 @@ The derivative is with respect to the coordinate.
 | `:double` (default) | `Float64` | `ComplexF64` |
 | `:quad` | `BigFloat` | `Complex{BigFloat}` |
 
-!!! note "Quad precision"
-    Ordinary numeric arguments work with `precision=:quad`.
-    It cannot recover digits already lost in the inputs or guarantee 30 accurate digits
-    in every parameter regime.
+Input precision is what the arguments retain, calculation precision is the arithmetic used, output precision is what returned numbers store, and accuracy is agreement with the mathematical result.
+
+`precision=:quad` uses fixed native quad arithmetic (113 significand bits, about 34 decimal digits). The caller's `BigFloat` precision and rounding control output components and some Julia calculations. Increasing them does not increase native precision or guarantee more accurate digits. `scaled=true` extends range without adding accuracy.
+
+| Function | Effect of `BigFloat` settings with `precision=:quad` |
+|:--|:--|
+| `smn`, `rmn` | Value and derivative output rounding, plus working precision in guarded calculations. |
+| `spheroidal` | Follows the requested individual functions. |
+| `eigenvalue` | Output rounding and guarded integral-eigenvalue refinement. Native separation calculations stay fixed quad. |
+| `eigenvalue_sweep` | Parameter conversion, stored eigenvalues and predictor arithmetic. |
+| `dmn`, `kmn`, `amn` | Output rounding and guarded working precision. Expansion tolerances remain separate. |
+| `jacobian_eigen`, `jacobian_smn`, `jacobian_rmn` | Output rounding and Julia derivative arithmetic. Finite-difference steps and tolerances remain separate. |
+| `find_c_for_eigenvalue` | Target and bracket conversion, root arithmetic and outputs. Default stopping tolerances stay unchanged. |
+| `radial_wronskian` | Output rounding and arithmetic combining radial results. |
+| `accuracy` | Integer estimates remain integers, with `-1` for unavailable estimates. Refinement and diagnostics can depend on the settings. |
+
+Construct decimal inputs from strings within the precision scope. Widening `0.65` after Julia has rounded it to `Float64` cannot recover lost digits:
+
+~~~julia
+setprecision(BigFloat, 256) do
+    c, eta = parse.(BigFloat, ("0.65", "0.3"))
+    s = smn(2, 3, c, eta; precision=:quad)
+    # Compare using exactly representable inputs.
+    d = only(rmn(0, 1, 1.0, 2.0; precision=:double).value)
+    q = only(rmn(0, 1, 1.0, 2.0; precision=:quad).value)
+    (output_bits=precision(real(q)), difference=abs(Complex{BigFloat}(d) - q))
+end
+~~~
+
+The difference measures agreement, not an accuracy guarantee. `accuracy` provides value estimates, not rigorous bounds or derivative certification.
+
+A future arbitrary-precision request could specify a bit count explicitly while preserving `:double` defaults and existing `:quad` behavior. It would require refinement beyond native quad accuracy. This capability is not currently available, and arbitrary precision alone guarantees neither rigorous bounds nor correct rounding.
 
 ## Parallel evaluation
 
