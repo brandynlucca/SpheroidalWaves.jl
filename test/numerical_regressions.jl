@@ -98,7 +98,113 @@ end
         end
     end
 
-    s = smn(200, 200, 0.0, 0.3; scaled = true, logderivative = true)
-    @test only(s.value.exponent) > 308
-    @test only(s.logderivative) ≈ -200*0.3/(1-0.3^2) rtol=2e-13
+    # Rodrigues' formula gives P_200^200(x) = 399!!*(1-x^2)^100 exactly.
+    # Preserve the represented Float64 input as a rational before evaluating it.
+    x = Rational{BigInt}(0.3)
+    exact = prod(big(k) for k in 1:2:399)*(1-x^2)^100
+    slope = -200x/(1-x^2)*exact
+    expected = BigFloat(numerator(exact))/BigFloat(denominator(exact))
+    dexpected = BigFloat(numerator(slope))/BigFloat(denominator(slope))
+    for precision in (:double, :quad)
+        s = smn(200, 200, 0.0, 0.3; precision, scaled = true, logderivative = true)
+        tolerance = precision === :quad ? big"1e-28" : 2e-13
+        @test only(s.value.exponent) > 308
+        @test only(s.logderivative) ≈ -200*0.3/(1-0.3^2) rtol=2e-13
+        @test only(s.value.mantissa)*big(10)^only(s.value.exponent) ≈ expected rtol=tolerance
+        @test only(s.derivative.mantissa)*big(10)^only(s.derivative.exponent) ≈ dexpected rtol=tolerance
+    end
+end
+
+@testset "Nonzero-parameter angular zeros and stationary points" begin
+    # Independent mpmath 1.3.0 dense Legendre eigensolves, m=0 and c=1.
+    # scripts/generate_accuracy_references.py reproduces these fixtures without
+    # loading this package. Precision 70 -> 100 digits and truncation 24 -> 32
+    # terms changed all entries by less than 8e-71 and 6e-75, respectively.
+    # DLMF 30.4 normalization: integral S^2 dx = 2/(2n+1), with P_n phase.
+    # Each tuple stores geometry, n, k, lambda, S(x1), S'(x1), S(x2), S'(x2).
+    # x1=k/2^32 and x2=(k+1)/2^32 are exact in both tested precisions.
+    references = (
+        (:prolate, 2, 2402525102,
+            big"6.5334718005237964814925379360799328556369815722767",
+            big"-0.0000000003646498962489905788454236918058790314910610385883",
+            big"1.703323695364498173128344421120509893166775201302",
+            big"0.000000000031936056168787758739232927394918200909331216420251",
+            big"1.7033236960102420046654208441424825333890648774496"),
+        (:prolate, 3, 1889698684,
+            big"12.514462145094064809261980883628730057332910207698",
+            big"-0.44292097656532255188482591614237266717618479737531",
+            big"-0.00000000038207851043720495748415690501344184277370260476039",
+            big"-0.44292097656532255179036066283900872297066311925656",
+            big"0.0000000011935288576588813378344880644357212632729745748638"),
+        (:oblate, 2, 2559710628,
+            big"5.4868000538186858525400642095821339086324379566395",
+            big"-0.00000000022586337863787453748872263184262640129052089928229",
+            big"1.7661129448340532706054786121628771889090325546217",
+            big"0.00000000018534183516176014934265906632273885987885759586284",
+            big"1.7661129455941844827844704379333764287770031145608"),
+        (:oblate, 3, 1952290389,
+            big"11.492120902297953778872839994203848799719935527161",
+            big"-0.45130974952979024172775506093481452827491145456698",
+            big"-0.00000000088576585426959176119068231968610374136907004850296",
+            big"-0.45130974952979024175361115885493258229135506392983",
+            big"0.00000000066366366447389452958718345957023128915676149551127")
+    )
+    for precision in (:double, :quad),
+        (spheroid, n, k, lambda, v1, d1, v2, d2) in references
+
+        T = precision === :quad ? BigFloat : Float64
+        tolerance = precision === :quad ? big"1e-28" : 2e-14
+        points = T[k, k + 1] ./ T(2)^32
+        @test eigenvalue(0, n, 1; precision, spheroid) ≈ lambda rtol=tolerance
+        for normalize in (false, true)
+            result = smn(0, n, 1, points; precision, spheroid, normalize)
+            scale = normalize ? sqrt(BigFloat(2n+1)/2) : BigFloat(1)
+            for (i, (value, derivative)) in enumerate(((v1, d1), (v2, d2)))
+                # Absolute error for the vanishing component, relative for the other.
+                if n == 2
+                    @test abs(result.value[i]-scale*value) <= tolerance*scale
+                    @test result.derivative[i]≈scale*derivative rtol=tolerance atol=0
+                else
+                    @test result.value[i]≈scale*value rtol=tolerance atol=0
+                    @test abs(result.derivative[i]-scale*derivative) <= tolerance*scale
+                end
+            end
+        end
+    end
+end
+
+@testset "Absolute errors near angular zeros" begin
+    # Exact P_2 and P_3 polynomials, independent of the solver's recurrence.
+    # Rational arithmetic captures the actual input bits. Only the final ratio
+    # and unit-norm factor use BigFloat arithmetic (256 bits in the test suite).
+    # Condon-Shortley phase is +1 for m=0. DLMF 14.7.1 and 14.7.13.
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate),
+        normalize in (false, true), n in (2, 3)
+        T = precision === :quad ? BigFloat : Float64
+        tolerance = precision === :quad ? big"1e-28" : 2e-14
+        delta = T(2)^(precision === :quad ? -80 : -20)
+        root = inv(sqrt(T(n == 2 ? 3 : 5)))
+        points = T[-root - delta, -root + delta, 0, root - delta, root + delta]
+        result = smn(0, n, 0, points; precision, spheroid, normalize)
+        scale = normalize ? sqrt(BigFloat(2n+1)/2) : BigFloat(1)
+        for (i, point) in enumerate(points)
+            x = Rational{BigInt}(point)
+            value = n == 2 ? (3x^2-1)/2 : (5x^3-3x)/2
+            derivative = n == 2 ? 3x : (15x^2-3)/2
+            expected = scale*BigFloat(numerator(value))/BigFloat(denominator(value))
+            dexpected = scale*BigFloat(numerator(derivative))/BigFloat(denominator(derivative))
+            # Absolute error at value zeros or stationary points, relative error
+            # for the other component. Scaling accounts for unit normalization.
+            if n == 2 || iszero(point)
+                @test abs(result.value[i]-expected) <= tolerance*scale
+            else
+                @test result.value[i]≈expected rtol=tolerance atol=0
+            end
+            if n == 3 || iszero(point)
+                @test abs(result.derivative[i]-dexpected) <= tolerance*scale
+            else
+                @test result.derivative[i]≈dexpected rtol=tolerance atol=0
+            end
+        end
+    end
 end
