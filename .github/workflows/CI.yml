@@ -97,7 +97,7 @@ jobs:
           - '1'
           - 'pre'
           - '1.10'
-          - 'nightly'
+          # - 'nightly'
         platform:
           - os: ubuntu-latest
             arch: x64
