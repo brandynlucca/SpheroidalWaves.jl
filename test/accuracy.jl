@@ -11,8 +11,12 @@ using SpheroidalWaves, Test
             kind = 2, diagnostics = true, options...)
         actual = (target===:angular ? smn : rmn)(
             0, 0, 0, points; spheroid, precision, kind = 2, options...)
-        reference = target===:angular ? atanh.(points) :
-                    spheroid===:prolate ? -atanh.(inv.(points)) : atan.(points) .- R(pi)/2
+        wide = Complex{BigFloat}.(points)
+        reference = target===:angular ? atanh.(wide) :
+                    spheroid===:prolate ? -atanh.(inv.(wide)) :
+                    atan.(wide) .- BigFloat(pi)/2
+        reference_derivative = target===:angular ? inv.(1 .- wide .^ 2) :
+                               inv.(wide .^ 2 .- (spheroid===:prolate ? 1 : -1))
         @test report.digits ==
               accuracy(0, 0, 0, points; spheroid, precision, target, kind = 2, options...)
         @test all(d -> d>=(precision===:quad ? 28 : 12), report.digits)
@@ -25,6 +29,11 @@ using SpheroidalWaves, Test
             @test diagnostic.coordinate_condition ≈
                   abs(points[i]*actual.derivative[i]/actual.value[i])
             @test iszero(diagnostic.parameter_condition)
+            @test diagnostic.value.status === diagnostic.derivative.status === :estimated
+            @test abs(actual.value[i]-reference[i]) <= diagnostic.value.absolute_error
+            @test abs(actual.derivative[i]-reference_derivative[i]) <=
+                  diagnostic.derivative.absolute_error
+            @test diagnostic.working_precision[2] > diagnostic.working_precision[1]
         end
     end
     for target in (:angular, :radial)
@@ -37,12 +46,17 @@ using SpheroidalWaves, Test
     @test zero_report.digits == [-1]
     @test only(zero_report.diagnostics).finite_flag
     @test isinf(only(zero_report.diagnostics).coordinate_condition)
+    @test only(zero_report.diagnostics).value.status === :estimated
+    @test isnan(only(zero_report.diagnostics).value.relative_error)
     endpoints = accuracy(
         1, 1, 1.25, [1+0im, 0.25+0.125im]; target = :angular, diagnostics = true)
     @test endpoints.digits[1] == -1 && endpoints.digits[2]>=12
     @test endpoints.diagnostics[1].conditioning_flag === :unavailable
+    @test endpoints.diagnostics[1].value.status === :unavailable
+    @test endpoints.diagnostics[1].derivative.status === :singularity
     real_report = accuracy(0, 0, 0, [0.25]; target = :angular, diagnostics = true)
-    @test real_report.digits == [-1] && real_report.diagnostics === nothing
+    @test real_report.digits == [-1] &&
+          only(real_report.diagnostics).value.status === :estimated
     @test_throws ArgumentError accuracy(
         0, 0, 1, [0.25im]; target = :angular, kind = 2, normalize = true)
     @test accuracy(0, 0, 1, [2+0.25im]; normalize = true) == accuracy(0, 0, 1, [2+0.25im])
@@ -61,12 +75,132 @@ using SpheroidalWaves, Test
         overflow = Complex{F}.((F("1e400"), 1, 0, 0))
         @test SW._coordinate_accuracy_record(
             overflow, overflow, plan, 1, :double, false).diagnostics.conditioning_flag ===
-              :singular
+              :nonfinite
         sensitive = Complex{F}.((1, 10000, 0, 0))
         warning = SW._coordinate_accuracy_record(
             sensitive, sensitive, plan, 1, :double, false)
         @test warning.diagnostics.conditioning_flag === :warning
         @test warning.digits < 12
+    end
+end
+
+@testset "Separate value and derivative accuracy estimates" begin
+    function check_estimates(actual, diagnostic, value, derivative)
+        for (field, reference) in ((:value, value), (:derivative, derivative))
+            estimate = getproperty(diagnostic, field)
+            @test estimate.status === :estimated
+            @test abs(only(getproperty(actual, field))-reference) <= estimate.absolute_error
+            @test estimate.absolute_error isa BigFloat
+            @test !iszero(reference) && estimate.relative_error >= 0
+        end
+        @test diagnostic.working_precision[2] > diagnostic.working_precision[1]
+        @test diagnostic.terms[2] > diagnostic.terms[1]
+    end
+    # Independent c=1 spectral references bracketing a zero and a stationary
+    # point. These exact dyadic inputs are also used by numerical_regressions.jl.
+    zeros = (
+        (:prolate, 2, 2402525102,
+            big"-3.646498962489905788454236914910610385883e-10",
+            big"1.703323695364498173128344421120509893166775201302"),
+        (:oblate, 3, 1952290389,
+            big"-0.45130974952979024172775506093481452827491145456698",
+            big"-0.00000000088576585426959176119068231968610374136907004850296"))
+    for precision in (:double, :quad), (spheroid, n, k, value, derivative) in zeros
+
+        normalize = spheroid === :oblate
+        point = k/2.0^32
+        report = accuracy(0, n, 1, [point]; spheroid, precision, normalize,
+            target = :angular, diagnostics = true)
+        actual = smn(0, n, 1, point; spheroid, precision, normalize)
+        factor = normalize ? sqrt(BigFloat(2n+1)/2) : BigFloat(1)
+        check_estimates(actual, only(report.diagnostics), factor*value, factor*derivative)
+        @test report.digits ==
+              accuracy(0, n, 1, [point]; spheroid, precision, normalize, target = :angular)
+    end
+    # Large-bandwidth cancellation uses the independently converged fixture
+    # from oblate_precision.jl, with the same 256-bit input construction.
+    point = BigFloat(3)/10
+    for precision in (:double, :quad)
+        report = accuracy(0, 0, 50, [point]; spheroid = :oblate, precision,
+            target = :angular, diagnostics = true)
+        actual = smn(0, 0, 50, point; spheroid = :oblate, precision)
+        check_estimates(actual, only(report.diagnostics),
+            big"9.67772408518644447309773518088656173136537178202329502e-15",
+            big"4.763828624750672125456540294407534653167498239290307627e-13")
+        @test report.digits == [-1]
+    end
+    # Read only four interior pairs from the independent matrix. The broad
+    # cut survey and its Python generator are never executed by package tests.
+    rows = [split(line, '\t')
+            for line in readlines(joinpath(@__DIR__, "accuracy_references.tsv"))
+            if startswith(line, "radial")]
+    function radial_reference(spheroid, ci, kind)
+        pair = map(("radial1", "radial2")) do family
+            row = only(filter(
+                r -> r[1] == family && r[2] == string(spheroid) &&
+                     r[3:9] == ["0", "0", "1", ci, "2", "0", "interior"],
+                rows))
+            (complex(parse(BigFloat, row[10]), parse(BigFloat, row[11])),
+                complex(parse(BigFloat, row[12]), parse(BigFloat, row[13])))
+        end
+        kind <= 2 ? pair[kind] : pair[1] .+ (kind == 3 ? im : -im) .* pair[2]
+    end
+    for precision in (:double, :quad), kind in 1:4
+
+        spheroid = isodd(kind) ? :prolate : :oblate
+        c = kind <= 2 ? 1 : 1+0.25im
+        reference = radial_reference(spheroid, kind <= 2 ? "0" : "0.25", kind)
+        report = accuracy(0, 0, c, [2]; spheroid, precision, kind, diagnostics = true)
+        actual = rmn(0, 0, c, 2; spheroid, precision, kind)
+        check_estimates(actual, only(report.diagnostics), reference...)
+        @test only(report.diagnostics).method === :radial_refinement
+    end
+    # The ordinary double output underflows. Its absolute error must remain
+    # nonzero, using the independent decaying-wave fixture in radial_hankel.jl.
+    report = accuracy(2, 4, 20im, [40]; spheroid = :oblate, kind = 3, diagnostics = true)
+    diagnostic = only(report.diagnostics)
+    @test diagnostic.value.status === diagnostic.derivative.status === :estimated
+    @test diagnostic.value.digits == diagnostic.derivative.digits == 0
+    @test diagnostic.value.absolute_error >=
+          big"3.802038016847395155618029612498744199455358714591274911e-351"
+    @test diagnostic.derivative.absolute_error >=
+          big"7.611800331549399620260330117854328694240686039155645507e-350"
+end
+
+@testset "Accuracy diagnostic failure states" begin
+    unavailable = accuracy(0, 0, 0, [0.25]; target = :angular, kind = 2, diagnostics = true)
+    @test only(unavailable.diagnostics).value.status === :unavailable
+    @test isnan(only(unavailable.diagnostics).value.absolute_error)
+    static = accuracy(0, 1, 0, [2]; normalization = :static, diagnostics = true)
+    @test only(static.diagnostics).derivative.status === :unavailable
+    regular = accuracy(0, 1, 0, [0, 1]; target = :angular, diagnostics = true)
+    @test regular.diagnostics[1].value.status === :estimated
+    @test regular.diagnostics[1].value.digits == -1
+    @test isnan(regular.diagnostics[1].value.relative_error)
+    @test isfinite(regular.diagnostics[1].value.absolute_error)
+    @test regular.diagnostics[2].value.status === :unavailable
+    singular = accuracy(1, 1, 0, [1]; target = :angular, diagnostics = true)
+    @test only(singular.diagnostics).value.status === :unavailable
+    @test only(singular.diagnostics).derivative.status === :singularity
+    for (target, point) in ((:angular, 1), (:radial, 1))
+        report = accuracy(0, 0, 1, [point]; target, kind = 2, diagnostics = true)
+        @test only(report.diagnostics).value.status === :singularity
+        @test only(report.diagnostics).derivative.status === :singularity
+    end
+    overflow = accuracy(200, 200, 0, [0.3]; target = :angular, diagnostics = true)
+    @test only(overflow.diagnostics).value.status === :nonfinite
+    SW = SpheroidalWaves
+    failed = SW._real_accuracy_diagnostics(0, 0, 0, [0.25], :prolate, :double,
+        :angular, 1, false, :standard;
+        reference = (args...; kwargs...) -> error("Unresolved reference"))
+    @test only(failed).value.status === only(failed).derivative.status ===
+          :refinement_failed
+    @test only(failed).value.digits == -1
+    @test_throws ArgumentError SW._accuracy_refinement(() -> throw(ArgumentError("Invalid option")))
+    SW._with_swprecision(384) do
+        F = SW._SWFloat
+        failed = SW._accuracy_component(F(1), F(1), F(2), F(2), :double)
+        @test failed.status === :refinement_failed && failed.digits == -1
     end
 end
 
