@@ -199,6 +199,8 @@ Complex coordinates continue the real-coordinate normalization on these cuts:
 
 Angular `z=±1` and prolate `z=1` retain their one-sided endpoint conventions. Oblate continuation passes through `z=0`. Coordinate order does not change the branch. Complex coordinates support the same derivative, scaling, and degree-range options. Use `accuracy(...; diagnostics=true)` for convergence and conditioning estimates.
 
+At `c=0`, exact-reference checks cover angular zeros and stationary points, scaled angular values at `m=n=200`, and both sides of these cuts at distances `2^-12` and `2^-40`. Values and derivatives are checked separately, using absolute errors near zeros. These samples do not establish accuracy throughout the domain or for nonzero `c`.
+
 ~~~julia
 smn(1, 2, 1.25, 0.3 + 0.2im; derivatives=2)
 rmn(1, 2, 1.25, [1.5 + 0.2im, 2.0 - 0.1im]; kind=3)
