@@ -935,8 +935,7 @@ polynomials when c is small.
         First derivatives dSmₙ/dη at each η point
 
 **Accuracy:**
-    Accuracy depends on parameter, order and coordinate. The precision setting
-    selects the working/output precision, not a guaranteed number of accurate digits.
+    Accuracy depends on parameter, order and coordinate. Native quad arithmetic has fixed precision. BigFloat settings affect output rounding and guarded calculations, without guaranteeing arbitrary-precision accuracy. See [Precision and outputs](@ref precision-and-outputs).
 
 **Special Cases:**
     - c = 0: Returns Ferrers P_n^m (kind=1) or Q_n^m (kind=2)
