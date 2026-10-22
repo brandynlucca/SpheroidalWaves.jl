@@ -259,7 +259,8 @@ function _radial_sensitivity_step(plan, x, state, h; rtol = _SWFloat("1e-42"),
     error("Differentiated radial equation did not converge")
 end
 
-function _radial_expansion_batch(plan, points, kind)
+function _radial_expansion_batch(plan, points, kind;
+        step_fraction = 1, rtol = _SWFloat("1e-42"))
     V = kind>=3 ? typeof(complex(plan.c)) : typeof(plan.c)
     states = Vector{NTuple{4, V}}(undef, length(points))
     tail = _SWFloat("0")
@@ -274,10 +275,10 @@ function _radial_expansion_batch(plan, points, kind)
             steps = 0
             while x>target
                 radius = plan.spheroid===:prolate ? x-1 : sqrt(x^2+1)
-                h = -min(x-target, radius/4, inv(1+abs(plan.c)+sqrt(abs(plan.lambda))))
+                h = -min(x-target, step_fraction*min(radius/4, inv(1+abs(plan.c)+sqrt(abs(plan.lambda)))))
                 x+h<x ||
                     error("Radial sensitivity propagation exhausted coordinate precision")
-                state = _radial_sensitivity_step(plan, x, state, h)
+                state = _radial_sensitivity_step(plan, x, state, h; rtol)
                 x += h
                 steps += 1
                 steps<=100000 ||
