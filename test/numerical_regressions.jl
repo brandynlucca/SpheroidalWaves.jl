@@ -98,7 +98,55 @@ end
         end
     end
 
-    s = smn(200, 200, 0.0, 0.3; scaled = true, logderivative = true)
-    @test only(s.value.exponent) > 308
-    @test only(s.logderivative) ≈ -200*0.3/(1-0.3^2) rtol=2e-13
+    # Rodrigues' formula gives P_200^200(x) = 399!!*(1-x^2)^100 exactly.
+    # Preserve the represented Float64 input as a rational before evaluating it.
+    x = Rational{BigInt}(0.3)
+    exact = prod(big(k) for k in 1:2:399)*(1-x^2)^100
+    slope = -200x/(1-x^2)*exact
+    expected = BigFloat(numerator(exact))/BigFloat(denominator(exact))
+    dexpected = BigFloat(numerator(slope))/BigFloat(denominator(slope))
+    for precision in (:double, :quad)
+        s = smn(200, 200, 0.0, 0.3; precision, scaled = true, logderivative = true)
+        tolerance = precision === :quad ? big"1e-28" : 2e-13
+        @test only(s.value.exponent) > 308
+        @test only(s.logderivative) ≈ -200*0.3/(1-0.3^2) rtol=2e-13
+        @test only(s.value.mantissa)*big(10)^only(s.value.exponent) ≈ expected rtol=tolerance
+        @test only(s.derivative.mantissa)*big(10)^only(s.derivative.exponent) ≈ dexpected rtol=tolerance
+    end
+end
+
+@testset "Absolute errors near angular zeros" begin
+    # Exact P_2 and P_3 polynomials, independent of the solver's recurrence.
+    # Rational arithmetic captures the actual input bits. Only the final ratio
+    # and unit-norm factor use BigFloat arithmetic (256 bits in the test suite).
+    # Condon-Shortley phase is +1 for m=0. DLMF 14.7.1 and 14.7.13.
+    for precision in (:double, :quad), spheroid in (:prolate, :oblate),
+        normalize in (false, true), n in (2, 3)
+        T = precision === :quad ? BigFloat : Float64
+        tolerance = precision === :quad ? big"1e-28" : 2e-14
+        delta = T(2)^(precision === :quad ? -80 : -20)
+        root = inv(sqrt(T(n == 2 ? 3 : 5)))
+        points = T[-root - delta, -root + delta, 0, root - delta, root + delta]
+        result = smn(0, n, 0, points; precision, spheroid, normalize)
+        scale = normalize ? sqrt(BigFloat(2n+1)/2) : BigFloat(1)
+        for (i, point) in enumerate(points)
+            x = Rational{BigInt}(point)
+            value = n == 2 ? (3x^2-1)/2 : (5x^3-3x)/2
+            derivative = n == 2 ? 3x : (15x^2-3)/2
+            expected = scale*BigFloat(numerator(value))/BigFloat(denominator(value))
+            dexpected = scale*BigFloat(numerator(derivative))/BigFloat(denominator(derivative))
+            # Absolute error at value zeros or stationary points, relative error
+            # for the other component. Scaling accounts for unit normalization.
+            if n == 2 || iszero(point)
+                @test abs(result.value[i]-expected) <= tolerance*scale
+            else
+                @test result.value[i]≈expected rtol=tolerance atol=0
+            end
+            if n == 3 || iszero(point)
+                @test abs(result.derivative[i]-dexpected) <= tolerance*scale
+            else
+                @test result.derivative[i]≈dexpected rtol=tolerance atol=0
+            end
+        end
+    end
 end
