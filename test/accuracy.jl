@@ -201,6 +201,24 @@ end
         F = SW._SWFloat
         failed = SW._accuracy_component(F(1), F(1), F(2), F(2), :double)
         @test failed.status === :refinement_failed && failed.digits == -1
+
+        # Failed continuation refinement reuses the original state. Identical
+        # fallback states must not imply convergence or a zero error estimate.
+        point = Complex{F}(0.25, 0.125)
+        plan = SW._sensitivity_plan(0, 1, F(0), :prolate, :double)
+        state = Complex{F}.((point, 1, 0, 0))
+        record = SW._coordinate_accuracy_record(
+            state, state, plan, point, :double, false; refinement_failed = true)
+        @test record.digits == -1
+        @test !record.diagnostics.converged
+        @test record.diagnostics.finite_flag
+        @test record.diagnostics.conditioning_flag === :poor
+        for component in (record.diagnostics.value, record.diagnostics.derivative)
+            @test component.status === :refinement_failed
+            @test component.digits == -1
+            @test isnan(component.absolute_error)
+            @test isnan(component.relative_error)
+        end
     end
 end
 

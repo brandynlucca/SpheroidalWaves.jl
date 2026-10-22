@@ -512,9 +512,9 @@ let file_groups = (
                 delete!(serial_testsets, expression.args[3])
                 return TEST_GROUP in ("all", "api-and-precision") ? expression : nothing
             end
-            # This test exercises jacobian_smn alongside complex wave values.
-            # Keep it with parameter sensitivities to reuse their compiled methods.
-            group = expression.args[3] == "Complex angular coordinates" ?
+            # Compile wave values with the other function tests, and parameter
+            # sensitivities with the other Jacobian tests.
+            group = expression.args[3] == "Complex angular parameter sensitivities" ?
                     "derivatives-and-boundaries" : current_group[]
             if TEST_GROUP == "all" || TEST_GROUP == group
                 push!(testsets, expression)
