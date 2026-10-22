@@ -1,7 +1,7 @@
 module SpheroidalWaves
 
 using Libdl
-using LinearAlgebra: Tridiagonal, lu
+using LinearAlgebra: Tridiagonal, lu, SingularException
 using PrecompileTools: @setup_workload, @compile_workload
 using SpheroidalWaves_jll
 
@@ -1408,7 +1408,8 @@ tail size, eigenvalue conditioning, and eigenproblem/sensitivity residuals;
 `step_used` and `relative_change_when_halving_step` are `nothing`.
 Finite differences populate those two step fields, with conditioning
 `:good`, `:warning`, or `:poor` and action `:accept`, `:retry_smaller_h`, or `:use_quad`.
-Unresolved curvature returns action `:unresolved` in quad precision. Integral limits use `:right_limit`.
+Unresolved curvature returns action `:unresolved` in quad precision. Integral limits use 
+`:right_limit`.
 
 !!! note "Zero bandwidth"
     First derivatives are `Λ₀′=2/π` and `μ₁′=-2im/3`, otherwise zero.
@@ -1987,77 +1988,66 @@ end
 
 """
     accuracy(m, n, c, arg; target=:radial, spheroid=:prolate,
-             precision=:double, kind=1, normalize=false, normalization=:standard, diagnostics=false)
+             precision=:double, kind=1, normalize=false,
+             normalization=:standard, diagnostics=false)
 
-Return a vector of estimated decimal digits for the requested function
-values. Real coordinates use backend estimates. Complex coordinates compare
-higher-precision continuation with halved steps and include conditioning and
-output rounding. These are diagnostics, not rigorous error bounds or statistical
-confidence intervals, and do not certify the returned coordinate derivatives.
+Estimate numerical accuracy for [`smn`](@ref) (`target=:angular`) or
+[`rmn`](@ref) (`target=:radial`). Arguments, geometry, precision, kinds,
+normalization and coordinate domains follow those functions. Wrap a single
+coordinate in a vector, such as `[0.3]`. Angular `normalize=true` applies only
+to kind 1 and is ignored for radial calls.
 
-### Arguments and keywords
+The default returns one integer per coordinate for function values. Positive
+entries estimate decimal digits, `0` means no reliable digits, and `-1` means no
+estimate is available. These estimates are heuristic, not rigorous error bounds
+or statistical confidence intervals.
 
-- `m`, `n`: integer order and degree with `0 <= m <= n`.
-- `c`: finite real or complex spheroidal parameter, following [`rmn`](@ref).
-  Radial `normalization=:static` includes zero. Its real-coordinate calls have no digit estimate.
-- `arg`: nonempty vector of finite coordinates, with one estimate returned
-  per entry in the same order. For angular functions use `-1 <= eta <= 1`;
-  for real radial coordinates use prolate `x>=1` or oblate `x>=0`. Complex
-  coordinates follow the cuts of `smn` and `rmn`. Singular coordinates
-  follow the behavior of the corresponding wave function. A single coordinate
-  must be wrapped in a vector, e.g. `[0.3]`.
-- `target=:radial`: estimate radial values from `rmn`; `:angular` selects [`smn`](@ref).
-- `spheroid=:prolate`: geometry, `:prolate` or `:oblate`.
-- `precision=:double`: `:double` or `:quad`; evaluate at that precision before
-  reporting integer digit estimates. This does not request a particular digit count.
-- `kind=1`: angular first kind (`1`) or second kind (`2`); radial kinds `1:4`.
-  For real coordinates, only radial `kind=2` has a radial digit estimator. The default radial `kind=1`
-  therefore returns `-1` at every coordinate.
-- `normalize=false`: use the default angular normalization. For angular `kind=1`,
-  `true` selects unit integral normalization for real parameters and its analytic
-  continuation for complex parameters. Angular `kind=2` rejects `true`.
-  This keyword has no effect on radial estimates.
-- `diagnostics=false`: `true` returns `(; digits, diagnostics)`. For complex
-  coordinates, `diagnostics` contains per-point refinement changes, coordinate,
-  parameter and eigenvalue condition numbers, and convergence flags.
-  For real coordinates, `diagnostics` is `nothing`.
+For real coordinates, the default uses native first-kind angular and second-kind
+radial estimates where available. Angular second-kind, small-parameter
+(`abs(c)<=1e-4`), purely imaginary parameter, guarded expansion and endpoint
+evaluations return `-1`. Radial static normalization, analytic evaluations and
+kinds 1, 3 and 4 also return `-1`. Nonfinite values and invalid native estimates
+receive `-1`. Invalid inputs raise the corresponding wave-function errors.
 
-### Interpreting the result
+### Optional diagnostics
 
-An entry of `-1` means **no estimate is available**. Zero means the diagnostic
-reports no reliable decimal digits. Positive entries are estimates, not guarantees.
-Invalid inputs raise the same domain/argument errors as `smn` or `rmn`.
+`diagnostics=true` returns `(; digits, diagnostics)`. The top-level `digits`
+retains the default value estimates. Each per-coordinate diagnostic additionally
+contains separate `value` and `derivative` records with `digits`,
+`absolute_error`, `relative_error` and `status`. Error estimates use `BigFloat`
+to preserve small errors when double outputs underflow. At a zero, an absolute
+estimate can remain available while relative error is `NaN` and its digit count
+is `-1`.
 
-For complex coordinates, zeros, endpoint limits, nonfinite outputs and unresolved
-refinement return `-1`. Condition numbers above 100 receive a `:warning` flag.
-The following backend limitations apply to real coordinates:
+Component statuses are `:estimated`, `:unavailable`, `:refinement_failed`,
+`:nonfinite` or `:singularity`. Unavailable errors are `NaN`. A mathematical
+singularity is distinguished from numerical overflow. A failed additional
+comparison is reported without discarding a successful original evaluation.
 
-- Angular `abs(c)<=1e-4`: return `-1`; the spherical-limit and small-parameter
-  expansions have no calibrated digit estimator.
-- Angular purely imaginary complex parameters return `-1`.
-- Angular `kind=2`: evaluate Qs, then return `-1`; its propagation and
-  coefficient convergence checks are not calibrated decimal-digit estimates.
-- Refined angular evaluations for real parameters with `abs(c) > n + 1` return `-1`;
-  native estimates do not describe the coefficient-based result.
-- Angular endpoint limits and quad endpoint reconstruction: return `-1`; the native estimate
-  describes the normalization point rather than the requested coordinate.
-- Radial `c=0`: requires `normalization=:static`, which returns `-1`.
-- Radial `kind=2`: report the native second-kind estimate, which may use
-  Wronskian consistency and cancellation diagnostics.
-- Radial `kind=1`, `3`, or `4`: evaluate the requested function, then return `-1`.
-  A second-kind/pair estimate does not establish the accuracy of these functions
-  or their potentially cancelling Hankel combinations.
-- Nonfinite values and unavailable or out-of-range native estimates return `-1`.
+Real first-kind angular diagnostics compare higher-precision coefficient
+expansions. Real standard radial diagnostics support kinds 1 through 4 using
+refined Bessel expansions and, where needed, halved propagation steps. `method`,
+`working_precision` (bits) and `terms` identify the comparison. Finite endpoint
+limits, real second-kind angular functions and real static radial normalization
+retain unavailable component estimates.
 
-Quad estimates use the same precision-preserving inputs as the evaluation path.
-For sensitive calculations, use independent references, identities, or precision
-comparisons in addition to the backend diagnostic.
+Complex-coordinate diagnostics refine arithmetic and halve continuation steps.
+They retain their refinement changes, condition numbers and convergence flags,
+and add the separate component estimates. Their default digit counts remain
+unavailable at zeros, endpoints, nonfinite outputs or unresolved refinement.
+Conditioning above 100 receives a `:warning` flag.
+
+Refinement differences, output rounding and conditioning contribute to the
+estimates. Agreement can still miss correlated errors. Value estimates do not
+establish derivative accuracy, and derivative estimates are likewise not
+certified bounds. Additional real-coordinate comparisons run only with
+`diagnostics=true` and can cost more than the requested wave evaluation.
 
 ```julia
-accuracy(0, 2, 0.0, [0.3]; target=:angular) # [-1]
-accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
+accuracy(0, 1, 2.0, [1.5]; kind=2)
+a = accuracy(0, 2, 1.0, [0.3]; target=:angular, diagnostics=true)
+a.diagnostics[1].derivative.absolute_error
 ```
-
 """
 function accuracy(
         m::Integer, n::Integer, c::Union{Real, Complex}, arg::AbstractVector{<:Real};
@@ -2067,7 +2057,9 @@ function accuracy(
     if diagnostics
         digits = accuracy(
             m, n, c, arg; spheroid, precision, kind, target, normalize, normalization)
-        return (; digits, diagnostics = nothing)
+        records = _real_accuracy_diagnostics(m, n, c, arg, spheroid, precision, target,
+            kind, normalize, normalization)
+        return (; digits, diagnostics = records)
     end
     target in (:angular, :radial) || error("target must be :angular or :radial")
     _validate_wave_arguments(m, n, c, arg, spheroid, precision, target; kind, normalization)
