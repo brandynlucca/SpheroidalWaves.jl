@@ -372,8 +372,7 @@ the oblate factor follows its radial equation and normalization.
 
 ## Accuracy estimates
 
-`accuracy(m,n,c,arg; target=:radial, spheroid=:prolate, precision=:double,
-kind=1, normalize=false, normalization=:standard, diagnostics=false)` returns one integer per coordinate.
+`accuracy(m,n,c,arg; target=:radial, spheroid=:prolate, precision=:double, kind=1, normalize=false, normalization=:standard, diagnostics=false)` returns one integer per coordinate.
 
 | Argument / keyword | Meaning |
 |:--|:--|
@@ -386,12 +385,10 @@ kind=1, normalize=false, normalization=:standard, diagnostics=false)` returns on
 | `kind=1` | Angular `1` or `2`; radial `1:4` |
 | `normalize=false` | Default angular normalization; `true` selects unit normalization for real first-kind angular functions and its analytic continuation for complex `c`. Invalid for angular kind 2; ignored for radial calls |
 
-Positive entries estimate decimal digits; `0` reports no reliable digits and
-`-1` means no estimate is available. Invalid inputs raise the corresponding
-wave-function errors; nonfinite values receive `-1` when evaluation returns them.
+Positive entries estimate decimal digits. `0` reports no reliable digits and `-1` means no estimate is available. Invalid inputs raise the corresponding wave-function errors. Nonfinite values receive `-1` when evaluation returns them.
 
-!!! note "Available estimates"
-    For real coordinates, only radial `kind=2` has a radial estimator, so the default radial call (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion evaluations and static radial normalization have no calibrated digit estimates. See [`accuracy`](@ref).
+!!! note "Default estimates"
+    For real coordinates, only radial `kind=2` has a native radial estimator, so the default radial call (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion evaluations and static radial normalization have no native digit estimates. See [`accuracy`](@ref).
 
 ~~~julia
 accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
@@ -399,19 +396,17 @@ accuracy(0, 2, 1.0, [0.3]; target=:angular, normalize=true, precision=:quad)
 accuracy(0, 2, 0.0, [0.3]; target=:angular) # [-1]
 ~~~
 
-Complex coordinates use higher precision and halved continuation steps to estimate
-convergence. Add `diagnostics=true` for per-point refinement changes, condition
-numbers, and convergence flags. Zeros, endpoints and unresolved estimates return `-1`.
+Add `diagnostics=true` for separate `value` and `derivative` records containing `digits`, `absolute_error`, `relative_error` and `status`. The top-level `digits` remains the default estimate. Higher precision and longer expansions provide additional estimates for real first-kind angular functions and standard radial kinds 1–4. Complex coordinates use higher precision and halved continuation steps. `method`, `working_precision` (bits) and `terms` describe the comparison. These optional calculations add evaluation cost.
+
+Statuses distinguish `:estimated`, `:unavailable`, `:refinement_failed`, `:nonfinite` and `:singularity`. At zeros, absolute estimates remain useful while relative errors are `NaN` and digit counts are `-1`. Errors use `BigFloat` to preserve small values. Finite endpoint limits, real angular kind 2 and real static radial normalization retain unavailable component estimates.
 
 ~~~julia
 a = accuracy(1, 2, 1.25, [0.3 + 0.2im]; target=:angular, diagnostics=true)
-a.digits
-a.diagnostics[1].conditioning_flag
+a.diagnostics[1].derivative.absolute_error
+a.diagnostics[1].derivative.status
 ~~~
 
 !!! warning "Diagnostics are not error bounds"
-    A small Wronskian error checks consistency of the solution pair.
-    Correlated errors can preserve that identity.
-    Digit estimates do not certify coordinate derivatives.
+    A small Wronskian error checks consistency of the solution pair. Correlated errors can preserve that identity or escape refinement comparisons. Value estimates do not establish derivative accuracy, and neither estimate is a rigorous error bound.
 
 
