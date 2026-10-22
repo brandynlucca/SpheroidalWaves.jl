@@ -196,8 +196,8 @@ halved continuation steps. `plan` supplies the refined coefficient diagnostics
 and eigenvalue condition number.
 
 Return `(; digits, diagnostics)`. Endpoint limits, zero values, nonfinite results,
-and unresolved refinement receive `digits = -1`. Digit counts are heuristic
-estimates of value accuracy, not certified bounds or derivative accuracy estimates.
+and unresolved refinement receive `digits = -1`. Diagnostics additionally carry
+separate value and derivative error estimates. None of these are certified bounds.
 """
 function _coordinate_accuracy_record(original, refined, plan, point, precision, endpoint;
         target = :angular, spheroid = plan.spheroid, kind = 1, refinement_failed = false)
