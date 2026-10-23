@@ -149,8 +149,9 @@ function _coordinate_batch(initial, points, target, spheroid; step_fraction = 1)
 end
 
 function _complex_coordinate_data(m, n, c, points, spheroid, precision, target, kind,
-        normalize, normalization; mode = nothing, step_fraction = 1, sensitivity = true)
-    return _with_swprecision(_coordinate_precision(m, n, c, points)) do
+        normalize, normalization; mode = nothing, step_fraction = 1, sensitivity = true,
+        working_precision = _coordinate_precision(m, n, c, points))
+    return _with_swprecision(working_precision) do
         R = precision===:quad ? BigFloat : Float64
         parameter = c isa Real ? _input_float(R, c) : _input_float(Complex{R}, c)
         initial = _coordinate_initial_data(m, n, parameter, spheroid, precision, target,
@@ -195,26 +196,23 @@ function _complex_coordinate_wave(
     order = max(derivatives, second_derivative ? 2 : 1)
     R = precision===:quad ? BigFloat : Float64
     T = Complex{R}
-    fields = (
-        :value, :derivative, :second_derivative, :third_derivative, :fourth_derivative)[1:(order + 1)]
-    values = _with_swprecision(_coordinate_precision(m, n, c, points)) do
-        data = _complex_coordinate_data(
-            m, n, c, points, spheroid, precision, target, kind, normalize, normalization;
-            sensitivity = false)
-        arrays = [zeros(Complex{_SWFloat}, length(points)) for _ in fields]
-        for (i, point) in enumerate(points)
-            if _coordinate_is_endpoint(point, target, spheroid)
-                f = target===:angular ? smn : rmn
-                options = target===:angular ? (; normalize) : (; normalization)
-                endpoint = f(m, n, c, real(point); spheroid, precision,
-                    kind, derivatives = order, options...)
-                for (array, field) in zip(arrays, fields)
-                    array[i] = only(getproperty(endpoint, field))
-                end
-                continue
-            end
+    # Keep the output tuple's length out of the numerical closure's type, so
+    # requesting another derivative order reuses the compiled calculation.
+    names = (:value, :derivative, :second_derivative, :third_derivative, :fourth_derivative)
+    bits = _coordinate_precision(m, n, c, points)
+    arrays = _with_swprecision(bits) do
+        interior = findall(z -> !_coordinate_is_endpoint(z, target, spheroid), points)
+        # Endpoints use the real-domain limits below. They need no continuation
+        # solve or preliminary first-derivative evaluation.
+        data = isempty(interior) ? nothing :
+               _complex_coordinate_data(
+            m, n, c, points[interior], spheroid, precision, target, kind, normalize,
+            normalization; sensitivity = false, working_precision = bits)
+        arrays = [zeros(Complex{_SWFloat}, length(points)) for _ in 1:(order + 1)]
+        for (index, i) in enumerate(interior)
+            point = points[i]
             z = Complex{_SWFloat}(point)
-            y, dy = data.states[i][1:2]
+            y, dy = data.states[index][1:2]
             arrays[1][i], arrays[2][i] = y, dy
             order==1 && continue
             a, b, d = _wave_equation(m, data.plan.c, z, data.plan.lambda, spheroid, target)
@@ -233,8 +231,19 @@ function _complex_coordinate_wave(
                     (arrays[5][i] = -(3b*third+(3bprime+d)*ddy+2dprime*dy+dsecond*y)/a)
             end
         end
-        NamedTuple{fields}(Tuple(arrays))
+        for (i, point) in enumerate(points)
+            _coordinate_is_endpoint(point, target, spheroid) || continue
+            f = target===:angular ? smn : rmn
+            options = target===:angular ? (; normalize) : (; normalization)
+            endpoint = f(m, n, c, real(point); spheroid, precision,
+                kind, derivatives = order, options...)
+            for (index, array) in enumerate(arrays)
+                array[i] = only(getproperty(endpoint, names[index]))
+            end
+        end
+        arrays
     end
+    values = NamedTuple{names[1:(order + 1)]}(Tuple(arrays))
     output = map(v -> scaled ? _decimal_scaled(v, T) : T.(v), values)
     if logderivative
         ratio = T[isreal(z) ?

@@ -1,17 +1,18 @@
 using SpheroidalWaves, Test
 
-@testset "Complex angular coordinates" begin
-    # Independent Ferrers polynomial recurrence fixes the square-root branch.
-    function ferrers(m, degrees, z)
-        previous = zero(z)
-        current = (-1)^m*prod(oftype(z, k) for k in 1:2:(2m - 1); init = one(z))*(sqrt(1-z)*sqrt(1+z))^m
-        values = typeof(z)[]
-        for l in m:last(degrees)
-            l in degrees && push!(values, current)
-            previous, current = current, ((2l+1)*z*current-(l+m)*previous)/(l-m+1)
-        end
-        values
+# Independent Ferrers polynomial recurrence fixes the square-root branch.
+function reference_ferrers(m, degrees, z)
+    previous = zero(z)
+    current = (-1)^m*prod(oftype(z, k) for k in 1:2:(2m - 1); init = one(z))*(sqrt(1-z)*sqrt(1+z))^m
+    values = typeof(z)[]
+    for l in m:last(degrees)
+        l in degrees && push!(values, current)
+        previous, current = current, ((2l+1)*z*current-(l+m)*previous)/(l-m+1)
     end
+    values
+end
+
+@testset "Complex angular coordinates" begin
     for (precision, spheroid) in ((:quad, :prolate), (:double, :oblate))
         T = precision===:quad ? BigFloat : Float64
         tolerance = precision===:quad ? big"2e-27" : 3e-12
@@ -19,12 +20,9 @@ using SpheroidalWaves, Test
         for c in (T(1.25), complex(T(1.25), T(0.125))), normalize in (false, true)
 
             coefficients = dmn(1, 2, c; spheroid, precision, normalize)
-            basis = [ferrers(1, coefficients.degrees, z) for z in points]
+            basis = [reference_ferrers(1, coefficients.degrees, z) for z in points]
             actual = smn(1, 2, c, points; spheroid, precision, normalize)
             @test actual.value ≈ [sum(coefficients.coefficients .* p) for p in basis] rtol=tolerance
-            tangent = jacobian_smn(1, 2, c, points; spheroid, precision, normalize)
-            @test (c isa Real ? tangent.dvalue_dc : tangent.dvalue_dcreal) ≈
-                  [sum(coefficients.dcoefficients_dc .* p) for p in basis] rtol=tolerance
             @test actual.value isa Vector{Complex{T}}
         end
         z = first(points)
@@ -75,6 +73,9 @@ using SpheroidalWaves, Test
             scaled = true, logderivative = true)
         reference = smn(1, 2, 1.25+0.125im, [-1, 1]; kind, derivatives = 4,
             scaled = true, logderivative = true)
+        endpoint_only = smn(1, 2, 1.25+0.125im, z[1:2]; kind, derivatives = 4,
+            scaled = true, logderivative = true)
+        @test isequal(endpoint_only, NamedTuple{keys(endpoint_only)}(reference))
         @test isequal(actual.derivative.mantissa[1:2], reference.derivative.mantissa)
         @test isequal(actual.fourth_derivative.mantissa[1:2], reference.fourth_derivative.mantissa)
         @test isequal(actual.logderivative[1:2], reference.logderivative)
@@ -87,6 +88,22 @@ using SpheroidalWaves, Test
     @test_throws ArgumentError smn(0, 0, 1, Inf+im)
     @test_throws ArgumentError smn(0, 0, 1, 0.3im; kind = 2, normalize = true)
     @test_throws ArgumentError smn(0, 0, 1, 0.3im; derivatives = 5)
+end
+
+@testset "Complex angular parameter sensitivities" begin
+    for (precision, spheroid) in ((:quad, :prolate), (:double, :oblate))
+        T = precision===:quad ? BigFloat : Float64
+        tolerance = precision===:quad ? big"2e-27" : 3e-12
+        points = Complex{T}[0.3 + 0.2im, -0.4 - 0.3im, 1.4 + 0.2im]
+        for c in (T(1.25), complex(T(1.25), T(0.125))), normalize in (false, true)
+
+            coefficients = dmn(1, 2, c; spheroid, precision, normalize)
+            basis = [reference_ferrers(1, coefficients.degrees, z) for z in points]
+            tangent = jacobian_smn(1, 2, c, points; spheroid, precision, normalize)
+            @test (c isa Real ? tangent.dvalue_dc : tangent.dvalue_dcreal) ≈
+                  [sum(coefficients.dcoefficients_dc .* p) for p in basis] rtol=tolerance
+        end
+    end
 end
 
 @testset "Public expansion coefficients" begin

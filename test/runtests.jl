@@ -3,7 +3,8 @@ using Test
 
 const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
 TEST_GROUP in
-("all", "api-and-precision", "derivatives-and-boundaries", "functions-and-coefficients") ||
+("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
+    "functions-and-coefficients") ||
     error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
 
 # Ordinary Pkg.test() and coverage run the complete suite.
@@ -497,10 +498,11 @@ let file_groups = (
             ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
                 "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
                 "oblate_precision.jl", "integral_eigenvalues.jl"],
-        "derivatives-and-boundaries" =>
-            ["parameter_derivatives.jl", "boundary_diagnostics.jl",
+        "parameter-derivatives" =>
+            ["parameter_derivatives.jl",
                 "angular_parameter_derivatives.jl", "radial_parameter_derivatives.jl",
-                "integral_sensitivities.jl"])
+                "integral_sensitivities.jl"],
+        "coordinates-and-endpoints" => ["boundary_diagnostics.jl"])
     testsets = Expr[]
     serial_testsets = Set(["Accuracy tracks the requested native evaluation",
         "Coordinate zeros and stationary points"])
@@ -512,10 +514,13 @@ let file_groups = (
                 delete!(serial_testsets, expression.args[3])
                 return TEST_GROUP in ("all", "api-and-precision") ? expression : nothing
             end
-            # This test exercises jacobian_smn alongside complex wave values.
-            # Keep it with parameter sensitivities to reuse their compiled methods.
-            group = expression.args[3] == "Complex angular coordinates" ?
-                    "derivatives-and-boundaries" : current_group[]
+            # Keep complex-coordinate Jacobians with continuation and endpoint
+            # checks so each job compiles the numerical methods it needs.
+            group = expression.args[3] in
+                    ("Complex angular parameter sensitivities",
+                "Complex coordinate parameter sensitivities",
+                "Complex-coordinate Jacobian diagnostics keyword") ?
+                    "coordinates-and-endpoints" : current_group[]
             if TEST_GROUP == "all" || TEST_GROUP == group
                 push!(testsets, expression)
             end

@@ -99,8 +99,25 @@ const STATIC_PARAMETER_REFERENCES = Dict(
 
         for (jac, args) in ((jacobian_eigen, (0, 0, c)),
             (jacobian_smn, (0, 0, c, [0.25])),
-            (jacobian_rmn, (0, 0, c, [2.0])),
-            (jacobian_smn, (0, 0, c, [0.25+0.125im])),
+            (jacobian_rmn, (0, 0, c, [2.0])))
+            ordinary = jac(args...; options...)
+            reported = jac(args...; options..., diagnostics = true)
+            values = ordinary isa Number ? reported.derivative :
+                     NamedTuple{keys(ordinary)}(reported)
+            @test isequal(ordinary, values)
+            @test any(name -> startswith(string(name), "metadata"), keys(reported))
+            @test_throws MethodError jac(args...; options..., with_metadata = true)
+            @test_throws MethodError jac(args...; options..., diagnostics = true, with_metadata = false)
+        end
+    end
+end
+
+@testset "Complex-coordinate Jacobian diagnostics keyword" begin
+    for c in (1.25, 1.25+0.125im),
+        options in ((;), (; h = 1e-4, adaptive = false), (;
+            order = 2, h = 1e-3, adaptive = false))
+
+        for (jac, args) in ((jacobian_smn, (0, 0, c, [0.25+0.125im])),
             (jacobian_rmn, (0, 0, c, [2+0.125im])))
             ordinary = jac(args...; options...)
             reported = jac(args...; options..., diagnostics = true)
