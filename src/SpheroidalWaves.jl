@@ -1352,9 +1352,9 @@ function eigenvalue(m::Integer, n::Integer, c::Union{Real, Complex};
         _validate_coefficient_options(m, n, c, spheroid, precision, nothing,
             max_terms, :orthonormal)
         bits = _validate_precision_bits(precision_bits)
-        plan = _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
+        eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision, bits,
             nothing, max_terms, false)
-        return _precision_output(plan.lambda, bits)
+        return _round_to_bigfloat(eigenpair.lambda, bits)
     end
     operator!==:separation &&
         return _integral_eigenvalue(m, n, c, spheroid, precision, operator, form)

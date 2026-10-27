@@ -1,22 +1,18 @@
-# Explicit arbitrary precision starts with separation eigenpairs. Native
-# routines select the mode/sign only; every magnitude is recomputed in Julia.
+# Native routines select the mode and sign; Julia recomputes each magnitude.
 function _validate_precision_bits(bits)
     bits isa Integer && !(bits isa Bool) && 2 <= bits <= div(typemax(Int), 4) ||
         throw(ArgumentError("precision_bits must be an integer of at least 2 bits"))
     return Int(bits)
 end
 
-_precision_output(x::Real, bits) = BigFloat(x, _swrounding(); precision = bits)
-_precision_output(x::Complex, bits) =
-    complex(_precision_output(real(x), bits), _precision_output(imag(x), bits))
+_round_to_bigfloat(x::Real, bits) = BigFloat(x, _swrounding(); precision = bits)
+_round_to_bigfloat(x::Complex, bits) =
+    complex(_round_to_bigfloat(real(x), bits), _round_to_bigfloat(imag(x), bits))
 
-_working_parameter(c::Real) = _SWFloat(c)
-_working_parameter(c::Complex) = complex(_SWFloat(real(c)), _SWFloat(imag(c)))
+_SWFloat_complex(c::Complex) = complex(_SWFloat(real(c)), _SWFloat(imag(c)))
 
-# Compare after aligning the bilinearly normalized vectors' remaining sign.
-# Eigenvalues and sensitivities use mixed absolute/relative accuracy; vectors
-# use their orthonormal-basis norm, not the relative error of tiny entries.
-function _arbitrary_plan_change(previous, result, derivatives)
+# Align signs, then compare vector norms and scaled eigenvalue sensitivities.
+function _align_and_measure_eigenpair_change!(previous, result, derivatives)
     k = min(length(previous.v), length(result.v))
     phase = real(sum(conj.(previous.v[1:k]) .* result.v[1:k])) < 0 ? -1 : 1
     result.v .*= phase
@@ -37,19 +33,20 @@ function _arbitrary_plan_change(previous, result, derivatives)
     return change
 end
 
-function _arbitrary_truncation_plan(m, n, c, spheroid, seed, tolerance,
+function _refine_coefficient_truncation(m, n, c, spheroid, seed, tolerance,
         max_terms, derivatives)
-    z = _working_parameter(c)
+    z = c isa Real ? _SWFloat(c) : _SWFloat_complex(c)
+    eigenvalue_seed = seed isa Real ? _SWFloat(seed) : _SWFloat_complex(seed)
     bandwidth = ceil(Int, min(abs(z), _SWFloat(max_terms)))
     terms = min(max_terms, max(16, (n-m)÷2+9+bandwidth))
     previous = nothing
     while true
-        # Leave guard bits for the linear solve and near-cancelling Rayleigh sum.
+        # Target requested accuracy above the matrix sum's rounding floor.
         result = _solve_coefficient_mode(m, n, z, terms, spheroid,
-            _working_parameter(seed); derivatives, target = 16eps(_SWFloat))
+            eigenvalue_seed; derivatives, target = tolerance/16)
         change = previous === nothing ?
                  (iszero(z) ? zero(_SWFloat) : _SWFloat(Inf)) :
-                 _arbitrary_plan_change(previous, result, derivatives)
+                 _align_and_measure_eigenpair_change!(previous, result, derivatives)
         if max(change, result.tail, result.residual, result.derivative_residual) <= tolerance
             return (; result..., terms, relative_change = change, tolerance,
                 phase = Ref{Union{Nothing, Int}}(nothing), converged = true)
@@ -61,15 +58,14 @@ function _arbitrary_truncation_plan(m, n, c, spheroid, seed, tolerance,
     end
 end
 
-const _arbitrary_coefficient_cache_key = gensym(:arbitrary_coefficient_plans)
+const _coefficient_eigenpair_cache_key = gensym(:coefficient_eigenpairs)
 
-function _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
+function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision, bits,
         rtol, max_terms, derivatives)
-    cache = get!(task_local_storage(), _arbitrary_coefficient_cache_key) do
+    cache = get!(task_local_storage(), _coefficient_eigenpair_cache_key) do
         Dict{Any, Any}()
     end
-    # Preserve the original input, including BigFloat bits beyond the ambient
-    # precision. Native mode selection also depends on the ambient context.
+    # Cache original inputs and the arithmetic settings used for native seeds.
     key = (m, n, typeof(c), c, spheroid, precision, bits, rtol, max_terms,
         derivatives, _swrounding(), Base.precision(BigFloat), rounding(BigFloat),
         backend_library(; precision))
@@ -77,16 +73,15 @@ function _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
 
     seed = if _use_small_parameter_expansion(c)
         _with_swprecision(bits+64) do
-            z = _working_parameter(c)
             spherical = _SWFloat(n)*(n+1)
-            z isa Real ? spherical : complex(spherical, zero(_SWFloat))
+            c isa Real ? spherical : complex(spherical, zero(_SWFloat))
         end
     else
-        eigenvalue(m, n, c; spheroid, precision)
+        # Native bandwidths must be nonnegative; Julia retains signed sensitivities.
+        eigenvalue(m, n, c isa Real ? abs(c) : c; spheroid, precision)
     end
     isfinite(seed) || error("Native eigenvalue seed is not finite")
-    # A tighter rtol must also increase working precision, rather than merely
-    # making a fixed-precision solver fail its stopping test.
+    # Tighter tolerances also need more working bits.
     workbits = _with_swprecision(max(192, bits+64)) do
         requested = rtol === nothing ? bits : max(bits, ceil(Int, -log2(_SWFloat(rtol))))
         max(192, requested+64)
@@ -96,7 +91,7 @@ function _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
         result, stable = _with_swprecision(workbits) do
             tolerance = ldexp(one(_SWFloat), -bits-8)
             rtol === nothing || (tolerance = min(tolerance, _SWFloat(rtol)/256))
-            result = _arbitrary_truncation_plan(m, n, c, spheroid, seed, tolerance,
+            result = _refine_coefficient_truncation(m, n, c, spheroid, seed, tolerance,
                 max_terms, derivatives)
             # Guard against convergence to a different native-selected branch.
             if !_use_small_parameter_expansion(c)
@@ -106,7 +101,7 @@ function _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
                     error("Refined eigenvalue disagrees with the selected native mode")
             end
             stable = previous !== nothing &&
-                     _arbitrary_plan_change(previous, result, derivatives) <= tolerance
+                     _align_and_measure_eigenpair_change!(previous, result, derivatives) <= tolerance
             result, stable
         end
         if stable
@@ -120,26 +115,26 @@ function _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
     error("Requested precision could not be confirmed by working-precision refinement")
 end
 
-function _arbitrary_dmn(m, n, c; spheroid, precision, normalize, rtol,
+function _dmn_at_precision(m, n, c; spheroid, precision, normalize, rtol,
         max_terms, derivatives, basis, precision_bits)
     bits = _validate_precision_bits(precision_bits)
-    plan = _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
+    eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision, bits,
         rtol, max_terms, derivatives)
-    return _with_swprecision(Base.precision(real(plan.lambda))) do
+    return _with_swprecision(Base.precision(real(eigenpair.lambda))) do
         phase = _use_small_parameter_expansion(c) ?
-                (real(plan.v[(n-m)÷2+1]) < 0 ? -1 : 1) :
-                _coefficient_phase(plan, precision)
+                (real(eigenpair.v[(n-m)÷2+1]) < 0 ? -1 : 1) :
+                _coefficient_phase(c isa Real ? (; eigenpair..., c = abs(eigenpair.c)) : eigenpair,
+            precision)
         scale = phase*(normalize ? one(_SWFloat) : sqrt(_ferrers_norm2(m, n, _SWFloat)))
-        factors = basis === :orthonormal ? fill(scale, plan.terms) :
-                  [scale/sqrt(_ferrers_norm2(m, l, _SWFloat)) for l in plan.degrees]
-        # Explicit destinations preserve requested output bits without changing
-        # Julia's process-wide defaults (including on Julia 1.10 and 1.11).
-        output(x) = _precision_output(x, bits)
-        (; coefficients = output.(plan.v .* factors),
-            dcoefficients_dc = derivatives ? output.(plan.dv .* factors) : nothing,
-            degrees = copy(plan.degrees), eigenvalue = output(plan.lambda),
-            deigenvalue_dc = derivatives ? output(plan.dlambda) : nothing,
-            terms = plan.terms, tail_norm = output(plan.tail),
-            relative_change = output(plan.relative_change), converged = true)
+        factors = basis === :orthonormal ? fill(scale, eigenpair.terms) :
+                  [scale/sqrt(_ferrers_norm2(m, l, _SWFloat)) for l in eigenpair.degrees]
+        # Explicit destinations preserve requested bits without changing global settings.
+        round_to_bigfloat(x) = _round_to_bigfloat(x, bits)
+        (; coefficients = round_to_bigfloat.(eigenpair.v .* factors),
+            dcoefficients_dc = derivatives ? round_to_bigfloat.(eigenpair.dv .* factors) : nothing,
+            degrees = copy(eigenpair.degrees), eigenvalue = round_to_bigfloat(eigenpair.lambda),
+            deigenvalue_dc = derivatives ? round_to_bigfloat(eigenpair.dlambda) : nothing,
+            terms = eigenpair.terms, tail_norm = round_to_bigfloat(eigenpair.tail),
+            relative_change = round_to_bigfloat(eigenpair.relative_change), converged = true)
     end
 end

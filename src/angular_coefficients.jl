@@ -433,7 +433,7 @@ function dmn(m::Integer, n::Integer, c::Union{Real, Complex};
         rtol = nothing, max_terms::Integer = 512, derivatives::Bool = true,
         basis::Symbol = :ferrers, precision_bits = nothing)
     _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, basis)
-    precision_bits === nothing || return _arbitrary_dmn(m, n, c; spheroid, precision,
+    precision_bits === nothing || return _dmn_at_precision(m, n, c; spheroid, precision,
         normalize, rtol, max_terms, derivatives, basis, precision_bits)
     # Sensitivities retain the guarded solver and its existing public defaults.
     if !derivatives
@@ -494,7 +494,7 @@ function dmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex
     _validate_coefficient_options(
         m, last(n), c, spheroid, precision, rtol, max_terms, basis)
     precision_bits === nothing || return [
-        _arbitrary_dmn(m, degree, c; spheroid, precision, normalize, rtol,
+        _dmn_at_precision(m, degree, c; spheroid, precision, normalize, rtol,
             max_terms, derivatives, basis, precision_bits) for degree in n]
     # Request one native degree block when parameter sensitivities are unnecessary.
     native = derivatives ? nothing :
