@@ -416,16 +416,9 @@ with complex counterparts for complex `c`. `rtol` controls coefficient-vector
 convergence, not relative accuracy of every tiny coefficient. An unresolved
 mode or exhausted `max_terms` raises an error.
 
-`precision_bits=p` requests arbitrary precision for all numeric result fields,
-which become `BigFloat` (or complex counterparts) with exactly `p` bits.
-It refines native mode seeds using guarded Julia arithmetic, increasing expansion
-lengths and comparing two working precisions. Inputs are promoted directly at
-working precision; their existing rounding cannot be undone. The target is of
-order `2^-p` in orthonormal coefficient-vector norm and mixed absolute/relative
-eigenvalue and sensitivity accuracy. `rtol` may tighten this target, never relax
-it. Tiny coefficients need not have `p` accurate relative bits. Exhausting the
-refinement limits raises an error; this is not a rigorous error bound or a
-correct-rounding guarantee. Omitting `precision_bits` preserves native defaults.
+`precision_bits=p` refines the expansion in Julia and returns `p`-bit `BigFloat`
+components, including sensitivities. `rtol` may tighten, but cannot relax, its
+normwise accuracy target. See [Precision and outputs](@ref precision-and-outputs).
 
 `basis=:orthonormal` uses `P_l^m / sqrt(2(l+m)!/((2l+1)(l-m)!))` instead.
 The `normalize` keyword specifies the wave function normalization independently
