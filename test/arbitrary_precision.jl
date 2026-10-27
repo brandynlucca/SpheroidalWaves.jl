@@ -1,12 +1,6 @@
 using SpheroidalWaves, Test
 
-# Independent mpmath 1.3.0 dense eigenpairs from
-# scripts/generate_accuracy_references.py::legendre_mode(0, 0, c, sigma, terms).
-# Refined (decimal digits, terms): (110, 24), (140, 24), (140, 32).
-# All four displayed quantities changed by less than 2e-110 under precision
-# refinement and 2e-140 under truncation refinement. The native Fortran and
-# Julia inverse-iteration solvers are not used to generate these references.
-# Coefficients use the default Ferrers basis and angular normalization.
+# Independent mpmath 1.3.0 references: scripts/generate_accuracy_references.py::legendre_mode, (dps, terms) = (110, 24), (140, 24), (140, 32).
 const ARBITRARY_PRECISION_REFERENCES = (
     (spheroid = :prolate, c = 1//1, values = (
         ("0.319000055146892739783981985871826494103814376510741729114970059238053009763670379743178473870059809926688", "0.0"),
@@ -65,12 +59,39 @@ const ARBITRARY_PRECISION_REFERENCES = (
                               for (a, b) in zip(result.coefficients[1:3], reference[2:4]))
                     push!(errors, abs(lambda-reference[1]))
                 end
-                # More requested bits must improve measured accuracy, not only
-                # produce a wider container holding a native-precision value.
+                # Requested bits must improve measured accuracy beyond native precision.
                 @test errors[1] < big"1e-45"
                 @test errors[2] < errors[1]*BigFloat(2)^(-80)
                 native = eigenvalue(0, 0, c; spheroid, precision = :quad)
                 @test errors[1]*big"1e6" < abs(native-reference[1])
+                # Either native precision selects the branch without capping requested accuracy.
+                quad_seed = eigenvalue(0, 0, c; spheroid, precision = :quad,
+                    precision_bits = 160)
+                quad_coefficients = dmn(0, 0, c; spheroid, precision = :quad,
+                    precision_bits = 160)
+                @test precision(real(quad_seed)) == 160
+                @test isapprox(quad_seed, reference[1]; rtol = BigFloat(2)^(-157))
+                @test all(isapprox(a, b; rtol = BigFloat(2)^(-156)) for (a, b) in
+                    zip(quad_coefficients.coefficients[1:3], reference[2:4]))
+            end
+        end
+
+        @testset "Signed real parameters" begin
+            for spheroid in (:prolate, :oblate)
+                positive = dmn(1, 3, 2; spheroid, precision_bits = 160)
+                negative = dmn(1, 3, -2; spheroid, precision_bits = 160)
+                @test positive.degrees == negative.degrees
+                @test positive.eigenvalue == negative.eigenvalue
+                @test positive.coefficients == negative.coefficients
+                @test positive.deigenvalue_dc == -negative.deigenvalue_dc
+                @test positive.dcoefficients_dc == -negative.dcoefficients_dc
+                @test eigenvalue(1, 3, -2; spheroid, precision_bits = 160) == positive.eigenvalue
+                for value in (negative.eigenvalue, negative.deigenvalue_dc,
+                    negative.coefficients..., negative.dcoefficients_dc...,
+                    negative.tail_norm, negative.relative_change)
+                    @test value isa BigFloat
+                    @test precision(value) == 160
+                end
             end
         end
 
@@ -93,8 +114,7 @@ const ARBITRARY_PRECISION_REFERENCES = (
                 @test abs(sum(unit.coefficients .* unit.dcoefficients_dc .* norms)) < tolerance
                 @test isapprox(unit.deigenvalue_dc, plain.deigenvalue_dc; rtol = tolerance)
 
-                # An independent high-precision central difference checks both
-                # sensitivities, with step and roundoff errors below 160 bits.
+                # Independent central differences have step and roundoff errors below 160 bits.
                 h = BigFloat(2)^(-100)
                 lower = dmn(1, 2, c-h; spheroid, precision_bits = 320, derivatives = false)
                 upper = dmn(1, 2, c+h; spheroid, precision_bits = 320, derivatives = false)
@@ -106,6 +126,24 @@ const ARBITRARY_PRECISION_REFERENCES = (
                 @test lower.dcoefficients_dc === nothing
                 @test lower.deigenvalue_dc === nothing
             end
+        end
+
+        @testset "Large parameter refinement beyond 512 bits" begin
+            result = dmn(0, 0, 50; precision_bits = 512)
+            reference = dmn(0, 0, 50; precision_bits = 640)
+            count = min(result.terms, reference.terms)
+            tolerance = BigFloat(2)^(-508)
+            @test result.converged
+            @test precision(result.eigenvalue) == 512
+            @test all(x -> precision(x) == 512, result.coefficients)
+            @test result.tail_norm <= BigFloat(2)^(-512)
+            @test result.relative_change <= BigFloat(2)^(-512)
+            @test isapprox(result.eigenvalue, reference.eigenvalue; rtol = tolerance)
+            @test isapprox(result.coefficients[1:count], reference.coefficients[1:count];
+                rtol = tolerance)
+            @test isapprox(result.dcoefficients_dc[1:count], reference.dcoefficients_dc[1:count];
+                rtol = tolerance)
+            @test isapprox(result.deigenvalue_dc, reference.deigenvalue_dc; rtol = tolerance)
         end
 
         @testset "Static limits and degree ranges" begin
@@ -132,8 +170,7 @@ const ARBITRARY_PRECISION_REFERENCES = (
         end
 
         @testset "Input fidelity, rounding, cache ownership, and tasks" begin
-            # The stored parameter has information above both native quad and
-            # the ambient precision used by this call. It must reach the solve.
+            # Preserve stored input bits above both native quad and ambient precision.
             delta = BigFloat(2)^(-180)
             c = 1+delta
             center = dmn(0, 0, 1; precision_bits = 256)
@@ -195,16 +232,25 @@ const ARBITRARY_PRECISION_REFERENCES = (
             @test_throws ArgumentError dmn(0, 0, 1; precision_bits = 160, basis = :invalid)
             @test_throws ArgumentError dmn(0, 0, 1; precision_bits = 160, rtol = 0)
             @test_throws ArgumentError dmn(0, 0, 1; precision_bits = 160, rtol = NaN)
-            @test_throws Exception eigenvalue(0, 0, 1; precision_bits = 256, max_terms = 1)
-            @test_throws Exception dmn(0, 0, 1; precision_bits = 256, max_terms = 1)
+            @test_throws r"max_terms" eigenvalue(0, 0, 1; precision_bits = 256, max_terms = 1)
+            @test_throws r"max_terms" dmn(0, 0, 1; precision_bits = 256, max_terms = 1)
             # A loose coefficient tolerance must not weaken an explicit bit request.
             strict = dmn(0, 0, 1; precision_bits = 160)
             loose = dmn(0, 0, 1; precision_bits = 160, rtol = 0.1)
             @test isapprox(strict.coefficients, loose.coefficients; rtol = BigFloat(2)^(-155))
+            # A tighter tolerance refines calculations while retaining the requested output width.
+            tolerance = BigFloat(2)^(-250)
+            tight = dmn(0, 0, 1; precision_bits = 160, rtol = tolerance)
+            @test tight.tail_norm <= tolerance
+            @test tight.relative_change <= tolerance
+            @test tight.terms >= strict.terms
+            @test precision(tight.eigenvalue) == 160
+            @test precision(tight.tail_norm) == 160
+            @test precision(tight.relative_change) == 160
+            @test isapprox(tight.eigenvalue, strict.eigenvalue; rtol = BigFloat(2)^(-156))
             @test eigenvalue(0, 0, 1) isa Float64
             @test eigenvalue(0, 0, 1; precision = :quad) isa BigFloat
         end
     end
     @test (precision(BigFloat), rounding(BigFloat)) == original
 end
-
