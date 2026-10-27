@@ -61,7 +61,7 @@ d = dmn(1, 2, 5//4; precision_bits=256, normalize=true)
 precision(lambda) # 256
 ~~~
 
-Outputs use `p`-bit `BigFloat` components regardless of ambient precision. Inputs retain their existing information; use rationals or sufficiently precise `BigFloat` inputs. Guarded Julia arithmetic refines native seeds and expansion lengths; failure within `max_terms` (default 512) throws. `rtol` may tighten the target. Native routines still limit branch selection. Defaults stay unchanged; arbitrary precision guarantees neither rigorous error bounds nor correct rounding.
+Outputs use `p`-bit `BigFloat` components regardless of ambient precision. Inputs retain their existing information; use rationals or sufficiently precise `BigFloat` inputs. Guarded Julia arithmetic refines native seeds and expansion lengths; failure within `max_terms` (default 512) throws. The normwise target is `2^-p`; `rtol` may tighten it. Native routines still limit branch selection. Defaults stay unchanged; arbitrary precision guarantees neither rigorous error bounds nor correct rounding.
 
 ## Parallel evaluation
 
