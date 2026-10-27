@@ -39,6 +39,7 @@ module prolate_parameters
 end module prolate_parameters
 
 module prolate_swf
+ use, intrinsic :: iso_fortran_env, only: int64
  use prolate_parameters
 
 ! ---------------------------------------------------------------------------
@@ -51,7 +52,11 @@ module prolate_swf
  integer, parameter :: pleg_cache_slots = 48
  integer, parameter :: qleg_cache_slots = 48
 
+ integer(int64), save :: auxiliary_cache_limit_bytes = 67108864_int64
+!$omp threadprivate(auxiliary_cache_limit_bytes)
+
  type :: pleg_cache_entry
+   integer(int64) :: bytes = 0_int64
    logical :: valid = .false.
    integer :: m = -1
    integer :: iopd = -1
@@ -70,6 +75,7 @@ module prolate_swf
  end type
 
  type :: qleg_cache_entry
+   integer(int64) :: bytes = 0_int64
    logical :: valid = .false.
    integer :: m = -1
    integer :: lnum = 0
@@ -88,6 +94,7 @@ module prolate_swf
  end type
 
  type :: gauss_cache_entry
+   integer(int64) :: bytes = 0_int64
    logical :: valid = .false.
    integer :: ndec = 0
    integer :: n = 0
@@ -103,6 +110,50 @@ module prolate_swf
 !$omp threadprivate(pleg_cache_next, qleg_cache_next)
 
  contains
+
+  logical function add_cache_bytes(bytes, element_bytes, rows, columns) result(fits)
+    integer(int64), intent(inout) :: bytes
+    integer(int64), intent(in) :: element_bytes
+    integer, intent(in) :: rows
+    integer, optional, intent(in) :: columns
+    integer(int64) :: count, row_bytes, available
+    fits = .false.
+    if(bytes<0.or.bytes>auxiliary_cache_limit_bytes.or.element_bytes<=0.or.rows<0) return
+    count = 1_int64
+    if(present(columns)) count = int(columns,int64)
+    if(count<0) return
+    available = auxiliary_cache_limit_bytes-bytes
+    if(int(rows,int64)>available/element_bytes) return
+    row_bytes = int(rows,int64)*element_bytes
+    if(row_bytes>0) then
+      if(count>available/row_bytes) return
+    end if
+    bytes = bytes+row_bytes*count
+    fits = .true.
+  end function
+
+  logical function reserve_cache_bytes(requested) result(fits)
+    integer(int64), intent(in) :: requested
+    integer(int64) :: retained
+    integer :: slot
+    fits = .false.
+    if(requested<0.or.requested>auxiliary_cache_limit_bytes) return
+    retained = gauss_cache%bytes+sum(pleg_cache%bytes)
+    retained = retained+sum(qleg_cache%bytes)
+    if(retained>auxiliary_cache_limit_bytes-requested) then
+      do slot=1,pleg_cache_slots
+        call clear_pleg_cache_slot(slot)
+      end do
+      do slot=1,qleg_cache_slots
+        call clear_qleg_cache_slot(slot)
+      end do
+      if(allocated(gauss_cache%x)) deallocate(gauss_cache%x)
+      if(allocated(gauss_cache%w)) deallocate(gauss_cache%w)
+      gauss_cache%bytes = 0_int64
+      gauss_cache%valid = .false.
+    end if
+    fits = .true.
+  end function
 
   logical function cache_real_equal(a, b)
     real(knd), intent(in) :: a, b
@@ -132,6 +183,7 @@ module prolate_swf
     integer, intent(in) :: idx
 
     ! Reset and deallocate one cache slot before it is reused.
+    pleg_cache(idx)%bytes = 0_int64
     pleg_cache(idx)%valid = .false.
     pleg_cache(idx)%m = -1
     pleg_cache(idx)%iopd = -1
@@ -210,9 +262,18 @@ module prolate_swf
     real(knd), intent(in) :: barg(maxt), pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt), alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp)
     integer, intent(in) :: ipdnorm(maxt), ipnorm(maxt)
     integer :: idx
+    integer(int64) :: requested_bytes, real_bytes, integer_bytes
 
     ! Reuse a matching slot when possible; otherwise take a free or round-robin
     ! replacement slot.
+    requested_bytes = 0_int64
+    real_bytes = storage_size(1.0_knd)/8
+    integer_bytes = storage_size(1)/8
+    if(.not.add_cache_bytes(requested_bytes,real_bytes,narg)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes,maxt,lim)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes+2*integer_bytes,maxt)) return
+    if(.not.add_cache_bytes(requested_bytes,8*real_bytes,lim)) return
+    if(.not.reserve_cache_bytes(requested_bytes)) return
     idx = find_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp)
     if(idx == 0) then
       idx = 1
@@ -229,21 +290,22 @@ module prolate_swf
 
     call clear_pleg_cache_slot(idx)
     allocate(pleg_cache(idx)%barg(narg))
-    allocate(pleg_cache(idx)%pr(maxt, maxp))
-    allocate(pleg_cache(idx)%pdr(maxt, maxp))
+    allocate(pleg_cache(idx)%pr(maxt, lim))
+    allocate(pleg_cache(idx)%pdr(maxt, lim))
     allocate(pleg_cache(idx)%pdnorm(maxt))
     allocate(pleg_cache(idx)%pnorm(maxt))
     allocate(pleg_cache(idx)%ipdnorm(maxt))
     allocate(pleg_cache(idx)%ipnorm(maxt))
-    allocate(pleg_cache(idx)%alpha(maxp))
-    allocate(pleg_cache(idx)%beta(maxp))
-    allocate(pleg_cache(idx)%gamma(maxp))
-    allocate(pleg_cache(idx)%coefa(maxp))
-    allocate(pleg_cache(idx)%coefb(maxp))
-    allocate(pleg_cache(idx)%coefc(maxp))
-    allocate(pleg_cache(idx)%coefd(maxp))
-    allocate(pleg_cache(idx)%coefe(maxp))
+    allocate(pleg_cache(idx)%alpha(lim))
+    allocate(pleg_cache(idx)%beta(lim))
+    allocate(pleg_cache(idx)%gamma(lim))
+    allocate(pleg_cache(idx)%coefa(lim))
+    allocate(pleg_cache(idx)%coefb(lim))
+    allocate(pleg_cache(idx)%coefc(lim))
+    allocate(pleg_cache(idx)%coefd(lim))
+    allocate(pleg_cache(idx)%coefe(lim))
 
+    pleg_cache(idx)%bytes = requested_bytes
     pleg_cache(idx)%valid = .true.
     pleg_cache(idx)%m = m
     pleg_cache(idx)%iopd = iopd
@@ -304,6 +366,7 @@ module prolate_swf
   subroutine clear_qleg_cache_slot(idx)
     integer, intent(in) :: idx
 
+    qleg_cache(idx)%bytes = 0_int64
     qleg_cache(idx)%valid = .false.
     qleg_cache(idx)%m = -1
     qleg_cache(idx)%lnum = 0
@@ -351,7 +414,15 @@ module prolate_swf
     real(knd), intent(in) :: x1, qdr(maxq), qdml, qdl(lnum), qr(maxq), qml, ql(lnum), termpq
     integer, intent(in) :: iqdl(lnum), iql(lnum)
     integer :: idx
+    integer(int64) :: requested_bytes, real_bytes, integer_bytes
 
+    requested_bytes = 0_int64
+    real_bytes = storage_size(1.0_knd)/8
+    integer_bytes = storage_size(1)/8
+    if(.not.add_cache_bytes(requested_bytes,real_bytes,4)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes,maxq)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes+2*integer_bytes,lnum)) return
+    if(.not.reserve_cache_bytes(requested_bytes)) return
     idx = find_qleg_cache(m, lnum, limq, maxq, x1, ndec)
     if(idx == 0) then
       idx = 1
@@ -374,6 +445,7 @@ module prolate_swf
     allocate(qleg_cache(idx)%iqdl(lnum))
     allocate(qleg_cache(idx)%iql(lnum))
 
+    qleg_cache(idx)%bytes = requested_bytes
     qleg_cache(idx)%valid = .true.
     qleg_cache(idx)%m = m
     qleg_cache(idx)%lnum = lnum
@@ -427,7 +499,8 @@ module prolate_swf
     integer, intent(in) :: ndec, n
     real(knd), intent(out) :: x(n), w(n)
 
-        if(gauss_cache%valid) then
+        integer(int64) :: requested_bytes, real_bytes
+    if(gauss_cache%valid) then
             if(gauss_cache%ndec == ndec .and. gauss_cache%n == n) then
                 x(1:n) = gauss_cache%x(1:n)
                 w(1:n) = gauss_cache%w(1:n)
@@ -435,12 +508,19 @@ module prolate_swf
             end if
             if(allocated(gauss_cache%x)) deallocate(gauss_cache%x)
             if(allocated(gauss_cache%w)) deallocate(gauss_cache%w)
+      gauss_cache%bytes = 0_int64
+      gauss_cache%valid = .false.
         end if
 
         call gauss(ndec, n, x, w)
-        allocate(gauss_cache%x(n))
+        requested_bytes = 0_int64
+    real_bytes = storage_size(1.0_knd)/8
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes,n)) return
+    if(.not.reserve_cache_bytes(requested_bytes)) return
+    allocate(gauss_cache%x(n))
         allocate(gauss_cache%w(n))
-        gauss_cache%valid = .true.
+        gauss_cache%bytes = requested_bytes
+    gauss_cache%valid = .true.
         gauss_cache%ndec = ndec
         gauss_cache%n = n
         gauss_cache%x(1:n) = x(1:n)
@@ -670,6 +750,7 @@ module prolate_swf
     maxmp = maxm +5
     maxt = 1
     jnenmax = 10
+    if(ioprad /= 2) jnenmax = 1
     if(iopang /= 0) maxt = narg
 
      call main (mmin, minc, mnum, lnum, c, ioprad, iopang, iopnorm, minacc, &
