@@ -485,6 +485,7 @@ if TEST_GROUP in ("all", "api-and-precision")
 
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
+    include("arbitrary_precision.jl")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end

@@ -52,11 +52,11 @@ function _coefficient_matrix(m, n, c, terms, spheroid; derivatives = true)
     return degrees, Tridiagonal(off, diagonal, copy(off)), derivative
 end
 
-function _solve_coefficient_mode(m, n, c, terms, spheroid, seed; derivatives = true)
+function _solve_coefficient_mode(m, n, c, terms, spheroid, seed; derivatives = true,
+        target = eps(_SWFloat)^(2//3))
     degrees, H, dH = _coefficient_matrix(m, n, c, terms, spheroid; derivatives)
     v = zeros(eltype(H), terms)
     v[min(terms, (n-m)÷2+1)] = 1
-    target = eps(_SWFloat)^(2//3)
     shift = target^(1//2)*(1+abs(seed))
     shifted = Tridiagonal(copy(H.dl), H.d .- (seed+shift), copy(H.du))
     # The inverse-iteration shift stays fixed, so reuse its tridiagonal factorization.
@@ -396,7 +396,7 @@ end
 """
     dmn(m, n, c; spheroid=:prolate, precision=:double,
                            normalize=false, rtol=nothing, max_terms=512,
-                           derivatives=true, basis=:ferrers)
+                           derivatives=true, basis=:ferrers, precision_bits=nothing)
 
 Return the Ferrers expansion of `smn(m,n,c,x; kind=1, normalize, ...)`:
 `S(x) = sum(coefficients[i] * P_degrees[i]^m(x))`, with Condon–Shortley phase
@@ -416,6 +416,17 @@ with complex counterparts for complex `c`. `rtol` controls coefficient-vector
 convergence, not relative accuracy of every tiny coefficient. An unresolved
 mode or exhausted `max_terms` raises an error.
 
+`precision_bits=p` requests arbitrary precision for all numeric result fields,
+which become `BigFloat` (or complex counterparts) with exactly `p` bits.
+It refines native mode seeds using guarded Julia arithmetic, increasing expansion
+lengths and comparing two working precisions. Inputs are promoted directly at
+working precision; their existing rounding cannot be undone. The target is of
+order `2^-p` in orthonormal coefficient-vector norm and mixed absolute/relative
+eigenvalue and sensitivity accuracy. `rtol` may tighten this target, never relax
+it. Tiny coefficients need not have `p` accurate relative bits. Exhausting the
+refinement limits raises an error; this is not a rigorous error bound or a
+correct-rounding guarantee. Omitting `precision_bits` preserves native defaults.
+
 `basis=:orthonormal` uses `P_l^m / sqrt(2(l+m)!/((2l+1)(l-m)!))` instead.
 The `normalize` keyword specifies the wave function normalization independently
 of this basis choice. `derivatives=false` omits parameter sensitivities and
@@ -427,8 +438,10 @@ Existing libraries without that capability use the guarded Julia solver.
 function dmn(m::Integer, n::Integer, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         rtol = nothing, max_terms::Integer = 512, derivatives::Bool = true,
-        basis::Symbol = :ferrers)
+        basis::Symbol = :ferrers, precision_bits = nothing)
     _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, basis)
+    precision_bits === nothing || return _arbitrary_dmn(m, n, c; spheroid, precision,
+        normalize, rtol, max_terms, derivatives, basis, precision_bits)
     # Sensitivities retain the guarded solver and its existing public defaults.
     if !derivatives
         native = _native_prolate_coefficient_block(m, n:n, c, spheroid, precision,
@@ -483,10 +496,13 @@ cases or insufficient native accuracy use the guarded coefficient solver.
 function dmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         rtol = nothing, max_terms::Integer = 512, derivatives::Bool = true,
-        basis::Symbol = :ferrers)
+        basis::Symbol = :ferrers, precision_bits = nothing)
     _validate_degree_range(m, n, [0], spheroid, precision)
     _validate_coefficient_options(
         m, last(n), c, spheroid, precision, rtol, max_terms, basis)
+    precision_bits === nothing || return [
+        _arbitrary_dmn(m, degree, c; spheroid, precision, normalize, rtol,
+            max_terms, derivatives, basis, precision_bits) for degree in n]
     # Request one native degree block when parameter sensitivities are unnecessary.
     native = derivatives ? nothing :
              _native_prolate_coefficient_block(m, n, c, spheroid,

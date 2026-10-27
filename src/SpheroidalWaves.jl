@@ -380,6 +380,7 @@ include("accuracy.jl")
 include("diagnostics.jl")
 include("scaled_values.jl")
 include("angular_coefficients.jl")
+include("arbitrary_precision.jl")
 include("angular_second_kind.jl")
 include("parameter_derivatives.jl")
 include("radial_parameter_derivatives.jl")
@@ -1295,7 +1296,8 @@ end
 
 """
     eigenvalue(m, n, c; spheroid=:prolate, precision=:double,
-               operator=:separation, form=:value)
+               operator=:separation, form=:value, precision_bits=nothing,
+               max_terms=512)
 
 Compute the spheroidal separation constant λₘₙ(c), or an integral-operator eigenvalue.
 
@@ -1323,6 +1325,17 @@ For the separation constant with complex `c`, follow degree `n` from `real(c)` v
 the same mode used by `smn` and `rmn`. Use `eigenvalue_sweep` with a complex
 vector for continuation along another path; closed paths can exchange modes.
 
+For separation constants, `precision_bits=p` requests arbitrary precision and
+returns a `BigFloat` (or complex counterpart) with exactly `p` bits. Native
+`precision` selects the initial mode only; the Julia coefficient solver refines
+the eigenpair with guard bits and increasing expansion lengths up to `max_terms`.
+Inputs are converted directly to working precision, independently of the ambient
+`BigFloat` precision. Existing floating inputs retain their original rounding.
+Convergence targets mixed absolute/relative error of order `2^-p` (scaled by
+`1+abs(λ)`) and is checked at two working precisions. Failure raises an error.
+This is not a rigorous error bound or a correct-rounding guarantee. Integral
+operators and other public functions do not yet accept this precision request.
+
 Args:
     m, n, c: spheroidal parameters
     spheroid: `:prolate` or `:oblate`
@@ -1334,10 +1347,21 @@ Returns:
 """
 function eigenvalue(m::Integer, n::Integer, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double,
-        operator::Symbol = :separation, form::Symbol = :value)
+        operator::Symbol = :separation, form::Symbol = :value,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     operator in (:separation, :concentration, :fourier) ||
         throw(ArgumentError("operator must be :separation, :concentration or :fourier"))
+    if precision_bits !== nothing
+        operator === :separation && form === :value ||
+            throw(ArgumentError("precision_bits currently supports only separation eigenvalues with form=:value"))
+        _validate_coefficient_options(m, n, c, spheroid, precision, nothing,
+            max_terms, :orthonormal)
+        bits = _validate_precision_bits(precision_bits)
+        plan = _arbitrary_coefficient_plan(m, n, c, spheroid, precision, bits,
+            nothing, max_terms, false)
+        return _precision_output(plan.lambda, bits)
+    end
     operator!==:separation &&
         return _integral_eigenvalue(m, n, c, spheroid, precision, operator, form)
     form===:value ||
