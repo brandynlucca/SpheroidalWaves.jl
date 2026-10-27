@@ -56,6 +56,9 @@ quad_result = rmn(1, 2, 1.5, [1.1, 1.2]; precision=:quad)
 
 # Characteristic value
 lambda = eigenvalue(1, 2, 1.5)
+
+# Arbitrary-precision separation eigenvalue
+lambda256 = eigenvalue(1, 2, 3//2; precision_bits=256)
 ```
 
 Pass arrays to `smn` and `rmn` for batch evaluation. Calls are [thread-safe](https://brandynlucca.github.io/SpheroidalWaves.jl/dev/math-and-usage/).
