@@ -1325,16 +1325,10 @@ For the separation constant with complex `c`, follow degree `n` from `real(c)` v
 the same mode used by `smn` and `rmn`. Use `eigenvalue_sweep` with a complex
 vector for continuation along another path; closed paths can exchange modes.
 
-For separation constants, `precision_bits=p` requests arbitrary precision and
-returns a `BigFloat` (or complex counterpart) with exactly `p` bits. Native
-`precision` selects the initial mode only; the Julia coefficient solver refines
-the eigenpair with guard bits and increasing expansion lengths up to `max_terms`.
-Inputs are converted directly to working precision, independently of the ambient
-`BigFloat` precision. Existing floating inputs retain their original rounding.
-Convergence targets mixed absolute/relative error of order `2^-p` (scaled by
-`1+abs(λ)`) and is checked at two working precisions. Failure raises an error.
-This is not a rigorous error bound or a correct-rounding guarantee. Integral
-operators and other public functions do not yet accept this precision request.
+`precision_bits=p` refines separation constants in Julia and returns `p`-bit
+`BigFloat` components. `max_terms` bounds the expansion; failed convergence
+throws. Integral operators are unsupported.
+See [Precision and outputs](@ref precision-and-outputs) for accuracy and native mode limits.
 
 Args:
     m, n, c: spheroidal parameters
