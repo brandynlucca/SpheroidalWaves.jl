@@ -1,6 +1,7 @@
 # Mathematical tools
 
 All examples use ordinary numeric arguments. Add `precision=:quad` for quad precision.
+Separation eigenvalues and `dmn` additionally accept `precision_bits` for arbitrary precision; see [Precision and outputs](@ref precision-and-outputs).
 
 ## Expansion coefficients and connection factors
 
@@ -37,6 +38,7 @@ results and shares native expansion work when available.
 ```julia
 coefficients = dmn(1, 2:8, 10.0; normalize=true,
                    basis=:orthonormal, derivatives=false, precision=:quad)
+dmn(1, 2, 5//4; precision_bits=256)
 ```
 
 ## Combined evaluation
@@ -88,6 +90,7 @@ The angular and radial equations share `λₘₙ(c)`, with
 ~~~julia
 eigenvalue(1, 2, 1.25; precision=:quad)
 eigenvalue(1, 2, 1.25; spheroid=:oblate, precision=:quad)
+eigenvalue(1, 2, 5//4; precision_bits=256)
 ~~~
 
 ### Concentration and finite Fourier eigenvalues

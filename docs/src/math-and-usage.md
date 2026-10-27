@@ -22,7 +22,7 @@ The derivative is with respect to the coordinate.
 
 Input precision is what the arguments retain, calculation precision is the arithmetic used, output precision is what returned numbers store, and accuracy is agreement with the mathematical result.
 
-`precision=:quad` uses fixed native quad arithmetic (113 significand bits, about 34 decimal digits). The caller's `BigFloat` precision and rounding control output components and some Julia calculations. Increasing them does not increase native precision or guarantee more accurate digits. `scaled=true` extends range without adding accuracy.
+Without `precision_bits`, `precision=:quad` uses fixed native quad arithmetic (113 significand bits, about 34 decimal digits). The caller's `BigFloat` precision and rounding control output components and some Julia calculations. Increasing them does not increase native precision or guarantee more accurate digits. `scaled=true` extends range without adding accuracy.
 
 | Function | Effect of `BigFloat` settings with `precision=:quad` |
 |:--|:--|
@@ -51,7 +51,17 @@ end
 
 The difference measures agreement, not an accuracy guarantee. `accuracy` provides value estimates, not rigorous bounds or derivative certification.
 
-A future arbitrary-precision request could specify a bit count explicitly while preserving `:double` defaults and existing `:quad` behavior. It would require refinement beyond native quad accuracy. This capability is not currently available, and arbitrary precision alone guarantees neither rigorous bounds nor correct rounding.
+### Explicit arbitrary precision
+
+Only separation `eigenvalue` and `dmn` accept `precision_bits=p` (`p≥2`), for both geometries and real or complex inputs.
+
+~~~julia
+lambda = eigenvalue(1, 2, 5//4; precision_bits=256)
+d = dmn(1, 2, 5//4; precision_bits=256, normalize=true)
+precision(lambda) # 256
+~~~
+
+Outputs use `p`-bit `BigFloat` components regardless of ambient precision. Inputs retain their existing information; use rationals or sufficiently precise `BigFloat` inputs. Guarded Julia arithmetic refines native seeds and expansion lengths; failure within `max_terms` (default 512) throws. `rtol` may tighten the target. Native routines still limit branch selection. Defaults stay unchanged; arbitrary precision guarantees neither rigorous error bounds nor correct rounding.
 
 ## Parallel evaluation
 
