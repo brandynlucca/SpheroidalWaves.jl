@@ -45,6 +45,7 @@ if TEST_GROUP in ("all", "api-and-precision")
         @testset "Local Backend Configuration Does Not Evaluate Generated Code" begin
             @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_DOUBLE)
             @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
+            @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_MPFR)
         end
 
         @testset "Precompiled package runtime state" begin
@@ -61,12 +62,17 @@ if TEST_GROUP in ("all", "api-and-precision")
                 @assert isapprox(only(r.derivative), -29.533616783570416; rtol=1e-13)
             end
             @assert !isempty(SW._backend_handles)
+            if haskey(ENV, "SPHEROIDALWAVES_LIBRARY_MPFR")
+                @assert SW.backend_library(; precision=:mpfr) == ENV["SPHEROIDALWAVES_LIBRARY_MPFR"]
+            end
             """
             command = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) -e $code`
             command = addenv(command,
                 "SPHEROIDALWAVES_LIBRARY_DOUBLE" => SpheroidalWaves.backend_library(),
                 "SPHEROIDALWAVES_LIBRARY_QUAD" =>
                     SpheroidalWaves.backend_library(; precision = :quad))
+            mpfr_library = SpheroidalWaves.backend_library(; precision = :mpfr)
+            mpfr_library === nothing || (command = addenv(command, "SPHEROIDALWAVES_LIBRARY_MPFR" => mpfr_library))
             @test success(command)
         end
 
@@ -81,14 +87,19 @@ if TEST_GROUP in ("all", "api-and-precision")
                 missing = joinpath(tempdir(), "spheroidalwaves-nonexistent-library")
                 @test_logs (:warn, r"does not exist") !SW._set_backend_from_candidate(missing, :double, "test")
                 withenv(SW._ENV_BACKEND_DOUBLE => saved[:double], SW._ENV_BACKEND_QUAD =>
-                    saved[:quad]) do
+                    saved[:quad], SW._ENV_BACKEND_MPFR => nothing) do
                     @test SW._configure_backends_from_env!()
                     @test SW.backend_library() == saved[:double]
                     @test SW.backend_library(precision = :quad) == saved[:quad]
                 end
                 withenv(SW._ENV_BACKEND_DOUBLE => nothing, SW._ENV_BACKEND_QUAD =>
-                    nothing) do
+                    nothing, SW._ENV_BACKEND_MPFR => nothing) do
                     @test !SW._configure_backends_from_env!()
+                end
+                withenv(SW._ENV_BACKEND_DOUBLE => nothing, SW._ENV_BACKEND_QUAD => nothing,
+                    SW._ENV_BACKEND_MPFR => saved[:mpfr]) do
+                    @test SW._configure_backends_from_env!() == (saved[:mpfr] !== nothing)
+                    saved[:mpfr] === nothing || @test SW.backend_library(; precision = :mpfr) == saved[:mpfr]
                 end
                 SW._backend_libraries[:double] = nothing
                 @test_throws r"No backend library configured" SW._require_backend_library(:double)
@@ -107,16 +118,21 @@ if TEST_GROUP in ("all", "api-and-precision")
                     @test SW._backend_filename("wave", kernel) == expected
                 end
                 mktempdir() do directory
-                    SW._backend_libraries[:double] = SW._backend_libraries[:quad] = nothing
+                    SW._backend_libraries[:double] = SW._backend_libraries[:quad] = SW._backend_libraries[:mpfr] = nothing
                     @test !SW._configure_backends_from_local_build!(directory)
                     @test SW.backend_library() === nothing
                     @test SW.backend_library(precision = :quad) === nothing
+                    @test SW.backend_library(precision = :mpfr) === nothing
                     # Discovery only checks filenames. Never load this placeholder.
                     candidate = joinpath(directory, SW._backend_filename("spheroidal_batch_double"))
                     touch(candidate)
                     @test SW._configure_backends_from_local_build!(directory)
                     @test SW.backend_library() == candidate
                     @test SW.backend_library(precision = :quad) === nothing
+                    mpfr_candidate = joinpath(directory, SW._backend_filename("spheroidal_batch_mpfr"))
+                    touch(mpfr_candidate)
+                    @test SW._configure_backends_from_local_build!(directory)
+                    @test SW.backend_library(precision = :mpfr) == mpfr_candidate
                 end
             finally
                 merge!(SW._backend_libraries, saved)
@@ -486,6 +502,8 @@ if TEST_GROUP in ("all", "api-and-precision")
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
     include("arbitrary_precision.jl")
+    include("precision_quantities.jl")
+    include("precision_waves.jl")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end

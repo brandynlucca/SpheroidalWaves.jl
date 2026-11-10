@@ -221,13 +221,73 @@ const ARBITRARY_PRECISION_REFERENCES = (
             @test (precision(BigFloat), rounding(BigFloat)) == settings
         end
 
+        @testset "Cache retention accounting" begin
+            SW = SpheroidalWaves
+            pair = SW._solve_coefficient_eigenpair_at_precision(0, 0, 1,
+                :prolate, :double, 160, nothing, 512, true)
+            short_key = (BigFloat(1; precision = 64), BigFloat(1; precision = 64))
+            large_key = (BigFloat(1; precision = 8*1024^2), BigFloat(1; precision = 8192))
+            short_bytes = SW._coefficient_eigenpair_bytes(pair, short_key)
+            large_bytes = SW._coefficient_eigenpair_bytes(pair, large_key)
+            @test large_bytes-short_bytes>=1024^2-8
+            profile = [complex(BigFloat(i; precision = 8192), BigFloat(i+1; precision = 8192))
+                for i in 1:10]
+            mode_state = (; m = 0, n = 0, lambda = first(profile), anchor = last(profile),
+                profile, sign = 1, endpoint_anchor = false,
+                endpoint_point = BigFloat(1; precision = 8192))
+            sample = (; pair..., mode_state, legendre_factors = typeof(pair.legendre_factors)(nothing))
+            @test SW._coefficient_eigenpair_bytes(sample, large_key)>large_bytes
+            cache = Dict{Any, Any}()
+            retained = SW._cache_coefficient_eigenpair!(cache, large_key, sample)
+            reservation = SW._coefficient_eigenpair_bytes(retained)
+            @test reservation>=Base.summarysize((large_key, retained))
+            SW._with_swprecision(precision(real(pair.lambda))) do
+                first = SW._legendre_recurrence_factors(retained)
+                @test first===SW._legendre_recurrence_factors(retained)
+            end
+            @test reservation==SW._coefficient_eigenpair_bytes(retained)
+            @test reservation>=Base.summarysize((large_key, retained))
+            overflow = (; pair..., degrees = [0, typemax(Int)])
+            @test SW._coefficient_eigenpair_bytes(overflow, nothing)==typemax(Int)
+        end
+
+        @testset "Cache priority and recency" begin
+            SW = SpheroidalWaves
+            pair = SW._solve_coefficient_eigenpair_at_precision(0, 0, 1,
+                :prolate, :double, 160, nothing, 512, true)
+            cache = Dict{Any, Any}()
+            canonical = [SW._cache_coefficient_eigenpair!(cache, key, pair) for key in 1:2]
+            for key in 3:96
+                SW._cache_coefficient_eigenpair!(cache, key, pair; native_label = true)
+            end
+            @test length(cache)==32
+            @test all(cache[key]===canonical[key] for key in 1:2)
+            @test count(result -> result.native_label, values(cache))==30
+            @test sum(SW._coefficient_eigenpair_bytes, values(cache))<=SW._coefficient_eigenpair_cache_limit
+            empty!(cache)
+            for key in 1:32
+                retained = SW._cache_coefficient_eigenpair!(cache, key, pair)
+                retained.last_used[] = UInt64(key)
+            end
+            @test SW._cached_coefficient_eigenpair(cache, 1)===cache[1]
+            @test cache[1].last_used[]>32
+            SW._cache_coefficient_eigenpair!(cache, 33, pair)
+            @test haskey(cache, 1) && !haskey(cache, 2) && haskey(cache, 33)
+            @test length(cache)==32
+            saved = copy(cache)
+            candidate = SW._cache_coefficient_eigenpair!(cache, 34, pair; native_label = true)
+            @test candidate.native_label && !haskey(cache, 34)
+            @test keys(cache)==keys(saved) && all(cache[key]===saved[key] for key in keys(saved))
+            @test sum(SW._coefficient_eigenpair_bytes, values(cache))<=SW._coefficient_eigenpair_cache_limit
+        end
+
         @testset "Invalid requests and computation limits" begin
             for bits in (0, -1, 1, true, 160.0, :quad)
                 @test_throws ArgumentError eigenvalue(0, 0, 1; precision_bits = bits)
                 @test_throws ArgumentError dmn(0, 0, 1; precision_bits = bits)
             end
             for operator in (:concentration, :fourier)
-                @test_throws ArgumentError eigenvalue(0, 0, 1; operator, precision_bits = 160)
+                @test_throws ArgumentError eigenvalue(1, 1, 1; operator, precision_bits = 160)
             end
             @test_throws ArgumentError dmn(0, 0, 1; precision_bits = 160, basis = :invalid)
             @test_throws ArgumentError dmn(0, 0, 1; precision_bits = 160, rtol = 0)

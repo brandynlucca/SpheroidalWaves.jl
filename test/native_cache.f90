@@ -19,7 +19,8 @@ program native_cache
   end do
 !$omp end parallel do
   failures = failures + check_pleg_storage()
-  failures = failures + check_native_modes()
+  failures = failures + check_native_modes(0,2,1.0_knd,1.0_knd,2.0_knd)
+  failures = failures + check_native_modes(3,10,20.0_knd,0.25_knd,0.25_knd)
   if (failures /= 0) then
     print *, 'Native cache and mode failures:', failures
     stop 1
@@ -131,39 +132,40 @@ contains
     if(add_cache_bytes(bytes,8_int64,huge(0),huge(0))) errors=errors+1
   end function check_pleg_storage
 
-  integer function check_native_modes() result(errors)
-    integer, parameter :: degrees=2, radial_modes(5)=[2,0,0,1,2], angular_modes(5)=[2,0,2,2,2]
-    real(knd) :: c,x,arguments(1),r1(degrees),r1d(degrees),r2(degrees),r2d(degrees)
+  integer function check_native_modes(m,degrees,c,prolate_x,oblate_x) result(errors)
+    integer, intent(in) :: m,degrees
+    real(knd), intent(in) :: c,prolate_x,oblate_x
+    integer, parameter :: radial_modes(5)=[2,0,0,1,2], angular_modes(5)=[2,0,2,2,2]
+    real(knd) :: x,arguments(1),r1(degrees),r1d(degrees),r2(degrees),r2d(degrees)
     real(knd) :: s1(degrees,1),s1d(degrees,1),eigenvalues(degrees)
     complex(knd) :: cc,cr1(degrees),cr1d(degrees),cr2(degrees),cr2d(degrees)
     complex(knd) :: cs1(degrees,1),cs1d(degrees,1),ceigenvalues(degrees)
-    complex(knd) :: values(degrees,7),reference(degrees,7)
+    complex(knd) :: values(degrees,7),reference(degrees,7),wronskian
     integer :: r1e(degrees),r1de(degrees),r2e(degrees),r2de(degrees),se(degrees,1),sde(degrees,1)
     integer :: radial_accuracy(degrees),angular_accuracy(degrees,1),angular_derivative_accuracy(degrees,1)
     integer :: geometry,stage,radial,angular,channel
     logical :: active(7)
     errors=0
-    c=1.0_knd
-    cc=cmplx(1.0_knd,0.25_knd,knd)
+    cc=cmplx(c,0.25_knd,knd)
     arguments=0.25_knd
     do geometry=0,3
-      x=1.0_knd
-      if(mod(geometry,2)==1) x=2.0_knd
+      x=prolate_x
+      if(mod(geometry,2)==1) x=oblate_x
       do stage=1,5
         radial=radial_modes(stage)
         angular=angular_modes(stage)
         select case(geometry)
         case(0)
-          call profcn(c,0,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
+          call profcn(c,m,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
             radial_accuracy,s1,se,s1d,sde,angular_accuracy,eigenvalues)
         case(1)
-          call oblfcn(c,0,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
+          call oblfcn(c,m,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
             radial_accuracy,s1,se,s1d,sde,angular_accuracy,eigenvalues)
         case(2)
-          call cprofcn(cc,0,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
+          call cprofcn(cc,m,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
             radial_accuracy,cs1,se,cs1d,sde,angular_accuracy,angular_derivative_accuracy,ceigenvalues)
         case(3)
-          call coblfcn(cc,0,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
+          call coblfcn(cc,m,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
             radial_accuracy,cs1,se,cs1d,sde,angular_accuracy,angular_derivative_accuracy,ceigenvalues)
         end select
         active=[.true.,radial>0,radial>0,radial==2,radial==2,angular>0,angular>0]
@@ -197,6 +199,17 @@ contains
           end if
         end if
         if(stage==1) reference=values
+        if(radial==2) then
+          wronskian=1.0_knd/c
+          if(geometry>=2) wronskian=1.0_knd/cc
+          if(mod(geometry,2)==0) then
+            wronskian=wronskian/(x*(x+2))
+          else
+            wronskian=wronskian/(x*x+1)
+          end if
+          if(any(abs((values(:,2)*values(:,5)-values(:,3)*values(:,4))/wronskian-1)> &
+            5.0e-8_knd)) errors=errors+1
+        end if
         do channel=1,7
           if(.not.active(channel)) cycle
           if(.not.all(ieee_is_finite(real(values(:,channel)))).or. &
