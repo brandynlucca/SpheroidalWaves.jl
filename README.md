@@ -57,7 +57,7 @@ quad_result = rmn(1, 2, 1.5, [1.1, 1.2]; precision=:quad)
 # Characteristic value
 lambda = eigenvalue(1, 2, 1.5)
 
-# Arbitrary-precision separation eigenvalue
+# Arbitrary precision (requires a local MPFR build until the matching JLL release)
 lambda256 = eigenvalue(1, 2, 3//2; precision_bits=256)
 ```
 
