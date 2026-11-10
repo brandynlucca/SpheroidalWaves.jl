@@ -53,7 +53,7 @@ The difference measures agreement, not an accuracy guarantee. `accuracy` provide
 
 ### Explicit arbitrary precision
 
-Only separation `eigenvalue` and `dmn` accept `precision_bits=p` (`p≥2`), for both geometries and real or complex inputs.
+Use `precision_bits=p` (`p≥2`) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, and analytic Jacobians. Wave Jacobians require `order=1`; all Jacobians require `h=nothing`. `accuracy` and coordinate-zero searches remain unsupported.
 
 ~~~julia
 lambda = eigenvalue(1, 2, 5//4; precision_bits=256)
@@ -61,7 +61,11 @@ d = dmn(1, 2, 5//4; precision_bits=256, normalize=true)
 precision(lambda) # 256
 ~~~
 
-Outputs use `p`-bit `BigFloat` components regardless of ambient precision. Inputs retain their existing information; use rationals or sufficiently precise `BigFloat` inputs. Guarded Julia arithmetic refines native seeds and expansion lengths; failure within `max_terms` (default 512) throws. The normwise target is `2^-p`; `rtol` may tighten it. Native routines still limit branch selection. Defaults stay unchanged; arbitrary precision guarantees neither rigorous error bounds nor correct rounding.
+Outputs have `p`-bit `BigFloat` components regardless of ambient precision. Use rational or sufficiently precise inputs. Guarded calculations refine precision and expansion length; failed precision refinement or insufficient `max_terms` throws. Branch continuation can fail near coalescing modes. Defaults stay unchanged; rigorous error bounds and correct rounding are not guaranteed.
+
+Higher precision costs more time and memory. Native workspaces and retained caches have byte budgets; oversized requests fail explicitly.
+
+CMake generates the MPFR backend from existing Fortran kernels. Source builds need MPFR, MPC, and GMP development libraries. The Yggdrasil recipe includes these dependencies; a matching JLL release is still required.
 
 ## Parallel evaluation
 
