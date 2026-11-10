@@ -10,6 +10,7 @@
 #define SW_PRECISION_MODULE spheroidal_precision_mpfr
 #define SW_PROLATE_PARAMETERS prolate_parameters_mpfr
 #define SW_PROLATE_MODULE prolate_swf_mpfr
+#define SW_OBLATE_MODULE oblate_swf_mpfr
 #define SW_REAL type(mp_real)
 #define SW_COMPLEX type(mp_complex)
 #define SW_LITERAL(native,decimal) mpreal(decimal)
@@ -18,6 +19,7 @@
 #else
 #define SW_PROLATE_PARAMETERS prolate_parameters
 #define SW_PROLATE_MODULE prolate_swf
+#define SW_OBLATE_MODULE oblate_swf
 #define SW_REAL real(sw_kind)
 #define SW_COMPLEX complex(sw_kind)
 #define SW_LITERAL(native,decimal) native
