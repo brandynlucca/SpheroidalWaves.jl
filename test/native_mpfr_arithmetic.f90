@@ -96,7 +96,7 @@ program native_mpfr_arithmetic
   print *, 'MPFR/MPC arithmetic, ownership, rounding, ABI accuracy and bounded failures passed'
 contains
   subroutine check_batch()
-    integer :: fixture,requested_bits,geometry,complex_parameter,slot
+    integer :: fixture,requested_bits,geometry,complex_parameter,slot,degree
     integer(c_int64_t) :: saved_limit
     type(mp_real) :: error,previous_error,reference_re,reference_im
     character(len=112), parameter :: references_re(4)=[character(len=112) :: &
@@ -163,6 +163,18 @@ contains
     v=z*mpcmplx(component(9),component(10))-w*mpcmplx(component(7),component(8))
     if (.not.mp_is_finite(real(v)).or..not.mp_is_finite(aimag(v))) error stop 51
     if (abs(v-1/(3*mpcmplx(mpreal(1),mpreal('1/4'))))>mpreal(2)**(-80)) error stop 52
+    do complex_parameter=0,1
+      call fill_text(parameter(:,2),'0')
+      if (complex_parameter==1) call fill_text(parameter(:,2),'1/4')
+      do degree=0,2,2
+        call evaluate(0,complex_parameter,0,degree,3,160,0)
+        z=mpcmplx(component(3),component(4))
+        w=mpcmplx(component(5),component(6))
+        v=z*mpcmplx(component(9),component(10))-w*mpcmplx(component(7),component(8))
+        if (.not.mp_is_finite(real(v)).or..not.mp_is_finite(aimag(v))) error stop 54
+        if (abs(v-1/(5*mpcmplx(mpreal(1),mpreal(complex_parameter)/4)))>mpreal(2)**(-80)) error stop 55
+      end do
+    end do
     call fill_text(parameter(:,2),'0')
     call evaluate(0,0,0,1,3,1024,0)
     error=component(3)*component(9)-component(5)*component(7)

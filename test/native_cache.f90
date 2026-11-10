@@ -19,7 +19,9 @@ program native_cache
   end do
 !$omp end parallel do
   failures = failures + check_pleg_storage()
+  failures = failures + check_native_modes(0,1,1.0_knd,1.0_knd,2.0_knd)
   failures = failures + check_native_modes(0,2,1.0_knd,1.0_knd,2.0_knd)
+  failures = failures + check_native_modes(0,3,1.0_knd,1.0_knd,2.0_knd)
   failures = failures + check_native_modes(3,10,20.0_knd,0.25_knd,0.25_knd)
   if (failures /= 0) then
     print *, 'Native cache and mode failures:', failures

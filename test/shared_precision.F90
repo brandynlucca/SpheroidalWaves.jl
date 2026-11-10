@@ -63,9 +63,9 @@ contains
 #endif
   end function
 
-  subroutine evaluate_shared(x,dyadic,negative,z,shifted)
+  subroutine evaluate_shared(x,decimal,negative,z,shifted)
     SW_REAL, intent(in) :: x
-    SW_REAL, intent(out) :: dyadic,negative,shifted
+    SW_REAL, intent(out) :: decimal,negative,shifted
     SW_COMPLEX, intent(out) :: z
 #ifdef SWF_PRECISION_MPFR
     SW_REAL :: offset
@@ -73,10 +73,10 @@ contains
 #else
     SW_REAL, parameter :: offset = SW_LITERAL(0.125_sw_kind,"0.125")
 #endif
-    dyadic = SW_LITERAL(1.00000000000000000000000000000000000000293873587705571876992184134305561419454666389193021880377187926569604314863681793212890625_sw_kind,"1.00000000000000000000000000000000000000293873587705571876992184134305561419454666389193021880377187926569604314863681793212890625")
+    decimal = SW_LITERAL(1.0000000000000000000000000000000000000001_sw_kind,"1.0000000000000000000000000000000000000001")
     ! The sign belongs inside the decimal text to preserve directed rounding.
     negative = SW_LITERAL(-0.1_sw_kind,"-0.1")
-    z = to_complex(dyadic,negative)
+    z = to_complex(decimal,negative)
     shifted = (x+offset)/2
   end subroutine
 end module
@@ -84,12 +84,15 @@ end module
 program shared_precision
   use shared_precision_example
   implicit none
-  SW_REAL :: x,dyadic,negative,shifted,values(3),copies(3),wide
+  SW_REAL :: x,decimal,negative,shifted,values(3),copies(3),wide
   SW_COMPLEX :: z,copy_z
   integer(c_int64_t), parameter :: large_integer = 9007199254740993_c_int64_t
 #ifdef SWF_PRECISION_MPFR
   integer :: bits_index,mode,saved_bits,saved_rounding
   integer, parameter :: precisions(4) = [160,256,384,160]
+  character(len=*), parameter :: decimal_ratio = &
+    "10000000000000000000000000000000000000001/" // &
+    "10000000000000000000000000000000000000000"
   SW_REAL :: retained,rounded,copied
   saved_bits = mpfr_bits
   saved_rounding = mpfr_rounding
@@ -119,32 +122,32 @@ program shared_precision
 contains
   subroutine check_shared()
     x = to_real(3)
-    call evaluate_shared(x,dyadic,negative,z,shifted)
+    call evaluate_shared(x,decimal,negative,z,shifted)
     if (shifted/=SW_LITERAL(1.5625_sw_kind,"1.5625")) error stop "initialized offset"
-    if (to_real(z)/=dyadic.or.aimag(z)/=negative) error stop "complex components"
+    if (to_real(z)/=decimal.or.aimag(z)/=negative) error stop "complex components"
     if (to_real(1/3)/=0.or.to_real(1)/3==0) error stop "integer division"
     if (to_real(1)/2/=SW_LITERAL(0.5_sw_kind,"0.5")) error stop "real division"
     wide = to_real(large_integer)
     if (wide/=SW_LITERAL(9007199254740993.0_sw_kind,"9007199254740993")) error stop "integer64 conversion"
-    values = [dyadic,negative,x]
+    values = [decimal,negative,x]
     copies = values
     values = 0
-    if (any(copies/=[dyadic,negative,x])) error stop "array ownership"
+    if (any(copies/=[decimal,negative,x])) error stop "array ownership"
     copy_z = z
     z = to_complex(to_real(0),to_real(0))
-    if (to_real(copy_z)/=dyadic.or.aimag(copy_z)/=negative) error stop "complex ownership"
+    if (to_real(copy_z)/=decimal.or.aimag(copy_z)/=negative) error stop "complex ownership"
 #ifdef SWF_PRECISION_MPFR
-    if (dyadic/=to_real(1)+to_real(2)**(-128).or.dyadic==1) error stop "literal beyond quad precision"
+    if (decimal/=mpreal(decimal_ratio).or.decimal==1) error stop "literal beyond quad precision"
     if (negative/=mpreal("-1/10")) error stop "signed decimal rounding"
     if (mode==2.or.mode==3) then
       if (negative==-mpreal("0.1")) error stop "signed literal differs from unary negation"
     end if
-    if (dyadic%data(1)/=mpfr_bits.or.shifted%data(1)/=mpfr_bits) error stop "runtime initialization precision"
+    if (decimal%data(1)/=mpfr_bits.or.shifted%data(1)/=mpfr_bits) error stop "runtime initialization precision"
     if (copy_z%re%data(1)/=mpfr_bits.or.copy_z%im%data(1)/=mpfr_bits) error stop "complex precision"
     if (mp_to_integer64(wide)/=large_integer) error stop "exact integer64 conversion"
     if (mpfr_status/=0) error stop "arithmetic status"
 #else
-    if (dyadic/=1) error stop "native rounding"
+    if (decimal/=1) error stop "native rounding"
     if (kind(shifted)/=sw_kind.or.kind(copy_z)/=sw_kind) error stop "native result kind"
 #ifdef SWF_PRECISION_QUAD
     if (int(wide,kind=c_int64_t)/=large_integer) error stop "quad integer64 conversion"

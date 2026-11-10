@@ -888,7 +888,7 @@ end if
     real(knd) eig(lnum), r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), &
          qdl(lnum), ql(lnum), s1(lnum, narg), s1d(lnum, narg)
     integer  ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), &
-         is1(lnum, narg), is1d(lnum, narg), match(lnum), nas(lnum, narg)
+         is1(lnum, narg), is1d(lnum, narg), match(lnum + 1), nas(lnum, narg)
 !
 !  integer and real(knd) arrays with dimension lnum+1
     integer ifajo(lnum + 1)
@@ -1194,6 +1194,8 @@ end if
       listart = 1
       matlim = min(lnum, nbp + 1)
       matlilim = matlim + 1
+      ! Pair lookahead needs a zero sentinel beyond the requested degrees.
+      match = 0
        do i = 2, matlim, 2
        match(i) = -int(log10(abs((eigt(i) - eigt(i - 1)) / (eigt(i)) &
             +ten * dec)))

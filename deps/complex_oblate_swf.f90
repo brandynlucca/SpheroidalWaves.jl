@@ -921,7 +921,7 @@ end if
 !
 !  integer arrays with dimension lnum
         integer   ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), &
-                  match(lnum), nar(lnum), iqdl(lnum), iql(lnum), ieigt(lnum), &
+                  match(lnum + 1), nar(lnum), iqdl(lnum), iql(lnum), ieigt(lnum), &
                   is1(lnum, narg), is1d(lnum, narg), nas(lnum, narg), nads(lnum, narg)
 !
 !  real(knd) arrays with dimension lnum
@@ -1271,7 +1271,8 @@ end if
             matlim = max(matlim, lipl + 1)
             if(matlim > lnum) matlim = lnum
             limi = 0
-            match(2) = 0
+            ! Pair lookahead needs a zero sentinel beyond the requested degrees.
+            match = 0
               do i = 2, matlim, 2
               match(i) = -int(log10(abs((eigt(i) - eigt(i - 1)) / eigt(i) &
                         +ten * dec)))
