@@ -15,6 +15,7 @@ const PROJECT_DIR = dirname(SCRIPT_DIR)
 const BUILD_DIR = joinpath(PROJECT_DIR, "build")
 const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
 const SELECTED_FORTRAN = Ref{Union{Nothing, String}}(nothing)
+const BUILD_MPFR = lowercase(get(ENV, "SWF_BUILD_MPFR", "on")) ∉ ("off", "false", "0")
 
 function detect_library_dir()
     candidates = [joinpath(BUILD_DIR, "lib"), joinpath(BUILD_DIR, "bin"), BUILD_DIR]
@@ -193,6 +194,8 @@ function verify_sources()
 
     all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad;
                    batch_wrappers_quad; "scaled_batch.f90"]
+    BUILD_MPFR && append!(all_sources,
+        ["generate_mpfr_fortran.cmake", "mpfr_real.f90", "mpfr_complex.f90", "mpfr_batch.f90", "mpfr_arithmetic.c", "mpc_arithmetic.c"])
     deps_dir = joinpath(PROJECT_DIR, "deps")
 
     for src in all_sources
@@ -219,7 +222,8 @@ function run_build()
     configure_cmd = [
         "cmake",
         "-S", PROJECT_DIR,
-        "-B", BUILD_DIR
+        "-B", BUILD_DIR,
+        "-DSWF_BUILD_MPFR=$(BUILD_MPFR ? "ON" : "OFF")"
     ]
 
     generator = choose_cmake_generator()
@@ -306,6 +310,7 @@ end
 function verify_libraries_built()
     lib_dir = detect_library_dir()
     stems = ["spheroidal_batch_double", "spheroidal_batch_quad"]
+    BUILD_MPFR && push!(stems, "spheroidal_batch_mpfr")
     ok = true
     for stem in stems
         path = _find_built_library(lib_dir, stem)
@@ -332,6 +337,7 @@ function report_library_paths()
     end
     info_msg("double library path: $lib_double_path")
     info_msg("quad library path: $lib_quad_path")
+    BUILD_MPFR && info_msg("mpfr library path: $(_find_built_library(lib_dir, "spheroidal_batch_mpfr"))")
     return true
 end
 
@@ -339,8 +345,9 @@ end
 # Main Build Workflow
 # ============================================================================
 function main()
-    info_msg("SpheroidalWaves Fortran batch build starting...")
-    info_msg("Building dual precision backends (double and quad)")
+    info_msg("SpheroidalWaves native backend build starting...")
+    info_msg(BUILD_MPFR ? "Building double, quad and MPFR/MPC backends" : "Building double and quad backends")
+    BUILD_MPFR && info_msg("MPFR/MPC requires C/Fortran compilers and MPFR/MPC/GMP development files.")
     info_msg("Build directory: $BUILD_DIR")
 
     # Check prerequisites
@@ -399,10 +406,10 @@ if !main()
         warn_msg("package installs prebuilt binaries automatically via SpheroidalWaves_jll.")
         warn_msg("This is only needed to compile the Fortran sources locally, e.g. for")
         warn_msg("development. To do so:")
-        warn_msg("  1. Install a Fortran compiler and CMake")
+        warn_msg("  1. Install C/Fortran compilers, CMake, and MPFR/MPC/GMP development files")
         warn_msg("  2. Rerun: julia --project=. scripts/build_from_source.jl")
         warn_msg("  3. Point SpheroidalWaves at the result with")
-        warn_msg("     SPHEROIDALWAVES_LIBRARY_DOUBLE / SPHEROIDALWAVES_LIBRARY_QUAD")
+        warn_msg("     SPHEROIDALWAVES_LIBRARY_DOUBLE / SPHEROIDALWAVES_LIBRARY_QUAD / SPHEROIDALWAVES_LIBRARY_MPFR")
         warn_msg("")
         warn_msg("To install a Fortran compiler:")
         warn_msg("  - Ubuntu/Debian: sudo apt-get install gfortran cmake")
