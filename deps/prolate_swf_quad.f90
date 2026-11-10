@@ -952,28 +952,25 @@ module prolate_swf
     real(knd) sbesf(maxj), sbesdf(maxj)
 !
 !  integer and real(knd) arrays with dimension maxlp
-    dimension ibese(maxlp), ineue(maxlp), ineuee(maxlp), &
-         ipnormint(maxlp), ineuesv(jnenmax, maxlp)
-    real(knd) pnormint(maxlp), sbesdr(maxlp), sbesn(maxlp), &
-         sneun(maxlp), sneune(maxlp), sneudr(maxlp), &
-         sneudre(maxlp), sneunsv(jnenmax, maxlp), &
-         sneudrsv(jnenmax, maxlp)
+    dimension ibese(maxlp), ineue(maxlp), ineuee(maxlp), ipnormint(maxlp)
+    integer, allocatable :: ineuesv(:,:)
+    real(knd) pnormint(maxlp), sbesdr(maxlp), sbesn(maxlp), sneun(maxlp), sneune(maxlp), sneudr(maxlp), &
+      sneudre(maxlp)
+    real(knd), allocatable :: sneunsv(:,:), sneudrsv(:,:)
 !
 !  integers and real(knd) arrays with dimension maxmp
     real(knd) enrneg(maxmp)
     dimension norme(maxmp)
 !
 !  real(knd) arrays with dimension maxn
-    real(knd) sneuf(maxn), sneudf(maxn), sneufe(maxn), sneudfe(maxn), &
-         sneufsv(jnenmax, maxn), sneudfsv(jnenmax, maxn)
+    real(knd) sneuf(maxn), sneudf(maxn), sneufe(maxn), sneudfe(maxn)
+    real(knd), allocatable :: sneufsv(:,:), sneudfsv(:,:)
 !
 !  real(knd) arrays with dimension given by maxp
-    real(knd) alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), &
-         coefc(maxp), coefd(maxp), coefe(maxp), gamma(maxp), &
-         pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), &
-         pr(maxt, maxp), prat(maxt, maxp), pratb(maxp), pratt(maxp), &
-         prat1(maxp), pratbsv(jnenmax, maxp), &
-         prattsv(jnenmax, maxp), pdratsv(jnenmax, maxp)
+    real(knd) alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp), &
+      gamma(maxp), pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), pr(maxt, maxp), prat(maxt, maxp), &
+      pratb(maxp), pratt(maxp), prat1(maxp)
+    real(knd), allocatable :: pratbsv(:,:), prattsv(:,:), pdratsv(:,:)
 !
 !  real(knd) arrays with dimension maxpdr
     real(knd) prx(maxpdr), pdrx(maxpdr)
@@ -1716,6 +1713,11 @@ end if
 !
 !  calculation using the variable eta expansion
        if(iopeta == 0 .or. iopeta == 4) go to 670
+       if(.not.allocated(ineuesv)) then
+         allocate( ineuesv(jnenmax, maxlp), sneunsv(jnenmax, maxlp), sneudrsv(jnenmax, maxlp), &
+           sneufsv(jnenmax, maxn), sneudfsv(jnenmax, maxn), pratbsv(jnenmax, maxp), prattsv(jnenmax, maxp), &
+           pdratsv(jnenmax, maxp))
+       end if
         do 430 inn = 1, 100
         nees(inn) = 0
         naccsav(inn) = 0
@@ -3977,6 +3979,7 @@ end if
     if(doldd2 > 0.0e0_knd) sumdnp2 = doldd2
     if(l /= 0) r2dtemp1 = factor
     if(l /= 0) sumdnp1 = r2dtemp1
+    jj = 0
     if(lm2 == 0) go to 60
      do 50 j = lm2, 1,-1
      jj = j + j + ix

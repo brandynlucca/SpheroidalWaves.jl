@@ -960,26 +960,25 @@ end if
         real(knd) pnormint(maxlp)
         complex(knd) sbesdr(maxlp), sbesdr2(maxlp), sbesn(maxlp), &
                      sbesn2(maxlp)
-        complex(knd) sneudre(maxlp), sneudrsv(jnenmax, maxlp)
+        complex(knd) sneudre(maxlp)
+        complex(knd), allocatable :: sneudrsv(:,:)
         complex(knd) sneudr(maxlp)
 !
 !  arrays with dimension maxmp
         complex(knd) enrneg(maxmp)
 !
 !  arrays with dimension maxn
-        integer ineue(maxn), ineuee(maxn), ineuesv(jnenmax, maxn)
-        complex(knd) sneufe(maxn), sneudfe(maxn), &
-                sneufsv(jnenmax, maxn), sneudfsv(jnenmax, maxn), &
-                sneune(maxn), sneunsv(jnenmax, maxn)
+        integer ineue(maxn), ineuee(maxn)
+        integer, allocatable :: ineuesv(:,:)
+        complex(knd) sneufe(maxn), sneudfe(maxn), sneune(maxn)
+        complex(knd), allocatable :: sneufsv(:,:), sneudfsv(:,:), sneunsv(:,:)
         complex(knd) sneun(maxn), sneuf(maxn), sneudf(maxn)
 !
 !  arrays with dimension given by maxp
-        real(knd) alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), &
-                  coefc(maxp), coefd(maxp), coefe(maxp), gamma(maxp), &
-                  pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), &
-                  pr(maxt, maxp), prat(maxt, maxp), pratb(maxp), pratt(maxp), &
-                  prat1(maxp), pratbsv(jnenmax, maxp), &
-                  prattsv(jnenmax, maxp), pdratsv(jnenmax, maxp)
+        real(knd) alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp), &
+          gamma(maxp), pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), pr(maxt, maxp), prat(maxt, maxp), &
+          pratb(maxp), pratt(maxp), prat1(maxp)
+        real(knd), allocatable :: pratbsv(:,:), prattsv(:,:), pdratsv(:,:)
 !
 !  arrays with dimension maxpdr
         real(knd) prx(maxpdr), pdrx(maxpdr)
@@ -2045,6 +2044,11 @@ end if
 !
 !  calculation using the variable eta expansion
               if(iopeta == 0 .or. iopeta == 4) go to 670
+              if(.not.allocated(sneudrsv)) then
+                allocate( sneudrsv(jnenmax, maxlp), ineuesv(jnenmax, maxn), sneufsv(jnenmax, maxn), &
+                  sneudfsv(jnenmax, maxn), sneunsv(jnenmax, maxn), pratbsv(jnenmax, maxp), &
+                  prattsv(jnenmax, maxp), pdratsv(jnenmax, maxp))
+              end if
                 do 430 inn = 1, 100
                 nees(inn) = 0
 430             naccsav(inn) = 0
@@ -5017,6 +5021,7 @@ end if
         if(aimag(doldd2) > 0.0e0_knd) sumdnp2i = aimag(doldd2)
         if(l /= 0) r2dtemp1 = (1.0e0_knd, 0.0e0_knd)
         if(l /= 0) sumdnp1r = 1.0e0_knd
+        jj = 0
         if(lm2 == 0) go to 60
           do 50 j = lm2, 1, -1
           jj = j + j + ix
