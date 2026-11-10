@@ -1,7 +1,6 @@
 # Mathematical tools
 
-All examples use ordinary numeric arguments. Add `precision=:quad` for quad precision.
-For `precision_bits` support and limits, see [Precision and outputs](@ref precision-and-outputs).
+All examples use ordinary numeric arguments. Add `precision=:quad` for quad precision. For `precision_bits` support and limits, see [Precision and outputs](@ref precision-and-outputs).
 
 ## Expansion coefficients and connection factors
 
@@ -25,15 +24,11 @@ $$S_n^{m(1)}(z,\gamma)=K_n^m(\gamma)\,\mathrm{Ps}_n^m(z,\gamma^2).$$
 
 Use $\gamma=c$, $z=x$ for prolate and $\gamma=ic$, $z=-ix$ for oblate. The exterior Legendre branch uses $[z\sqrt{1-z^{-2}}]^m$ without the Ferrers phase. Oblate joining factors are complex. `normalize=true` gives the factor for a unit-normalized angular expansion.
 
-All three support real or complex parameters, both geometries and precisions. By default at `c=0`, `amn` is one and `kmn` is zero except for $(m,n)=(0,0)$, where it is one. Radial calls at `c=0` require `normalization=:static`. `rtol` and `max_terms` control coefficient convergence, not relative accuracy of every small coefficient.
+All three support real or complex parameters, both geometries and precisions. By default at $c=0$, `amn` is one and `kmn` is zero except for $(m,n)=(0,0)$, where it is one. Radial calls at $c=0$ require `normalization=:static`. `rtol` and `max_terms` control coefficient convergence, not relative accuracy of every small coefficient.
 
 
-Use `basis=:orthonormal` for coefficients multiplying
-$\mathsf P_l^m/\sqrt{2(l+m)!/((2l+1)(l-m)!)}$. This changes the basis,
-independently of the wave normalization selected by `normalize`. Set
-`derivatives=false` when parameter sensitivities are not needed. The derivative
-fields then contain `nothing`. A degree range returns a vector of coefficient
-results and shares native expansion work when available.
+Use `basis=:orthonormal` for coefficients multiplying $\mathsf P_l^m/\sqrt{2(l+m)!/((2l+1)(l-m)!)}$. This changes the basis,
+independently of the wave normalization selected by `normalize`. Set `derivatives=false` when parameter sensitivities are not needed. The derivative fields then contain `nothing`. A degree range returns a vector of coefficient results and shares native expansion work when available.
 
 ```julia
 coefficients = dmn(1, 2:8, 10.0; normalize=true,
@@ -43,9 +38,7 @@ dmn(1, 2, 5//4; precision_bits=256)
 
 ## Combined evaluation
 
-Request angular, radial, and coefficient results together when they share the
-same order and parameter. Use `spheroid=:prolate` (the default) or
-`spheroid=:oblate` to select the geometry:
+Request angular, radial, and coefficient results together when they share the same order and parameter. Use `spheroid=:prolate` (the default) or `spheroid=:oblate` to select the geometry:
 
 ```julia
 result = spheroidal(1, 2:8, 10.0; eta=[-0.4, 0.25], x=1.2,
@@ -59,18 +52,10 @@ oblate = spheroidal(1, 2:8, 10.0; spheroid=:oblate,
                     eta=[-0.4, 0.25], x=[0.0, 0.5], kind=3, precision=:quad)
 ```
 
-Omit `eta`, `x`, or `coefficients` to omit that result. Set `derivatives=false`
-to omit coordinate derivatives, or `parameter_derivatives=true` to request
-coefficient sensitivities. Scalar degrees produce the same vector shapes as
+Omit `eta`, `x`, or `coefficients` to omit that result. Set `derivatives=false` to omit coordinate derivatives, or `parameter_derivatives=true` to request coefficient sensitivities. Scalar degrees produce the same vector shapes as
 `smn` and `rmn`. Coordinates and the parameter are dimensionless.
 
-Real prolate evaluations can share a native expansion. Additional radial
-coordinates require separate radial work. Oblate evaluations use the existing
-oblate evaluators, including their radial domain `x >= 0`. Other supported
-cases and older libraries retain the individual evaluation paths. Coefficient residual and
-tail checks remain active, as does guarded angular evaluation where cancellation
-requires extra precision. Native coefficient results report `relative_change=NaN`
-because they do not compare successive Julia truncations.
+Real prolate evaluations can share a native expansion. Additional radial coordinates require separate radial work. Oblate evaluations use the existing oblate evaluators, including their radial domain $x \geq 0$. Other supported cases and older libraries retain the individual evaluation paths. Coefficient residual and tail checks remain active, as does guarded angular evaluation where cancellation requires extra precision. Native coefficient results report `relative_change=NaN` because they do not compare successive Julia truncations.
 
 ## Eigenvalue operators
 
@@ -84,8 +69,7 @@ because they do not compare successive Julia truncations.
 
 ### Separation constant
 
-The angular and radial equations share `λₘₙ(c)`, with
-`λₘₙ(0) = n(n+1)`. Both geometries and real or complex parameters are supported.
+The angular and radial equations share $\lambda_{mn}(c)$, with $\lambda_{mn}(0) = n(n+1)$. Both geometries and real or complex parameters are supported.
 
 ~~~julia
 eigenvalue(1, 2, 1.25; precision=:quad)
@@ -95,7 +79,7 @@ eigenvalue(1, 2, 5//4; precision_bits=256)
 
 ### Concentration and finite Fourier eigenvalues
 
-For the first-kind angular mode `Sₙ = S₀ₙ` on `[-1,1]`:
+For the first-kind angular mode $S_{mn} = S_{0n}$` on $[-1,\,1]$:
 
 ~~~math
 \int_{-1}^{1}\frac{\sin(c(x-t))}{\pi(x-t)}S_n(t)\,dt
@@ -104,15 +88,14 @@ For the first-kind angular mode `Sₙ = S₀ₙ` on `[-1,1]`:
 \int_{-1}^{1}e^{-icxt}S_n(t)\,dt=\mu_n(c)S_n(x).
 ~~~
 
-The sinc kernel is `c/π` at `x=t`. For `c>0`,
+The sinc kernel is $\frac{c}{\pi}$ at $x=t$. For $c \geq 0$,
 
 ~~~math
 0<\Lambda_n<1,\qquad
 \mu_n=(-i)^n\sqrt{\frac{2\pi\Lambda_n}{c}}.
 ~~~
 
-These conventions follow [DLMF 30.15](https://dlmf.nist.gov/30.15)
-with the interval scaled to `[-1,1]`.
+These conventions follow [DLMF 30.15](https://dlmf.nist.gov/30.15) with the interval scaled to $[-1,\,1]$.
 
 ~~~julia
 eigenvalue(0, 2, 1.0; operator=:concentration, precision=:quad)
@@ -122,24 +105,20 @@ eigenvalue(0, 0, 50.0; operator=:concentration,
 ~~~
 
 !!! note "Integral-operator domain"
-    Requires `m=0`, `n≥0`, `spheroid=:prolate`, and finite real `c≥0`.
-    At `c=0`, all `Λₙ=0`; `μ₀=2` and `μₙ=0` for `n>0`.
+    Requires $m=0$, $n \geq 0$, `spheroid=:prolate`, and finite real $c \geq 0$. At $c=0$, all $\Lambda_n=0$; $\mu_0=2$ and $\mu_n=0$ for $n > 0$.
 
 !!! tip "Small eigenvalues and complements"
-    `form=:log` returns `log(Λₙ)`; `form=:complement` returns `1-Λₙ`.
-    Use these directly when `Λₙ` rounds to zero or one.
-    At `c=0`, they return `-Inf` and `1`, respectively.
+    `form=:log` returns $\log(\Lambda_n)$; `form=:complement` returns $1-\Lambda_n$. Use these directly when $\Lambda_n$ rounds to zero or one. At $c=1$, they return $-\infty$ and $1$, respectively.
 
 ## Parameter derivatives
 
-The Jacobians differentiate with respect to `c`; coordinate derivatives are
-returned by `smn` and `rmn`.
+The Jacobians differentiate with respect to $c$. Coordinate derivatives are returned by `smn` and `rmn`.
 
-| Call | Result for real `c` |
+| Call | Result for real $c$ |
 |:--|:--|
-| `jacobian_eigen(m,n,c)` | `dλ/dc` |
-| `jacobian_smn(m,n,c,eta)` | `dvalue_dc = ∂S/∂c`, `dderivative_dc = ∂²S/(∂c∂η)` |
-| `jacobian_rmn(m,n,c,x)` | `dvalue_dc = ∂R/∂c`, `dderivative_dc = ∂²R/(∂c∂x)` |
+| `jacobian_eigen(m,n,c)` | $d\lambda / dc$ |
+| `jacobian_smn(m,n,c,eta)` | `dvalue_dc` = $\partial S / \partial c$, `dderivative_dc` = $\partial^2S/(\partial c \partial \eta)$ |
+| `jacobian_rmn(m,n,c,x)` | `dvalue_dc` = $\partial R / \partial c$, `dderivative_dc` = $\partial^2 R /(\partial c \partial x)$ |
 
 ~~~julia
 jacobian_smn(1, 2, 1.25, [0.3]; kind=2, precision=:quad)
@@ -149,10 +128,9 @@ jacobian_eigen(0, 2, 1.0; operator=:fourier, precision=:quad)
 jacobian_smn(1, 2, 1.25, [0.3]; order=2, diagnostics=true)
 ~~~
 
-`order=2` selects second parameter derivatives. Wave results use `d2value_dc2` and `d2derivative_dc2`. Complex results use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`. These calculations difference analytic first derivatives with fourth-order stencils. `h` controls the step and `diagnostics=true` adds shared step-refinement diagnostics. Standard radial and positive-bandwidth integral stencils require `2h<abs(c)`.
+`order=2` selects second parameter derivatives. Wave results use `d2value_dc2` and `d2derivative_dc2`. Complex results use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`. These calculations difference analytic first derivatives with fourth-order stencils. `h` controls the step and `diagnostics=true` adds shared step-refinement diagnostics. Standard radial and positive-bandwidth integral stencils require $2h < |c|$.
 
-`jacobian_eigen` accepts the same operators and forms as `eigenvalue`.
-For a real mode `ψₙ` with unit norm on `[-1,1]` and `c>0`:
+`jacobian_eigen` accepts the same operators and forms as `eigenvalue`. For a real mode $\psi_n$ with unit norm on $[-1,\,1]$ and $c>0$:
 
 ~~~math
 \frac{d\Lambda_n}{dc}=\frac{|\mu_n|^2}{\pi}\psi_n(1)^2,
@@ -162,23 +140,13 @@ For a real mode `ψₙ` with unit norm on `[-1,1]` and `c>0`:
 \frac{d(1-\Lambda_n)}{dc}=-\frac{d\Lambda_n}{dc}.
 ~~~
 
-For order 1 and complex `c=a+ib`, results contain real- and imaginary-direction
-partials (`d_dcreal`/`d_dcimag` for eigenvalues;
-`dvalue_dcreal`/`dvalue_dcimag` and
-`dderivative_dcreal`/`dderivative_dcimag` for functions).
-On a local analytic branch, `∂f/∂b = i ∂f/∂a`.
+For order 1 and complex $c=a+ib$, results contain real- and imaginary-direction partials (`d_dcreal`/`d_dcimag` for eigenvalues; `dvalue_dcreal`/`dvalue_dcimag` and `dderivative_dcreal`/`dderivative_dcimag` for functions). On a local analytic branch, $\partial f / \partial b = i \partial f / \partial a$.
 
 !!! note "Derivative options and limits"
-    First derivatives use analytic differentiation unless `h` is supplied.
-    `diagnostics=true` adds convergence diagnostics, not error bounds.
-    Angular `kind=2` parameter derivatives return `NaN` at `η=±1`.
-    Radial calls at `c=0` require `normalization=:static`.
+    First derivatives use analytic differentiation unless $h$ is supplied. `diagnostics=true` adds convergence diagnostics, not error bounds. Angular `kind=2` parameter derivatives return `NaN` at $\eta = \pm 1$. Radial calls at $c=0$ require `normalization=:static`.
 
 !!! note "Integral derivatives at zero"
-    First derivatives are `Λ₀′=2/π` and `μ₁′=-2im/3`, otherwise zero.
-    Second derivatives are `μ₀″=-2/9` and `μ₂″=-8/45`, otherwise zero.
-    `form=:log` returns `Inf` for order 1 and `-Inf` for order 2.
-    Logarithmic derivatives at zero require `h=nothing`.
+    First derivatives are $\Lambda_0^\prime = 2/\pi$ and $\mu_1^\prime = -2i/3$, otherwise zero. Second derivatives are $\mu_0^{\prime prime}=-2/9$ and $\mu_2^{\prime \prime}=-8/45$, otherwise zero. `form=:log` returns $-\infty$ and $\infty$ for order 1 and $-\infty$ for order 2. Logarithmic derivatives at zero require `h=nothing`.
 
 ## Inverse bandwidth
 
@@ -202,11 +170,7 @@ root.converged
 root.residual
 ~~~
 
-`bracket=(c_lo,c_hi)` is required: finite endpoints with `c_lo<c_hi` whose
-eigenvalues enclose the target. Concentration inversion also requires `c_lo>=0`.
-An endpoint matching within tolerance is returned immediately.
-`maxiter=160` limits iterations; `use_jacobian=true` permits Newton steps.
-With `false`, separation inversion uses secant/bisection and concentration uses bisection.
+`bracket=(c_lo,c_hi)` is required: finite endpoints with `c_lo<c_hi` whose eigenvalues enclose the target. Concentration inversion also requires `c_lo>=0`. An endpoint matching within tolerance is returned immediately. `maxiter=160` limits iterations; `use_jacobian=true` permits Newton steps. With `false`, separation inversion uses secant/bisection and concentration uses bisection.
 
 | Result field | Meaning |
 |:--|:--|
@@ -226,10 +190,7 @@ For concentration, `form` defines the target:
 | `:log` | `log(Λₙ)` | `[-Inf,0)` |
 
 !!! warning "Check convergence"
-    Check `root.converged` before using `root.c`; `root.residual` uses the requested form.
-    Unit concentration has no finite bandwidth. Zero concentration requires a bracket
-    containing zero. Fourier inversion is unsupported.
-    Set `atol` and `rtol` explicitly for tighter separation-constant inversion.
+    Check `root.converged` before using `root.c`; `root.residual` uses the requested form. Unit concentration has no finite bandwidth. Zero concentration requires a bracket containing zero. Fourier inversion is unsupported. Set `atol` and `rtol` explicitly for tighter separation-constant inversion.
 
 See [`find_c_for_eigenvalue`](@ref) for tolerance defaults and stopping criteria.
 
@@ -244,10 +205,8 @@ continued = eigenvalue_sweep(0, 0, path; precision=:quad)
 continued.selected_n
 ~~~
 
-Sweeps track separation constants only. Real grids must be monotone; complex
-grids specify an ordered piecewise-linear path.
-`selected_n` records degree labels and `switched_branch` flags label changes.
-`branch_lock=false` evaluates the native label independently at each point.
+Sweeps track separation constants only. Real grids must be monotone; complex grids specify an ordered piecewise-linear path.
+`selected_n` records degree labels and `switched_branch` flags label changes. `branch_lock=false` evaluates the native label independently at each point.
 
 | Keyword | Effect |
 |:--|:--|
@@ -255,14 +214,10 @@ grids specify an ordered piecewise-linear path.
 | `branch_window=1` | Search half-width around the previously selected degree `k`; real grids search `max(m,k-w):k+w`, complex paths search same-parity neighbors `k-2w, …, k+2w`, clipped below at the lowest valid degree of that parity |
 | `use_jacobian_predictor=true` | Real grids only: predict the second point with `dλ/dc`; if disabled or unreliable, use the preceding value. Later points use the slope between the previous two results |
 
-`branch_window` must be nonnegative; zero fixes the degree label.
-It has no effect with `branch_lock=false`. `use_jacobian_predictor` has no effect
-for complex paths, which use angular-profile matching.
-Both geometries and `precision=:double`/`:quad` are supported.
+`branch_window` must be nonnegative; zero fixes the degree label. It has no effect with `branch_lock=false`. `use_jacobian_predictor` has no effect for complex paths, which use angular-profile matching. Both geometries and `precision=:double`/`:quad` are supported.
 
 !!! warning "Complex branches"
-    A closed path can exchange eigenmodes. Its final value need not equal its initial value.
-    Nearly coalescing eigenvalues can make continuation and parameter derivatives ill-conditioned.
+    A closed path can exchange eigenmodes. Its final value need not equal its initial value. Nearly coalescing eigenvalues can make continuation and parameter derivatives ill-conditioned.
 
 ## Multiple degrees
 
@@ -273,9 +228,7 @@ rmn(1, 1:24, 1.25, [0.4, 1.0, 3.0];
     spheroid=:oblate, precision=:quad, kind=3, scaled=true)
 ~~~
 
-Rows correspond to coordinates; columns correspond to degrees.
-A scalar coordinate gives one row. Single-degree calls return vectors,
-including length-one vectors for scalar coordinates.
+Rows correspond to coordinates; columns correspond to degrees. A scalar coordinate gives one row. Single-degree calls return vectors, including length-one vectors for scalar coordinates.
 
 ## Scaled values and logarithmic derivatives
 
@@ -293,19 +246,14 @@ r = rmn(1, 2, 1.25, 2.0;
     kind=2, precision=:quad, scaled=true, logderivative=true)
 ~~~
 
-With `scaled=true`, `value` and `derivative` each contain
-`mantissa` and integer `exponent` arrays.
-For finite nonzero values, `1≤abs(mantissa)<10`.
-Complex mantissas use a common exponent for both components;
-zeros and nonfinite values use exponent zero.
+With `scaled=true`, `value` and `derivative` each contain `mantissa` and integer `exponent` arrays. For finite nonzero values, $1 \leq | \mathrm{mantissa} | < 10$. Complex mantissas use a common exponent for both components; zeros and nonfinite values use exponent zero.
 
 !!! warning "Range and zeros"
-    Scaling extends the representable magnitude, not the number of accurate digits.
-    `logderivative=true` uses one-sided endpoint limits and returns `NaN` at other computed zeros. Unscaled values may overflow even when the logarithmic derivative remains finite.
+    Scaling extends the representable magnitude, not the number of accurate digits. `logderivative=true` uses one-sided endpoint limits and returns `NaN` at other computed zeros. Unscaled values may overflow even when the logarithmic derivative remains finite.
 
 ## Higher coordinate derivatives
 
-For `λ=λₘₙ(c)` and `σ=1` (prolate) or `σ=-1` (oblate):
+For $\lambda = \lambda_{mn}(c)$ and $\sigma=1$ (prolate) or $\sigma=-1$ (oblate):
 
 ~~~math
 S''=\frac{2\eta S'-
@@ -326,19 +274,14 @@ r.second_derivative
 
 Both options also work with scaled outputs and degree ranges.
 
-Use `derivatives=3` or `4` to append `third_derivative` and `fourth_derivative`.
-Endpoint derivatives use one-sided limits. Oblate `x=0` is supported.
-`derivatives=2` is equivalent to `second_derivative=true`.
+Use `derivatives=3` or `4` to append `third_derivative` and `fourth_derivative`. Endpoint derivatives use one-sided limits. Oblate $x=0$ is supported. `derivatives=2` is equivalent to `second_derivative=true`.
 
 !!! note "Singular endpoints"
-    The formulas above apply away from singular endpoints.
-    Regular endpoint derivatives use finite or infinite one-sided limits.
-    Angular second-kind derivatives diverge at `η=±1`.
-    Prolate radial kinds 2–4 at `x=1` return `NaN` for real or complex parameters.
+    The formulas above apply away from singular endpoints. Regular endpoint derivatives use finite or infinite one-sided limits. Angular second-kind derivatives diverge at $\eta = \pm 1$. Prolate radial kinds 2–4 at $x=1$ return `NaN` for real or complex parameters.
 
 ## Radial Wronskians
 
-For real `c>0` and nonsingular radial coordinates:
+For real $c > 0$ and nonsingular radial coordinates:
 
 ~~~math
 W=R_1R_2'-R_1'R_2,\qquad
@@ -348,30 +291,20 @@ W=R_1R_2'-R_1'R_2,\qquad
 
 | `radial_wronskian` form | Output |
 |:--|:--|
-| `:raw` (default) | `W` |
-| `:normalized` | `Ŵ` |
-| `:error` | `ε_W` |
+| `:raw` (default) | $W$ |
+| `:normalized` | $\hat{W}$ |
+| `:error` | $\varepsilon_W$ |
 
-`radial_wronskian(m,n,c,x; spheroid=:prolate, precision=:double, form=:raw)`
-uses radial kinds 1 and 2 and their coordinate derivatives.
-`m,n` are integer order and degree with `0≤m≤n`. Standard normalization requires finite `c≠0`.
-`x` is a real scalar or nonempty vector: use prolate `x>1` or oblate `x≥0`.
-`spheroid=:oblate` selects `σ=-1`; `precision=:quad` selects quad precision.
-`normalization=:static` includes `c=0`, with $W=1/(x^2-\sigma)$ and
-normalized output $(x^2-\sigma)W$.
+`radial_wronskian(m,n,c,x; spheroid=:prolate, precision=:double, form=:raw)` uses radial kinds 1 and 2 and their coordinate derivatives. $m,n$ are integer order and degree with $0 \leq m \leq n$. Standard normalization requires finite $c \neq 0$. $x$ is a real scalar or nonempty vector: use prolate $x > 1$ or oblate $x \geq 0$. `spheroid=:oblate` selects $\sigma = -1$; `precision=:quad` selects quad precision. `normalization=:static` includes $c=0$, with $W=1/(x^2-\sigma)$ and normalized output $(x^2-\sigma)W$.
 
-Every form returns a vector, including for scalar `x`. Raw and normalized
-entries are complex; error entries are real. Normalized forms preserve scaling
-in intermediate products. Complex `c` is accepted under the same conventions as
-`rmn`; the unit-normalization check stated above is for real `c>0`.
+Every form returns a vector, including for scalar $x$. Raw and normalized entries are complex; error entries are real. Normalized forms preserve scaling in intermediate products. Complex $c$ is accepted under the same conventions as `rmn`; the unit-normalization check stated above is for real $c > 0$.
 
 ~~~julia
 radial_wronskian(1, 2, 1.25, [1.5, 2.0, 4.0];
     precision=:quad, form=:error)
 ~~~
 
-The prolate identity is [DLMF 30.11.7](https://dlmf.nist.gov/30.11#E7);
-the oblate factor follows its radial equation and normalization.
+The prolate identity is [DLMF 30.11.7](https://dlmf.nist.gov/30.11#E7), while the oblate factor follows its radial equation and normalization.
 
 ## Accuracy estimates
 
@@ -391,7 +324,7 @@ the oblate factor follows its radial equation and normalization.
 Positive entries estimate decimal digits. `0` reports no reliable digits and `-1` means no estimate is available. Invalid inputs raise the corresponding wave-function errors. Nonfinite values receive `-1` when evaluation returns them.
 
 !!! note "Default estimates"
-    For real coordinates, only radial `kind=2` has a native radial estimator, so the default radial call (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter (`abs(c)≤1e-4`), purely imaginary complex-parameter, and refined expansion evaluations and static radial normalization have no native digit estimates. See [`accuracy`](@ref).
+    For real coordinates, only radial `kind=2` has a native radial estimator, so the default radial call (`kind=1`) returns `-1`. Angular second-kind, endpoint, small-parameter ($|c| \leq 10^{-4}$), purely imaginary complex-parameter, and refined expansion evaluations and static radial normalization have no native digit estimates. See [`accuracy`](@ref).
 
 ~~~julia
 accuracy(0, 1, 2.0, [1.5]; target=:radial, kind=2)
