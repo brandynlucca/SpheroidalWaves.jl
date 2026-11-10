@@ -63,7 +63,7 @@ jobs:
           for platform in supported_platforms()
               BinaryBuilder.Auditor.generic_march(platform)
           end
-      - name: Build and audit both precision libraries
+      - name: Build and audit all precision libraries
         run: >-
           julia --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
           --verbose --deploy=local
@@ -138,13 +138,14 @@ jobs:
           using SpheroidalWaves_jll
           ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
           ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
+          ENV["SPHEROIDALWAVES_LIBRARY_MPFR"] = SpheroidalWaves_jll.libspheroidal_batch_mpfr_path
           using SpheroidalWaves
           @testset "JLL libraries and runtime dependencies" begin
               @test !isdir("build")
               @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
               @test realpath(dirname(dirname(pathof(SpheroidalWaves_jll)))) == realpath("binarybuilder-products/SpheroidalWaves_jll")
               @test SpheroidalWaves.SpheroidalWaves_jll === SpheroidalWaves_jll
-              for precision in (:double,:quad)
+              for precision in (:double,:quad,:mpfr)
                   library = SpheroidalWaves.backend_library(;precision)
                   @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]
                   @test occursin("/artifacts/", replace(library, '\\' => '/'))
@@ -167,6 +168,12 @@ jobs:
                       end
                   end
               end
+          end
+          @testset "Arbitrary precision JLL backend" begin
+              value = eigenvalue(0, 0, 1; precision_bits=160)
+              reference = parse(BigFloat, "0.31900005514689273978398198587182649410381437651074172911497005923805300976367"; precision=256)
+              @test precision(value) == 160
+              @test isapprox(value, reference; rtol=big"1e-46")
           end
           include("test/quad_precision.jl")
           include("test/numerical_regressions.jl")
@@ -217,7 +224,7 @@ jobs:
           if [[ -n "$existing" ]]; then
             echo "$existing" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all recipe targets. Native double/quad checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
+            printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all recipe targets. Native double, quad, and MPFR checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
               "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/yggdrasil-pr.md"
             gh pr create --repo JuliaPackaging/Yggdrasil --base master --head "$owner:$branch" \
               --title "[SpheroidalWaves] Build v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
