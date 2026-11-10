@@ -13,7 +13,8 @@ export radial_wronskian, accuracy
 
 const _backend_libraries = Dict{Symbol, Union{Nothing, String}}(
     :double => nothing,
-    :quad => nothing
+    :quad => nothing,
+    :mpfr => nothing
 )
 
 const _backend_handles = Dict{String, Ptr{Cvoid}}()
@@ -21,6 +22,7 @@ const _backend_registry_lock = ReentrantLock()
 
 const _ENV_BACKEND_DOUBLE = "SPHEROIDALWAVES_LIBRARY_DOUBLE"
 const _ENV_BACKEND_QUAD = "SPHEROIDALWAVES_LIBRARY_QUAD"
+const _ENV_BACKEND_MPFR = "SPHEROIDALWAVES_LIBRARY_MPFR"
 
 function _with_backend_registry_lock(f::F) where {F}
     lock(_backend_registry_lock)
@@ -38,14 +40,14 @@ function _validate_precision(precision::Symbol)
 end
 
 function set_backend_library!(path::AbstractString; precision::Symbol = :double)
-    _validate_precision(precision)
+    precision === :mpfr || _validate_precision(precision)
     return _with_backend_registry_lock() do
         _backend_libraries[precision] = String(path)
     end
 end
 
 function backend_library(; precision::Symbol = :double)
-    _validate_precision(precision)
+    precision === :mpfr || _validate_precision(precision)
     return _with_backend_registry_lock() do
         _backend_libraries[precision]
     end
@@ -75,6 +77,9 @@ function _configure_backends_from_env!()
     if haskey(ENV, _ENV_BACKEND_QUAD)
         configured_any |= _set_backend_from_candidate(ENV[_ENV_BACKEND_QUAD], :quad, "ENV[$_ENV_BACKEND_QUAD]")
     end
+    if haskey(ENV, _ENV_BACKEND_MPFR)
+        configured_any |= _set_backend_from_candidate(ENV[_ENV_BACKEND_MPFR], :mpfr, "ENV[$_ENV_BACKEND_MPFR]")
+    end
     return configured_any
 end
 
@@ -94,13 +99,17 @@ function _configure_backends_from_jll!()
         SpheroidalWaves_jll.libspheroidal_batch_double_path, :double, "SpheroidalWaves_jll")
     configured_any |= _set_backend_from_candidate(
         SpheroidalWaves_jll.libspheroidal_batch_quad_path, :quad, "SpheroidalWaves_jll")
+    if isdefined(SpheroidalWaves_jll, :libspheroidal_batch_mpfr_path)
+        configured_any |= _set_backend_from_candidate(
+            SpheroidalWaves_jll.libspheroidal_batch_mpfr_path, :mpfr, "SpheroidalWaves_jll")
+    end
     return configured_any
 end
 
 function _configure_backends_from_local_build!(build_root::AbstractString = normpath(joinpath(
         dirname(@__FILE__), "..", "build")))
     configured_any = false
-    for precision in (:double, :quad)
+    for precision in (:double, :quad, :mpfr)
         backend_library(precision = precision) === nothing || continue
         stem = "spheroidal_batch_$(precision)"
         filename = _backend_filename(stem)
@@ -119,7 +128,7 @@ function _configure_backends_from_local_build!(build_root::AbstractString = norm
 end
 
 function _require_backend_library(precision::Symbol)
-    _validate_precision(precision)
+    precision === :mpfr || _validate_precision(precision)
     lib = _with_backend_registry_lock() do
         _backend_libraries[precision]
     end
@@ -381,10 +390,12 @@ include("diagnostics.jl")
 include("scaled_values.jl")
 include("angular_coefficients.jl")
 include("arbitrary_precision.jl")
+include("mpfr_backend.jl")
 include("angular_second_kind.jl")
 include("parameter_derivatives.jl")
 include("radial_parameter_derivatives.jl")
 include("integral_eigenvalues.jl")
+include("precision_quantities.jl")
 include("coordinate_zeros.jl")
 
 function _call_real_smn(
@@ -1004,9 +1015,12 @@ end
 function smn(m::Integer, n::Integer, c::Union{Real, Complex}, eta::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         kind::Integer = 1, second_derivative::Bool = false, scaled::Bool = false, logderivative::Bool = false,
-        derivatives::Integer = 1)
+        derivatives::Integer = 1, precision_bits = nothing, max_terms::Integer = 512)
     _validate_wave_arguments(m, n, c, eta, spheroid, precision, :angular; kind)
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    precision_bits === nothing || return _smn_at_precision(m, n, c, eta;
+        spheroid, precision, precision_bits, max_terms, normalize, kind,
+        derivatives, second_derivative, scaled, logderivative)
     derivatives > 2 &&
         return _coordinate_derivatives(m, n, c, eta, spheroid, precision, :angular,
             kind, normalize, scaled, logderivative, derivatives)
@@ -1169,9 +1183,13 @@ Four kinds of radial functions are available.
 function rmn(m::Integer, n::Integer, c::Union{Real, Complex}, x::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1,
         second_derivative::Bool = false, scaled::Bool = false, logderivative::Bool = false,
-        derivatives::Integer = 1, normalization::Symbol = :standard)
+        derivatives::Integer = 1, normalization::Symbol = :standard,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_wave_arguments(m, n, c, x, spheroid, precision, :radial; kind, normalization)
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    precision_bits === nothing || return _rmn_at_precision(m, n, c, x;
+        spheroid, precision, precision_bits, max_terms, kind, normalization,
+        derivatives, second_derivative, scaled, logderivative)
     derivatives > 2 &&
         return _coordinate_derivatives(m, n, c, x, spheroid, precision, :radial,
             kind, false, scaled, logderivative, derivatives; normalization)
@@ -1258,11 +1276,13 @@ Normalized forms preserve scaling during intermediate products.
 function radial_wronskian(
         m::Integer, n::Integer, c::Union{Real, Complex}, x::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, form::Symbol = :raw,
-        normalization::Symbol = :standard)
+        normalization::Symbol = :standard, precision_bits = nothing, max_terms::Integer = 512)
     form in (:raw, :normalized, :error) ||
         throw(ArgumentError("form must be :raw, :normalized or :error"))
 
     _validate_wave_arguments(m, n, c, x, spheroid, precision, :radial; normalization)
+    precision_bits === nothing || return _radial_wronskian_at_precision(
+        m, n, c, x, spheroid, precision, form, normalization, precision_bits, max_terms)
     if normalization === :static
         r1 = _static_radial_values(m, n, c, x, spheroid, precision, 1)
         r2 = _static_radial_values(m, n, c, x, spheroid, precision, 2)
@@ -1325,10 +1345,9 @@ For the separation constant with complex `c`, follow degree `n` from `real(c)` v
 the same mode used by `smn` and `rmn`. Use `eigenvalue_sweep` with a complex
 vector for continuation along another path; closed paths can exchange modes.
 
-`precision_bits=p` refines separation constants in Julia and returns `p`-bit
-`BigFloat` components. `max_terms` bounds the expansion; failed convergence
-throws. Integral operators are unsupported.
-See [Precision and outputs](@ref precision-and-outputs) for accuracy and native mode limits.
+`precision_bits=p` uses the MPFR backend and returns `p`-bit `BigFloat` components.
+`max_terms` bounds the expansion; failed convergence throws.
+See [Precision and outputs](@ref precision-and-outputs) for accuracy limits.
 
 Args:
     m, n, c: spheroidal parameters
@@ -1347,8 +1366,9 @@ function eigenvalue(m::Integer, n::Integer, c::Union{Real, Complex};
     operator in (:separation, :concentration, :fourier) ||
         throw(ArgumentError("operator must be :separation, :concentration or :fourier"))
     if precision_bits !== nothing
-        operator === :separation && form === :value ||
-            throw(ArgumentError("precision_bits currently supports only separation eigenvalues with form=:value"))
+        operator === :separation || return _integral_eigenvalue_at_precision(
+            m, n, c, spheroid, precision, operator, form, precision_bits, max_terms)
+        form === :value || throw(ArgumentError("the separation constant supports only form=:value"))
         _validate_coefficient_options(m, n, c, spheroid, precision, nothing,
             max_terms, :orthonormal)
         bits = _validate_precision_bits(precision_bits)
@@ -1385,6 +1405,7 @@ include("eigenvalue_sweep.jl")
 Differentiate [`eigenvalue`](@ref) with respect to `c`. Order and degree satisfy
 `0 <= m <= n`. The default uses analytic differentiation; an explicit `h`
 selects finite differences.
+`precision_bits=p` requires `h=nothing` and uses analytic identities for both orders.
 
 ### Keywords
 
@@ -1393,7 +1414,7 @@ selects finite differences.
   components in the result.
 - `operator=:separation`: differentiate the separation constant.
   `:concentration` and `:fourier` require real `c >= 0`, `m=0`, and `:prolate`.
-- `order=1`: use `order=2` for the second parameter derivative. This differences
+- `order=1`: use `order=2` for the second parameter derivative. Without `precision_bits`, this differences
   analytic first derivatives with fourth-order stencils and step refinement.
   Complex results have `d2_dcreal2`, `d2_dcreal_dcimag`, and `d2_dcimag2` fields.
   `diagnostics=true` appends a shared `metadata` field for order 2.
@@ -1449,7 +1470,7 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
         diagnostics::Bool = false, adaptive::Bool = true,
         rtol::Real = 1e-6, atol::Real = 1e-10,
         operator::Symbol = :separation, form::Symbol = :value,
-        order::Integer = 1)
+        order::Integer = 1, precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
     operator in (:separation, :concentration, :fourier) ||
@@ -1457,6 +1478,8 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
     operator === :separation && form !== :value &&
         throw(ArgumentError("the separation constant supports only form=:value"))
+    precision_bits === nothing || return _eigen_jacobian_at_precision(
+        m, n, c, spheroid, precision, operator, form, precision_bits, max_terms, order, h, diagnostics)
     order == 2 && return _eigen_curvature(m, n, c, spheroid, precision, operator, form, h,
         diagnostics, adaptive, rtol, atol)
     operator!==:separation && return _integral_eigen_jacobian(m, n, c, spheroid, precision,
@@ -1544,13 +1567,19 @@ function jacobian_smn(
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false, h = nothing,
         kind::Integer = 1,
         diagnostics::Bool = false, adaptive::Bool = true,
-        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
+        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     _validate_jacobian_tolerances(rtol, atol)
     _validate_wave_arguments(m, n, c, eta, spheroid, precision, :angular; kind)
     kind == 2 && normalize &&
         throw(ArgumentError("normalize=true is only defined for angular kind=1; Qs uses the DLMF second-kind normalization"))
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
+    if precision_bits !== nothing
+        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
+        return _angular_parameter_derivatives_at_precision(m, n, c, eta;
+            spheroid, precision, precision_bits, max_terms, normalize, kind, diagnostics)
+    end
     order == 2 && return _wave_curvature(
         m, n, c, eta, spheroid, precision, kind, normalize, :angular,
         h, diagnostics, adaptive, rtol, atol)
@@ -1686,12 +1715,18 @@ function jacobian_rmn(
         m::Integer, n::Integer, c::Union{Real, Complex}, x::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1, h = nothing,
         diagnostics::Bool = false, adaptive::Bool = true,
-        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1, normalization::Symbol = :standard)
+        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1, normalization::Symbol = :standard,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     normalization === :standard && _validate_radial_parameter(c)
     _validate_jacobian_tolerances(rtol, atol)
     _validate_wave_arguments(m, n, c, x, spheroid, precision, :radial; kind, normalization)
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
+    if precision_bits !== nothing
+        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
+        return _radial_parameter_derivatives_at_precision(m, n, c, x;
+            spheroid, precision, precision_bits, max_terms, kind, normalization, diagnostics)
+    end
     order == 2 &&
         return _wave_curvature(m, n, c, x, spheroid, precision, kind, false, :radial,
             h, diagnostics, adaptive, rtol, atol; normalization)
@@ -1800,6 +1835,7 @@ end
 Solve `eigenvalue(m, n, c) = lambda_target` for real `c`.
 `m` and `n` are integer order and degree with `0 <= m <= n`;
 `lambda_target` is the real target in the selected `operator` and `form`.
+With `precision_bits=p`, outputs have `p` bits and tolerances default to `2^(-p-8)`; supplied tolerances may tighten them.
 
 With `operator=:concentration`, solve for real prolate bandwidth with `m=0`.
 `form=:value` interprets the target as Λ in [0,1); `:complement` as 1-Λ in
@@ -1862,12 +1898,16 @@ function find_c_for_eigenvalue(m::Integer, n::Integer, lambda_target::Real;
         rtol::Union{Nothing, Real} = nothing,
         maxiter::Integer = 160,
         use_jacobian::Bool = true,
-        operator::Symbol = :separation, form::Symbol = :value)
+        operator::Symbol = :separation, form::Symbol = :value,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     operator in (:separation, :concentration) ||
         throw(ArgumentError("inverse bandwidth supports operator=:separation or :concentration"))
     operator===:separation && form!==:value &&
         throw(ArgumentError("the separation constant supports only form=:value"))
+    precision_bits === nothing || return _find_c_at_precision(
+        m, n, lambda_target, bracket, spheroid, precision, operator, form,
+        precision_bits, atol, rtol, maxiter, use_jacobian, max_terms)
     T = precision===:quad ? BigFloat : Float64
     atol = atol===nothing ?
            (operator===:separation ? T(1e-10) :
@@ -2150,7 +2190,14 @@ function jacobian_smn(
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         kind::Integer = 1, h = nothing,
         diagnostics::Bool = false, adaptive::Bool = true,
-        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
+        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
+    if precision_bits !== nothing
+        _validate_jacobian_tolerances(rtol, atol)
+        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
+        return _angular_parameter_derivatives_at_precision(m, n, c, z;
+            spheroid, precision, precision_bits, max_terms, normalize, kind, diagnostics)
+    end
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :angular, kind, normalize, :standard,
         h, diagnostics, adaptive, rtol, atol, order)
@@ -2161,7 +2208,14 @@ function jacobian_rmn(
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1,
         normalization::Symbol = :standard, h = nothing,
         diagnostics::Bool = false, adaptive::Bool = true,
-        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1)
+        rtol::Real = 1e-6, atol::Real = 1e-10, order::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
+    if precision_bits !== nothing
+        _validate_jacobian_tolerances(rtol, atol)
+        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
+        return _radial_parameter_derivatives_at_precision(m, n, c, z;
+            spheroid, precision, precision_bits, max_terms, kind, normalization, diagnostics)
+    end
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :radial, kind, false, normalization,
         h, diagnostics, adaptive, rtol, atol, order)
@@ -2177,7 +2231,11 @@ end
 function smn(m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false, kind::Integer = 1,
         scaled::Bool = false, logderivative::Bool = false,
-        second_derivative::Bool = false, derivatives::Integer = 1)
+        second_derivative::Bool = false, derivatives::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
+    precision_bits === nothing || return _smn_at_precision(m, n, c, z;
+        spheroid, precision, precision_bits, max_terms, normalize, kind,
+        derivatives, second_derivative, scaled, logderivative)
     _complex_coordinate_wave(m, n, c, z, spheroid, precision, :angular, kind, normalize,
         scaled, logderivative, second_derivative, derivatives, :standard)
 end
@@ -2185,7 +2243,11 @@ end
 function rmn(m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1, normalization::Symbol = :standard,
         scaled::Bool = false, logderivative::Bool = false,
-        second_derivative::Bool = false, derivatives::Integer = 1)
+        second_derivative::Bool = false, derivatives::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
+    precision_bits === nothing || return _rmn_at_precision(m, n, c, z;
+        spheroid, precision, precision_bits, max_terms, kind, normalization,
+        derivatives, second_derivative, scaled, logderivative)
     _complex_coordinate_wave(m, n, c, z, spheroid, precision, :radial, kind, false,
         scaled, logderivative, second_derivative, derivatives, normalization)
 end
@@ -2198,10 +2260,12 @@ end
 function radial_wronskian(
         m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, form::Symbol = :raw,
-        normalization::Symbol = :standard)
+        normalization::Symbol = :standard, precision_bits = nothing, max_terms::Integer = 512)
     form in (:raw, :normalized, :error) ||
         throw(ArgumentError("form must be :raw, :normalized or :error"))
     _validate_complex_coordinates(m, n, c, z, spheroid, precision, :radial; normalization)
+    precision_bits === nothing || return _radial_wronskian_at_precision(
+        m, n, c, z, spheroid, precision, form, normalization, precision_bits, max_terms)
     R = precision===:quad ? BigFloat : Float64
     return _with_swprecision(_coordinate_precision(m, n, c, z)) do
         first = _complex_coordinate_data(
@@ -2229,6 +2293,8 @@ function accuracy(
 end
 
 include("degree_ranges.jl")
+include("precision_waves.jl")
+include("precision_radial.jl")
 
 function _initialize_backends!(configure_jll = _configure_backends_from_jll!,
         configure_local = _configure_backends_from_local_build!,
@@ -2281,6 +2347,7 @@ __init__() = _initialize_backends!()
         empty!(_backend_handles)
         _backend_libraries[:double] = nothing
         _backend_libraries[:quad] = nothing
+        _backend_libraries[:mpfr] = nothing
     end
 end
 

@@ -209,76 +209,109 @@ function _small_parameter_smn(m, n, c, points, spheroid, precision, normalize)
     return _evaluate_coefficient_vector(plan, scale .* plan.v, points)
 end
 
-# Evaluate a coefficient vector and its coordinate derivative in one recurrence.
-# Factoring (1-x^2)^(m/2) gives explicit endpoint limits without Inf-Inf sums.
-function _evaluate_coefficient_vector(
-        plan, coefficients, points; second_derivative = false, regular_factor = false)
-    values = zeros(eltype(coefficients), length(points))
-    derivatives = similar(values)
-    seconds = similar(values)
+function _legendre_recurrence_factors(plan)
+    cache = get(plan, :legendre_factors, nothing)
+    bits, rounding = _swsettings()
+    if cache!==nothing
+        stored = cache[]
+        if stored!==nothing && stored[1]==bits && stored[2]==rounding
+            return stored[3]
+        end
+    end
     m = plan.m
-    initial = inv(sqrt(_SWFloat("2")))
+    factors = map(m:(last(plan.degrees)-1)) do l
+        k = _SWFloat(l+1)
+        a = sqrt((4k^2-1)/((k-m)*(k+m)))
+        b = l==m ? zero(k) : sqrt((2k+1)*(k-1-m)*(k-1+m)/((2k-3)*(k-m)*(k+m)))
+        (a, b)
+    end
+    if cache!==nothing && bits<=Base.precision(real(plan.lambda)) &&
+       _coefficient_eigenpair_bytes(plan)<=_coefficient_eigenpair_cache_limit
+        cache[] = (bits, rounding, factors)
+    end
+    return factors
+end
+
+# Differentiate the normalized Legendre recurrence and its regular endpoint factor.
+function _evaluate_coefficient_vector(plan, coefficients, points;
+        second_derivative = false, regular_factor = false, derivatives = 1)
+    order = max(derivatives, second_derivative ? 2 : 1)
+    order in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    real_result = eltype(coefficients)<:Real && all(x -> x isa Real, points)
+    V = real_result ? _SWFloat : Complex{_SWFloat}
+    arrays = [zeros(V, length(points)) for _ in 0:order]
+    m = plan.m
+    initial = inv(sqrt(_SWFloat(2)))
     for k in 1:m
         initial *= -sqrt(_SWFloat(2k+1)/(2k))
     end
-    # These normalized recurrence factors depend on order and precision only.
-    # Compute them once for the whole point batch, retaining the same arithmetic.
-    factors = map(m:(last(plan.degrees) - 1)) do l
-        k = _SWFloat(l+1)
-        a = sqrt((4k^2-1)/((k-m)*(k+m)))
-        b = l == m ? zero(k) : sqrt((2k+1)*(k-1-m)*(k-1+m)/((2k-3)*(k-m)*(k+m)))
-        (a, b)
-    end
+    factors = _legendre_recurrence_factors(plan)
     for (i, point) in enumerate(points)
-        x = _SWFloat(point)
-        p = initial
-        previous, dp, dprevious = zero(p), zero(p), zero(p)
-        ddp, ddprevious = zero(p), zero(p)
-        f, df = zero(eltype(coefficients)), zero(eltype(coefficients))
-        ddf = zero(f)
+        x = point isa Real ? _SWFloat(point) : _SWFloat_complex(point)
+        P = typeof(x)
+        p, previous, next = (zeros(P, order+1) for _ in 1:3)
+        f = zeros(V, order+1)
+        p[1] = initial
         index = 1
         for l in m:last(plan.degrees)
-            if l == plan.degrees[index]
-                f += coefficients[index]*p
-                df += coefficients[index]*dp
-                second_derivative && (ddf += coefficients[index]*ddp)
+            if l==plan.degrees[index]
+                for j in 0:order
+                    f[j+1] += coefficients[index]*p[j+1]
+                end
                 index += 1
-                index > length(coefficients) && break
+                index>length(coefficients) && break
             end
-            a, b = factors[l - m + 1]
-            second_derivative && ((ddprevious, ddp) = (ddp, a*(2dp+x*ddp)-b*ddprevious))
-            previous, p, dprevious, dp = p, a*x*p-b*previous, dp, a*(p+x*dp)-b*dprevious
+            a, b = factors[l-m+1]
+            next[1] = a*(x*p[1])-b*previous[1]
+            next[2] = a*(x*p[2]+p[1])-b*previous[2]
+            for j in 2:order
+                next[j+1] = a*(x*p[j+1]+j*p[j])-b*previous[j+1]
+            end
+            previous, p, next = p, next, previous
+        end
+        if regular_factor
+            for j in 0:order
+                arrays[j+1][i] = f[j+1]
+            end
+            continue
         end
         u = (1-x)*(1+x)
-        if regular_factor
-            values[i], derivatives[i], seconds[i] = f, df, ddf
-        elseif iszero(u)
-            values[i] = m == 0 ? f : zero(f)
-            derivatives[i] = m == 0 ? df :
-                             m == 1 ?
-                             (iszero(f) ? zero(f) :
-                              _directed_infinity(
-                -x*f, coefficients isa
-                      AbstractVector{<:Real}, _SWFloat)) :
-                             m == 2 ? -2x*f : zero(f)
-            if second_derivative
-                seconds[i] = m==0 ? ddf :
-                             m==2 ? -2*f-4x*df :
-                             m==4 ? 8f :
-                             m>4 ? zero(f) :
-                             _directed_infinity(
-                    (m==1 ? -1 : 1)*f, coefficients isa AbstractVector{<:Real}, _SWFloat)
+        if iszero(u) && isodd(m)
+            first_nonzero = findfirst(!iszero, f)
+            for j in 0:order
+                if first_nonzero===nothing || m//2+first_nonzero-1>j
+                    arrays[j+1][i] = zero(V)
+                else
+                    k = first_nonzero-1
+                    power = m//2+k
+                    leading = f[k+1]*(-real(x))^(k+j)*
+                        prod(power-r for r in 0:(j-1); init = 1)
+                    arrays[j+1][i] = _directed_infinity(leading, real_result, _SWFloat)
+                end
+            end
+            continue
+        end
+        factor = zeros(P, order+1)
+        if iszero(u)
+            power = m÷2
+            for j in power:min(2power, order)
+                factor[j+1] = factorial(j)*binomial(power, j-power)*
+                    (-2x)^(2power-j)*(-1)^(j-power)
             end
         else
-            factor = u^(m//2)
-            values[i] = factor*f
-            derivatives[i] = factor*(df-m*x/u*f)
-            second_derivative &&
-                (seconds[i] = factor*(ddf-2m*x/u*df+(m*(m-2)*x^2/u^2-m/u)*f))
+            factor[1] = iseven(m) ? u^(m÷2) : u^(m//2)
+            for j in 0:(order-1)
+                previous_factor = j==0 ? zero(P) : factor[j]
+                factor[j+2] = ((m//2-j)*(-2x)*factor[j+1]-
+                    2*(m//2*j-j*(j-1)//2)*previous_factor)/u
+            end
+        end
+        for j in 0:order
+            arrays[j+1][i] = sum(binomial(j, k)*factor[k+1]*f[j-k+1] for k in 0:j)
         end
     end
-    result = (; value = values, derivative = derivatives)
-    return second_derivative ? (; result..., second_derivative = seconds) : result
+    names = (:value, :derivative, :second_derivative, :third_derivative, :fourth_derivative)
+    return NamedTuple{names[1:(order+1)]}(Tuple(arrays))
 end
 
 function _coefficient_phase(plan, precision; mode = nothing)
@@ -416,7 +449,7 @@ with complex counterparts for complex `c`. `rtol` controls coefficient-vector
 convergence, not relative accuracy of every tiny coefficient. An unresolved
 mode or exhausted `max_terms` raises an error.
 
-`precision_bits=p` refines the expansion in Julia and returns `p`-bit `BigFloat`
+`precision_bits=p` requires the MPFR backend and returns `p`-bit `BigFloat`
 components, including sensitivities. `rtol` may tighten, but cannot relax, its
 normwise accuracy target. See [Precision and outputs](@ref precision-and-outputs).
 
@@ -560,7 +593,7 @@ end
 
 """
     amn(m, n, c; spheroid=:prolate, precision=:double,
-                  rtol=nothing, max_terms=512)
+                  rtol=nothing, max_terms=512, precision_bits=nothing)
 
 Return the dimensionless DLMF 30.11.4 radial factor `A_n^m(σ*c^2)` in
 Meixner–Schäfke normalization, where `σ=1` for prolate and `σ=-1` for oblate.
@@ -569,13 +602,16 @@ This function accepts **signed** integer order `-n ≤ m ≤ n`. For negative or
 the unnormalized angular coefficients of order `p`. Positive order includes
 the finite extension below degree `m`, so it is generally not `sum(d_l)`.
 
-`A_n^m(0)=1`. Both real and complex parameters are supported. The result is
-Float64 or BigFloat according to `precision`, or its complex counterpart.
+`A_n^m(0)=1`. Both real and complex parameters are supported. Without `precision_bits`,
+the result is Float64 or BigFloat according to `precision`, or its complex counterpart.
 An unresolved coefficient expansion or singular finite extension raises an error.
 See [`dmn`](@ref) for truncation controls.
 """
 function amn(m::Integer, n::Integer, c::Union{Real, Complex};
-        spheroid::Symbol = :prolate, precision::Symbol = :double, rtol = nothing, max_terms::Integer = 512)
+        spheroid::Symbol = :prolate, precision::Symbol = :double, rtol = nothing, max_terms::Integer = 512,
+        precision_bits = nothing)
+    precision_bits === nothing || return _amn_at_precision(
+        m, n, c, spheroid, precision, precision_bits, rtol, max_terms)
     T = precision === :quad ? BigFloat : Float64
     V = c isa Real ? T : Complex{T}
     p = abs(m)
@@ -591,7 +627,7 @@ end
 
 """
     kmn(m, n, c; spheroid=:prolate, precision=:double,
-                   normalize=false, rtol=nothing, max_terms=512)
+                   normalize=false, rtol=nothing, max_terms=512, precision_bits=nothing)
 
 Return the dimensionless connection coefficient `K_n^m(γ)` in DLMF 30.11.8:
 `S_n^{m(1)}(z,γ) = K_n^m(γ) * Ps_n^m(z,γ^2)`. Here `Ps` is the exterior
@@ -608,7 +644,9 @@ zeros at an arbitrary matching coordinate. Unresolved sums raise an error.
 """
 function kmn(m::Integer, n::Integer, c::Union{Real, Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
-        rtol = nothing, max_terms::Integer = 512)
+        rtol = nothing, max_terms::Integer = 512, precision_bits = nothing)
+    precision_bits === nothing || return _kmn_at_precision(
+        m, n, c, spheroid, precision, normalize, precision_bits, rtol, max_terms)
     T = precision === :quad ? BigFloat : Float64
     V = c isa Real && spheroid === :prolate ? T : Complex{T}
     return _with_coefficient_expansion(

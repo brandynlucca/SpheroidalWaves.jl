@@ -80,9 +80,10 @@ function _coordinate_path(z, target, spheroid)
 end
 
 function _coordinate_continuation(equation, state, anchor, path; max_steps = 100000,
-        step_fraction = 1, step_count = Ref(0))
+        step_fraction = 1, step_count = Ref(0), rtol = nothing,
+        max_terms = max(256, cld(Base.precision(_SWFloat), 2)+64))
     x = anchor
-    tolerance = sqrt(eps(_SWFloat))
+    tolerance = rtol === nothing ? sqrt(eps(_SWFloat)) : rtol
     singularity = equation.spheroid===:prolate ? one(x) :
                   complex(zero(real(x)), one(real(x)))
     step_limit = inv(1+abs(equation.c)+sqrt(abs(equation.lambda)))
@@ -95,7 +96,7 @@ function _coordinate_continuation(equation, state, anchor, path; max_steps = 100
             h = delta*(length/abs(delta))
             x+h!=x ||
                 error("Complex-coordinate continuation exhausted coordinate precision")
-            state = _radial_sensitivity_step(equation, x, state, h; rtol = tolerance)
+            state = _radial_sensitivity_step(equation, x, state, h; rtol = tolerance, max_terms)
             x = length==abs(delta) ? destination : x+h
             steps += 1
             step_count[] += 1

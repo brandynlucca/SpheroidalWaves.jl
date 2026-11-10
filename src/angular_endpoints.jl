@@ -31,6 +31,7 @@ function _angular_endpoint_plan(m, n, c, points, spheroid; precision = :quad)
 end
 
 function _angular_endpoint_coefficients(m, lambda, q, radius)
+    T = real(lambda) isa _SWFloat ? _SWFloat : BigFloat
     coefficients = [one(lambda+q)]
     term_sum, derivative_sum = one(lambda+q), zero(lambda+q)
     power, small = one(radius), 0
@@ -38,16 +39,16 @@ function _angular_endpoint_coefficients(m, lambda, q, radius)
         current = coefficients[k + 1]
         previous = k >= 1 ? coefficients[k] : zero(current)
         previous2 = k >= 2 ? coefficients[k - 1] : zero(current)
-        next = ((BigFloat(k)*(k+2m+1)-lambda+BigFloat(m)*(m+1)+q)*current -
-                2q*previous+q*previous2)/(BigFloat(2)*(k+1)*(k+m+1))
+        next = ((T(k)*(k+2m+1)-lambda+T(m)*(m+1)+q)*current -
+                2q*previous+q*previous2)/(T(2)*(k+1)*(k+m+1))
         push!(coefficients, next)
         derivative_term = (k+1)*next*power
         power *= radius
         term = next*power
         term_sum += term
         derivative_sum += derivative_term
-        tiny = abs(term) <= eps(BigFloat)*abs(term_sum) &&
-               abs(derivative_term) <= eps(BigFloat)*abs(derivative_sum)
+        tiny = abs(term) <= eps(T)*abs(term_sum) &&
+               abs(derivative_term) <= eps(T)*abs(derivative_sum)
         small = tiny ? small+1 : 0
         small >= 3 && break
         k == 1023 && error("Angular endpoint series did not converge")

@@ -266,6 +266,7 @@ function _radial_expansion_batch(plan, points, kind;
     tail = _SWFloat("0")
     propagate = kind>=2 || plan.spheroid===:oblate
     interior = findall(x->x<2 && !(plan.spheroid===:prolate && x==1 && kind>=2), points)
+    initial = nothing
     if propagate && !isempty(interior)
         initial = _radial_expansion_data(plan, _SWFloat("2"), kind)
         tail = max(tail, initial.relative_tail)
@@ -298,7 +299,8 @@ function _radial_expansion_batch(plan, points, kind;
         if plan.spheroid===:prolate && x==1 && kind>=2
             states[i] = ntuple(_->V(NaN), 4)
         elseif !(propagate && i in interior)
-            result = _radial_expansion_data(plan, _SWFloat(x), kind)
+            result = initial!==nothing && x==2 ? initial :
+                     _radial_expansion_data(plan, _SWFloat(x), kind)
             states[i] = result.state
             tail = max(tail, result.relative_tail)
         end

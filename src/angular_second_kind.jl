@@ -49,14 +49,20 @@ end
 # Ferrers (on-the-cut) Qs on -1 < x < 1. DLMF 30.5.2 and 30.5.4 fix
 # its origin data. The joining sums include the finite extension of the
 # Legendre coefficients below degree m: DLMF 30.8(ii), 30.11.4.
-function _qs_initial_data(m, n, c, spheroid, precision; mode = nothing, rtol = nothing)
-    rtol = min(_SWFloat("1e-40"), exp(-2_SWFloat(abs(c)))*_SWFloat("1e-40"),
-        rtol===nothing ? one(_SWFloat) : rtol)
-    max_terms = max(512, (n-m)÷2+2ceil(Int, abs(c))+32)
-    plan = _coefficient_plan(m, n, c; spheroid, precision, rtol, max_terms,
-        eigenvalue_seed = mode === nothing ? nothing : mode.lambda)
+function _qs_initial_data(m, n, c, spheroid, precision; mode = nothing, rtol = nothing,
+        eigenpair = nothing, max_terms = max(512, (n-m)÷2+2ceil(Int, abs(c))+32),
+        tail_rtol = _SWFloat("1e-34"))
+    rtol = eigenpair===nothing ?
+        min(_SWFloat("1e-40"), exp(-2_SWFloat(abs(c)))*_SWFloat("1e-40"),
+            rtol===nothing ? one(_SWFloat) : rtol) :
+        (rtol===nothing ? eps(_SWFloat) : rtol)
+    plan = eigenpair===nothing ?
+        _coefficient_plan(m, n, c; spheroid, precision, rtol, max_terms,
+            eigenvalue_seed = mode === nothing ? nothing : mode.lambda) : eigenpair
     plan.converged || error("Qs coefficient expansion did not converge")
-    scale = _coefficient_phase(plan, precision; mode)*sqrt(_ferrers_norm2(m, n, _SWFloat))
+    phase = eigenpair===nothing ? _coefficient_phase(plan, precision; mode) :
+        _coefficient_phase_at_precision(plan)
+    scale = phase*sqrt(_ferrers_norm2(m, n, _SWFloat))
     sums = _coefficient_joining_sums(plan, scale)
     (; d, dc, weights, weighted, joining, dweighted, djoining, g, dg) = sums
     # For c=0 the extension vanishes and the factorial Wronskian is exact.
@@ -66,7 +72,7 @@ function _qs_initial_data(m, n, c, spheroid, precision; mode = nothing, rtol = n
         error("Qs normalization is singular or numerically unresolved")
     tail = max(sum(abs, d[max(1, end - 3):end])/abs(joining),
         sum(abs, (d .* weights)[max(1, end - 3):end])/abs(weighted))
-    tail <= _SWFloat("1e-34") ||
+    tail <= tail_rtol ||
         error("Qs joining sums did not converge to the required precision")
     origin = _evaluate_coefficient_vector(plan, scale .* plan.v, [_SWFloat("0")])
     dorigin = _evaluate_coefficient_vector(plan, scale .* plan.dv, [_SWFloat("0")])

@@ -5,6 +5,7 @@
 Track the separation constant over a nonempty, finite real grid `c_grid`.
 The grid must be strictly increasing or decreasing; a single point is allowed.
 `m` and the starting degree `n` are integers with `0 <= m <= n`.
+`precision_bits=p` uses arbitrary precision; custom evaluators remain responsible for their accuracy.
 
 ### Keywords
 
@@ -48,8 +49,7 @@ function eigenvalue_sweep(m::Integer,
         branch_lock::Bool = true,
         branch_window::Integer = 1,
         use_jacobian_predictor::Bool = true,
-        evaluator::Function = (mm, nn, cc) -> eigenvalue(
-            mm, nn, cc; spheroid = spheroid, precision = precision))
+        evaluator = nothing, precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     if spheroid != :prolate && spheroid != :oblate
         error("spheroid must be :prolate or :oblate, got :$spheroid")
@@ -60,6 +60,10 @@ function eigenvalue_sweep(m::Integer,
     if branch_window < 0
         error("branch_window must be nonnegative, got $branch_window")
     end
+    precision_bits === nothing || return _real_eigenvalue_sweep_at_precision(
+        m, n, c_grid, spheroid, precision, branch_lock, branch_window,
+        use_jacobian_predictor, evaluator, precision_bits, max_terms)
+    evaluator === nothing && (evaluator = (mm, nn, cc) -> eigenvalue(mm, nn, cc; spheroid, precision))
 
     T = precision === :quad ? BigFloat : Float64
     cvals = _input_float.(T, c_grid)
@@ -197,7 +201,8 @@ coordinate; this function does not impose a globally single-valued branch.
 function eigenvalue_sweep(m::Integer, n::Integer, c_grid::AbstractVector{<:Complex};
         spheroid::Symbol = :prolate, precision::Symbol = :double,
         branch_lock::Bool = true, branch_window::Integer = 1,
-        use_jacobian_predictor::Bool = true, evaluator = nothing)
+        use_jacobian_predictor::Bool = true, evaluator = nothing,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_precision(precision)
     spheroid in (:prolate, :oblate) || error("spheroid must be :prolate or :oblate")
     0 <= m <= n || error("require 0 <= m <= n")
@@ -205,6 +210,8 @@ function eigenvalue_sweep(m::Integer, n::Integer, c_grid::AbstractVector{<:Compl
     branch_window >= 0 || error("branch_window must be nonnegative")
     evaluator === nothing ||
         throw(ArgumentError("complex continuation requires native angular profiles; custom eigenvalue-only evaluators are unsupported"))
+    precision_bits === nothing || return _complex_eigenvalue_sweep_at_precision(
+        m, n, c_grid, spheroid, precision, branch_lock, branch_window, precision_bits, max_terms)
     T = precision === :quad ? BigFloat : Float64
     cvals = _input_float.(Complex{T}, c_grid)
     all(isfinite, cvals) || error("c_grid must be finite at the requested precision")
@@ -228,4 +235,128 @@ function eigenvalue_sweep(m::Integer, n::Integer, c_grid::AbstractVector{<:Compl
         end
     end
     return (; c = cvals, lambda = lambdas, selected_n, switched_branch)
+end
+
+function _real_eigenvalue_sweep_at_precision(m, n, c_grid, spheroid, precision,
+        branch_lock, branch_window, use_jacobian_predictor, evaluator, bits, max_terms)
+    bits = _validate_precision_bits(bits)
+    _with_swprecision(bits+96) do
+        cvals = _SWFloat.(c_grid)
+        all(isfinite, cvals) || throw(ArgumentError("c_grid must be finite"))
+        changes = diff(cvals)
+        (all(>(0), changes) || all(<(0), changes)) ||
+            throw(ArgumentError("c_grid must be strictly monotone"))
+        _validate_coefficient_options(m, n, first(cvals), spheroid, precision, nothing, max_terms, :orthonormal)
+        function sample(degree, c)
+            _validate_coefficient_options(m, degree, c, spheroid, precision, nothing, max_terms, :orthonormal)
+            value = evaluator === nothing ? _solve_coefficient_eigenpair_at_precision(
+                m, degree, c, spheroid, precision, bits+32, nothing, max_terms, false).lambda : evaluator(m, degree, c)
+            value isa Real && isfinite(value) || error("evaluator returned a nonfinite or nonreal eigenvalue")
+            _SWFloat(value)
+        end
+        lambdas = _SWFloat[sample(n, first(cvals))]
+        selected_n = Int[n]
+        switched_branch = falses(length(cvals))
+        for i in 2:length(cvals)
+            dc = cvals[i]-cvals[i-1]
+            predicted = if i>2
+                lambdas[i-1]+dc*(lambdas[i-1]-lambdas[i-2])/(cvals[i-1]-cvals[i-2])
+            elseif use_jacobian_predictor
+                pair = _solve_coefficient_eigenpair_at_precision(
+                    m, n, cvals[1], spheroid, precision, bits+32, nothing, max_terms, true)
+                lambdas[1]+dc*pair.dlambda
+            else
+                lambdas[1]
+            end
+            center = last(selected_n)
+            candidates = branch_lock ? (max(Int(m), center-branch_window):(center+branch_window)) : (n:n)
+            best_degree, best_value, best_distance = n, _SWFloat(NaN), _SWFloat(Inf)
+            for degree in candidates
+                value = sample(degree, cvals[i])
+                distance = abs(value-predicted)
+                if distance<best_distance
+                    best_degree, best_value, best_distance = degree, value, distance
+                end
+            end
+            isfinite(best_distance) || error("No finite continuation candidate at c=$(cvals[i])")
+            push!(lambdas, best_value)
+            push!(selected_n, best_degree)
+            switched_branch[i] = best_degree!=center
+        end
+        (; c = _round_to_bigfloat.(cvals, bits), lambda = _round_to_bigfloat.(lambdas, bits),
+            selected_n, switched_branch)
+    end
+end
+
+function _mpfr_angular_phase_evaluator(m, n, spheroid, precision, bits, max_terms)
+    samples, eigenvalues = Dict{Any, Any}(), Dict{Any, Any}()
+    function pair(c, degree)
+        _validate_coefficient_options(m, degree, c, spheroid, precision, nothing, max_terms, :orthonormal)
+        _solve_coefficient_eigenpair_at_precision(
+            m, degree, c, spheroid, precision, bits+32, nothing, max_terms, false; native_label = true)
+    end
+    function eigen(c, degree)
+        key = (c, degree)
+        haskey(eigenvalues, key) && return eigenvalues[key]
+        value = pair(c, degree).lambda
+        length(eigenvalues)>=64 && empty!(eigenvalues)
+        eigenvalues[key] = value
+    end
+    endpoint_anchor = Ref{Union{Nothing, Bool}}(nothing)
+    endpoint_point = Ref(zero(_SWFloat))
+    function sample(c, degree = n)
+        key = (c, degree)
+        haskey(samples, key) && return samples[key]
+        eigenpair = pair(c, degree)
+        state = _with_swprecision(Base.precision(real(eigenpair.lambda))) do
+            points = _SWFloat[0, 1//4, 1//2, 3//4]
+            values = _evaluate_coefficient_vector(eigenpair, eigenpair.v, points)
+            anchor = iseven(n-m) ? first(values.value) : first(values.derivative)
+            profile = [values.value; values.derivative ./ (n+1)]
+            endpoint_anchor[] === nothing && (endpoint_anchor[] = !(isfinite(anchor) && !iszero(anchor)))
+            if endpoint_anchor[]
+                if iszero(endpoint_point[])
+                    endpoint_point[] = 1-_SWFloat(2)^(-ceil(Int, log2(32*(1+_SWFloat(n)*(n+1)+abs(c)^2))))
+                end
+                endpoint = _evaluate_coefficient_vector(eigenpair, eigenpair.v, [endpoint_point[]])
+                anchor = only(endpoint.value)
+                append!(profile, [anchor, only(endpoint.derivative)/(n+1)])
+            end
+            isfinite(anchor) && !iszero(anchor) && all(isfinite, profile) ||
+                error("Cannot resolve arbitrary-precision angular continuation at c=$c")
+            (; m, n = Int(degree), lambda = eigenpair.lambda, anchor, profile, sign = 1,
+                endpoint_anchor = endpoint_anchor[], endpoint_point = endpoint_point[])
+        end
+        length(samples)>=32 && empty!(samples)
+        samples[key] = state
+    end
+    _AngularModeEvaluator(sample, eigen)
+end
+
+function _complex_eigenvalue_sweep_at_precision(m, n, c_grid, spheroid, precision,
+        branch_lock, branch_window, bits, max_terms)
+    bits = _validate_precision_bits(bits)
+    _with_swprecision(bits+96) do
+        cvals = _SWFloat_complex.(c_grid)
+        all(isfinite, cvals) || throw(ArgumentError("c_grid must be finite"))
+        evaluate = _mpfr_angular_phase_evaluator(m, n, spheroid, precision, bits, max_terms)
+        lambdas = similar(cvals)
+        selected_n = fill(Int(n), length(cvals))
+        switched_branch = falses(length(cvals))
+        if branch_lock
+            state = _initial_angular_phase(evaluate, m, n, first(cvals); branch_window)
+            lambdas[1], selected_n[1] = state.lambda, state.n
+            for i in 2:length(cvals)
+                state = _transport_angular_phase(evaluate, cvals[i-1], state, cvals[i]; branch_window)
+                lambdas[i], selected_n[i] = state.lambda, state.n
+                switched_branch[i] = selected_n[i]!=selected_n[i-1]
+            end
+        else
+            for i in eachindex(cvals)
+                lambdas[i] = evaluate.eigenvalue(cvals[i], n)
+            end
+        end
+        (; c = _round_to_bigfloat.(cvals, bits), lambda = _round_to_bigfloat.(lambdas, bits),
+            selected_n, switched_branch)
+    end
 end
