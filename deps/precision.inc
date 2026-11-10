@@ -7,16 +7,27 @@
 
 ! Supply both literal spellings explicitly; GNU traditional preprocessing cannot stringify tokens.
 #ifdef SWF_PRECISION_MPFR
+#define SW_PRECISION_MODULE spheroidal_precision_mpfr
+#define SW_PROLATE_PARAMETERS prolate_parameters_mpfr
+#define SW_PROLATE_MODULE prolate_swf_mpfr
 #define SW_REAL type(mp_real)
 #define SW_COMPLEX type(mp_complex)
 #define SW_LITERAL(native,decimal) mpreal(decimal)
+#define SW_CONVERT_REAL mpreal
+#define SW_ZERO_INIT
 #else
+#define SW_PROLATE_PARAMETERS prolate_parameters
+#define SW_PROLATE_MODULE prolate_swf
 #define SW_REAL real(sw_kind)
 #define SW_COMPLEX complex(sw_kind)
 #define SW_LITERAL(native,decimal) native
+#define SW_CONVERT_REAL real
+#define SW_ZERO_INIT = 0.0_sw_kind
 #ifdef SWF_PRECISION_QUAD
+#define SW_PRECISION_MODULE spheroidal_precision_quad
 #define SW_REAL_KIND selected_real_kind(33)
 #else
+#define SW_PRECISION_MODULE spheroidal_precision_double
 #define SW_REAL_KIND selected_real_kind(8)
 #endif
 #endif

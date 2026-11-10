@@ -25,7 +25,6 @@ elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
 endif()
 
 set(DOUBLE_BASE
-  "${CMAKE_SOURCE_DIR}/deps/prolate_swf.f90"
   "${CMAKE_SOURCE_DIR}/deps/oblate_swf.f90"
   "${CMAKE_SOURCE_DIR}/deps/complex_prolate_swf.f90"
   "${CMAKE_SOURCE_DIR}/deps/complex_oblate_swf.f90"
@@ -39,7 +38,6 @@ set(DOUBLE_WRAP
 )
 
 set(QUAD_BASE
-  "${CMAKE_SOURCE_DIR}/deps/prolate_swf_quad.f90"
   "${CMAKE_SOURCE_DIR}/deps/oblate_swf_quad.f90"
   "${CMAKE_SOURCE_DIR}/deps/complex_prolate_swf_quad.f90"
   "${CMAKE_SOURCE_DIR}/deps/complex_oblate_swf_quad.f90"
@@ -52,7 +50,8 @@ set(QUAD_WRAP
   "${CMAKE_SOURCE_DIR}/deps/complex_oblate_batch_fortran_quad.f90"
 )
 
-set(ALL_SOURCES ${DOUBLE_BASE} ${DOUBLE_WRAP})
+set(SHARED_KERNELS "${CMAKE_SOURCE_DIR}/deps/precision.F90" "${CMAKE_SOURCE_DIR}/deps/prolate_kernel.F90")
+set(ALL_SOURCES ${SHARED_KERNELS} ${DOUBLE_BASE} ${DOUBLE_WRAP})
 if(SWF_BUILD_QUAD)
   list(APPEND ALL_SOURCES ${QUAD_BASE} ${QUAD_WRAP})
 endif()
@@ -63,7 +62,9 @@ foreach(src ${ALL_SOURCES})
   endif()
 endforeach()
 
-add_library(spheroidal_batch_double SHARED ${DOUBLE_BASE} ${DOUBLE_WRAP} deps/scaled_batch.f90)
+add_library(spheroidal_batch_double SHARED ${SHARED_KERNELS} ${DOUBLE_BASE} ${DOUBLE_WRAP} deps/scaled_batch.f90)
+target_compile_definitions(spheroidal_batch_double PRIVATE SWF_PRECISION_DOUBLE)
+target_include_directories(spheroidal_batch_double PRIVATE "${CMAKE_SOURCE_DIR}/deps")
 target_link_libraries(spheroidal_batch_double PRIVATE OpenMP::OpenMP_Fortran)
 set_target_properties(spheroidal_batch_double PROPERTIES
   OUTPUT_NAME "spheroidal_batch_double"
@@ -77,7 +78,9 @@ if(WIN32)
 endif()
 
 if(SWF_BUILD_QUAD)
-  add_library(spheroidal_batch_quad SHARED ${QUAD_BASE} ${QUAD_WRAP} deps/scaled_batch.f90)
+  add_library(spheroidal_batch_quad SHARED ${SHARED_KERNELS} ${QUAD_BASE} ${QUAD_WRAP} deps/scaled_batch.f90)
+  target_compile_definitions(spheroidal_batch_quad PRIVATE SWF_PRECISION_QUAD)
+  target_include_directories(spheroidal_batch_quad PRIVATE "${CMAKE_SOURCE_DIR}/deps")
   target_link_libraries(spheroidal_batch_quad PRIVATE OpenMP::OpenMP_Fortran)
   set_target_properties(spheroidal_batch_quad PROPERTIES
     OUTPUT_NAME "spheroidal_batch_quad"
@@ -108,21 +111,23 @@ if(SWF_BUILD_MPFR)
   endif()
   set(MPFR_GENERATED_DIR "${CMAKE_BINARY_DIR}/mpfr_generated")
   set(MPFR_SOURCES)
-  foreach(geometry prolate oblate complex_prolate complex_oblate)
+  foreach(geometry oblate complex_prolate complex_oblate)
     list(APPEND MPFR_SOURCES "${MPFR_GENERATED_DIR}/${geometry}_swf_mpfr.f90")
   endforeach()
   add_custom_command(OUTPUT ${MPFR_SOURCES}
     COMMAND ${CMAKE_COMMAND} -E make_directory "${MPFR_GENERATED_DIR}"
     COMMAND ${CMAKE_COMMAND} "-DOUTPUT_DIR=${MPFR_GENERATED_DIR}"
+      "-DGEOMETRIES=oblate;complex_prolate;complex_oblate"
       -P "${CMAKE_SOURCE_DIR}/deps/generate_mpfr_fortran.cmake"
     DEPENDS "${CMAKE_SOURCE_DIR}/deps/generate_mpfr_fortran.cmake" ${QUAD_BASE}
     VERBATIM)
-  add_library(spheroidal_batch_mpfr SHARED ${MPFR_SOURCES}
+  add_library(spheroidal_batch_mpfr SHARED ${SHARED_KERNELS} ${MPFR_SOURCES}
     deps/mpfr_real.f90 deps/mpfr_complex.f90 deps/mpfr_batch.f90
     deps/mpfr_arithmetic.c deps/mpc_arithmetic.c)
   target_compile_features(spheroidal_batch_mpfr PRIVATE c_std_11)
+  target_compile_definitions(spheroidal_batch_mpfr PRIVATE SWF_PRECISION_MPFR)
   target_include_directories(spheroidal_batch_mpfr PRIVATE
-    ${MPFR_INCLUDE_DIR} ${MPC_INCLUDE_DIR} ${GMP_INCLUDE_DIR})
+    "${CMAKE_SOURCE_DIR}/deps" ${MPFR_INCLUDE_DIR} ${MPC_INCLUDE_DIR} ${GMP_INCLUDE_DIR})
   target_link_libraries(spheroidal_batch_mpfr PRIVATE
     OpenMP::OpenMP_Fortran ${MPC_LIBRARY} ${MPFR_LIBRARY} ${GMP_LIBRARY})
   if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
@@ -186,6 +191,15 @@ if(SWF_BUILD_TESTS)
     endif()
     add_test(NAME shared_precision_${precision} COMMAND ${proof_target})
     set_tests_properties(shared_precision_${precision} PROPERTIES TIMEOUT 60)
+    set(cache_target "spheroidal_prolate_cache_${precision}_test")
+    add_executable(${cache_target} test/prolate_cache.F90)
+    target_compile_definitions(${cache_target} PRIVATE "SWF_PRECISION_${precision_definition}")
+    target_include_directories(${cache_target} PRIVATE
+      "${CMAKE_SOURCE_DIR}/deps" "${CMAKE_BINARY_DIR}/mod_${precision}")
+    target_link_libraries(${cache_target} PRIVATE spheroidal_batch_${precision} OpenMP::OpenMP_Fortran)
+    set_target_properties(${cache_target} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    add_test(NAME prolate_cache_${precision} COMMAND ${cache_target})
+    set_tests_properties(prolate_cache_${precision} PROPERTIES TIMEOUT 60 ENVIRONMENT "OMP_NUM_THREADS=1")
   endforeach()
   add_executable(spheroidal_native_cache_test test/native_cache.f90)
   target_include_directories(spheroidal_native_cache_test PRIVATE "${CMAKE_BINARY_DIR}/mod_double")
@@ -212,6 +226,13 @@ if(SWF_BUILD_TESTS)
       RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
     add_test(NAME native_mpfr_arithmetic COMMAND spheroidal_native_mpfr_arithmetic_test)
     set_tests_properties(native_mpfr_arithmetic PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=4" TIMEOUT 60)
+    add_executable(spheroidal_mpfr_prolate_threads_test test/mpfr_prolate_threads.f90)
+    target_include_directories(spheroidal_mpfr_prolate_threads_test PRIVATE "${CMAKE_BINARY_DIR}/mod_mpfr")
+    target_link_libraries(spheroidal_mpfr_prolate_threads_test PRIVATE spheroidal_batch_mpfr OpenMP::OpenMP_Fortran)
+    set_target_properties(spheroidal_mpfr_prolate_threads_test PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+    add_test(NAME mpfr_prolate_threads COMMAND spheroidal_mpfr_prolate_threads_test)
+    set_tests_properties(mpfr_prolate_threads PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=4" TIMEOUT 60)
   endif()
 endif()
 
