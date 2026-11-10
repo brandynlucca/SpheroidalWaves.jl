@@ -18,9 +18,12 @@ jobs:
     coverage:
         name: Code Coverage
         runs-on: ubuntu-latest
-        timeout-minutes: 10
+        timeout-minutes: 60
         env:
             JULIA_NUM_THREADS: '4'
+            JULIA_NUM_PRECOMPILE_TASKS: '1'
+            OPENBLAS_NUM_THREADS: '1'
+            OMP_NUM_THREADS: '1'
             SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
         steps:
             - name: Checkout repository
@@ -40,7 +43,10 @@ jobs:
               run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
 
             - name: Build backends from source
-              run: julia --project=. scripts/build_from_source.jl
+              shell: bash
+              run: |
+                ulimit -v 3145728
+                julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
 
             - name: Point tests at the freshly built backends
               shell: bash

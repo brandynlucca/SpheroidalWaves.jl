@@ -23,9 +23,11 @@ jobs:
   build:
     name: BinaryBuilder builds and audits for all supported targets
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 360
     env:
       BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+      JULIA_NUM_THREADS: '1'
+      JULIA_NUM_PRECOMPILE_TASKS: '1'
     outputs:
       version: ${{ steps.recipe.outputs.version }}
     steps:
@@ -34,7 +36,7 @@ jobs:
         with:
           # BinaryBuilder's RISC-V audit needs Julia's newer architecture table.
           version: '1.12'
-      - name: Select the source commit and version
+      - name: Select the shared-source commit and version
         id: recipe
         shell: julia --color=yes {0}
         run: |
@@ -44,6 +46,9 @@ jobs:
           @assert version in Pkg.Types.semver_spec(project["compat"]["SpheroidalWaves_jll"]) "Package compatibility must include generated JLL $version"
           revision = ENV["GITHUB_SHA"]
           @assert occursin(r"^[0-9a-f]{40}$", revision)
+          for geometry in ("prolate", "oblate", "complex_prolate", "complex_oblate")
+              @assert isfile("deps/$(geometry)_kernel.F90")
+          end
           path = "contrib/yggdrasil/build_tarballs.jl"
           recipe = read(path, String)
           @assert length(collect(eachmatch(r"(?m)^version = v\"[^\"]+\"$", recipe))) == 1
@@ -65,7 +70,7 @@ jobs:
           end
       - name: Build and audit all precision libraries
         run: >-
-          julia --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
           --verbose --deploy=local
       - name: Collect the generated JLL and recipe
         run: |
@@ -82,7 +87,7 @@ jobs:
     name: JLL runtime and accuracy - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
     needs: build
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -98,6 +103,11 @@ jobs:
             arch: x64
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      JULIA_NUM_THREADS: '1'
+      JULIA_NUM_PRECOMPILE_TASKS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
@@ -123,11 +133,11 @@ jobs:
           end
           open(io -> TOML.print(io, artifacts), path, "w")
       - name: Load JLL runtimes and test the cross-built libraries
-        timeout-minutes: 5
+        timeout-minutes: 25
         shell: bash
         run: |
           unset LD_LIBRARY_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
-          julia --startup-file=no - <<'JULIA'
+          julia --startup-file=no --heap-size-hint=1G - <<'JULIA'
           using Pkg, Libdl, Test
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           Pkg.activate(;temp=true)
@@ -140,6 +150,7 @@ jobs:
           ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
           ENV["SPHEROIDALWAVES_LIBRARY_MPFR"] = SpheroidalWaves_jll.libspheroidal_batch_mpfr_path
           using SpheroidalWaves
+          include("test/require_backends.jl")
           @testset "JLL libraries and runtime dependencies" begin
               @test !isdir("build")
               @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
@@ -177,6 +188,7 @@ jobs:
           end
           include("test/quad_precision.jl")
           include("test/numerical_regressions.jl")
+          include("test/precision_waves.jl")
           JULIA
 
   submit:

@@ -1,6 +1,9 @@
 name: CI
 env:
   JULIA_NUM_THREADS: 2
+  JULIA_NUM_PRECOMPILE_TASKS: 1
+  OPENBLAS_NUM_THREADS: 1
+  OMP_NUM_THREADS: 1
 
 on:
   push:
@@ -24,7 +27,7 @@ jobs:
   native-backends:
     name: Build and check native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -46,6 +49,10 @@ jobs:
             library-pattern: build/lib/libspheroidal_batch_*.dylib
     steps:
       - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+          arch: ${{ matrix.platform.arch }}
       - uses: fortran-lang/setup-fortran@v1
         if: runner.os != 'Linux'
         with:
@@ -77,19 +84,14 @@ jobs:
         run: |
           echo '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64/bin' >> "$GITHUB_PATH"
           echo 'CMAKE_PREFIX_PATH=${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64' >> "$GITHUB_ENV"
-      # Build this checkout once per platform, then share only its libraries
-      # with the Julia version and test-group jobs in this workflow run.
-      - name: Build backends from source
+      # Share this checkout's libraries with the Julia version and test-group jobs.
+      - name: Build and test the shared-source backends
         shell: bash
+        env:
+          SWF_BUILD_TESTS: 'ON'
         run: |
-          generator="Unix Makefiles"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            generator="MinGW Makefiles"
-          fi
-          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DSWF_BUILD_TESTS=ON
-          cmake --build build --parallel 1
-      - name: Check native quadrature cache bounds and concurrency
-        run: ctest --test-dir build -j1 --output-on-failure
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
       - uses: actions/upload-artifact@v7
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
@@ -98,11 +100,44 @@ jobs:
           compression-level: 0
           retention-days: 1
 
+  build-configurations:
+    name: Shared-source build - ${{ matrix.configuration.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        configuration:
+          - {name: double-only, quad: 'OFF', mpfr: 'OFF', type: Release}
+          - {name: mpfr-without-quad, quad: 'OFF', mpfr: 'ON', type: Release}
+          - {name: debug, quad: 'ON', mpfr: 'ON', type: Debug}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+      - name: Install MPFR/MPC development files
+        if: matrix.configuration.mpfr == 'ON'
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
+      - name: Build and test the selected backends
+        shell: bash
+        env:
+          SWF_BUILD_QUAD: ${{ matrix.configuration.quad }}
+          SWF_BUILD_MPFR: ${{ matrix.configuration.mpfr }}
+          SWF_BUILD_TYPE: ${{ matrix.configuration.type }}
+          SWF_BUILD_TESTS: 'ON'
+        run: |
+          ulimit -v 3145728
+          julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
+
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
     needs: native-backends
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}

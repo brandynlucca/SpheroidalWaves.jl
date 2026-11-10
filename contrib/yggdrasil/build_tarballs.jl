@@ -5,7 +5,7 @@ version = v"0.6.0"
 
 sources = [
     GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
-    "e54a77efcf7c7cd9128f5604462528dbef6ae0ba"),
+    "adf75d1e31886132cb9a37bb27feed6e6a590d33"),
 ]
 
 script = raw"""
@@ -15,18 +15,17 @@ cmake -S . -B build-binarybuilder \
     -DCMAKE_INSTALL_PREFIX=${prefix} \
     -DCMAKE_PREFIX_PATH=${prefix} \
     -DCMAKE_BUILD_TYPE=Release \
+    -DSWF_BUILD_QUAD=ON \
     -DSWF_BUILD_MPFR=ON \
     -DSWF_BUILD_TESTS=OFF
-cmake --build build-binarybuilder --parallel ${nproc}
+cmake --build build-binarybuilder --parallel 1
 cmake --install build-binarybuilder
 install_license LICENSE
 """
 
 platforms = supported_platforms()
 
-# gfortran has no REAL(16)/__float128 (quadmath) support on 32-bit ARM or
-# PowerPC64LE, so `selected_real_kind(33)` (deps/prolate_swf_quad.f90:33)
-# resolves to an invalid kind and the quad-precision sources fail to compile.
+# The quad backend requires REAL(16)/__float128, unavailable on 32-bit ARM and PowerPC64LE.
 filter!(p -> !(arch(p) in ("armv6l", "armv7l", "powerpc64le")), platforms)
 
 platforms = expand_gfortran_versions(platforms)
