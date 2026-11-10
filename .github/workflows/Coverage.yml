@@ -35,6 +35,9 @@ jobs:
               with:
                 cache-name: cov-ubuntu-latest-1.10
 
+            - name: Install MPFR/MPC development files
+              run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
+
             - name: Build backends from source
               run: julia --project=. scripts/build_from_source.jl
 
@@ -43,6 +46,7 @@ jobs:
               run: |
                 echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=$(pwd)/build/lib/libspheroidal_batch_double.so" >> "$GITHUB_ENV"
                 echo "SPHEROIDALWAVES_LIBRARY_QUAD=$(pwd)/build/lib/libspheroidal_batch_quad.so" >> "$GITHUB_ENV"
+                echo "SPHEROIDALWAVES_LIBRARY_MPFR=$(pwd)/build/lib/libspheroidal_batch_mpfr.so" >> "$GITHUB_ENV"
 
             - name: Coverage test
               uses: julia-actions/julia-runtest@v1

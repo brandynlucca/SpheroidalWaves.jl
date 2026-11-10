@@ -55,6 +55,28 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
+      - name: Install MPFR/MPC development files
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
+          else
+            brew install mpfr libmpc gmp
+            echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
+          fi
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        id: mpfr-msys
+        with:
+          install: mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-gmp
+      - name: Configure MPFR/MPC search paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64/bin' >> "$GITHUB_PATH"
+          echo 'CMAKE_PREFIX_PATH=${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64' >> "$GITHUB_ENV"
       # Build this checkout once per platform, then share only its libraries
       # with the Julia version and test-group jobs in this workflow run.
       - name: Build backends from source
@@ -157,6 +179,26 @@ jobs:
         run: |
           echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}double.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
           echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}quad.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_MPFR=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}mpfr.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+      - name: Install MPFR/MPC runtime dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+          else
+            brew install mpfr libmpc gmp
+          fi
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        id: mpfr-msys
+        with:
+          install: mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-gmp
+      - name: Configure MPFR/MPC runtime paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64/bin' >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false # Collected by Coverage.yml.
