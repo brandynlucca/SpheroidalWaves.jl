@@ -8,6 +8,9 @@ module shared_precision_example
   implicit none
 #ifndef SWF_PRECISION_MPFR
   integer, parameter :: sw_kind = SW_REAL_KIND
+  integer, parameter :: knd1 = sw_kind
+#else
+  integer, parameter :: knd1 = 16
 #endif
   interface to_real
     module procedure integer_to_real, integer64_to_real, real_to_real, complex_to_real
@@ -86,6 +89,8 @@ program shared_precision
   implicit none
   SW_REAL :: x,decimal,negative,shifted,values(3),copies(3),wide
   SW_COMPLEX :: z,copy_z
+  SW_REAL1 :: secondary_real
+  SW_COMPLEX1 :: secondary_complex
   integer(c_int64_t), parameter :: large_integer = 9007199254740993_c_int64_t
 #ifdef SWF_PRECISION_MPFR
   integer :: bits_index,mode,saved_bits,saved_rounding
@@ -136,6 +141,10 @@ contains
     copy_z = z
     z = to_complex(to_real(0),to_real(0))
     if (to_real(copy_z)/=decimal.or.aimag(copy_z)/=negative) error stop "complex ownership"
+    secondary_real = SW_LITERAL(1.0000000000000000000000000000000000000001_knd1,"1.0000000000000000000000000000000000000001")
+    secondary_complex = SW_CONVERT_COMPLEX(secondary_real,negative,kind=knd1)
+    if(to_real(secondary_complex)/=decimal.or.aimag(secondary_complex)/=negative) &
+      error stop "secondary-kind complex conversion"
 #ifdef SWF_PRECISION_MPFR
     if (decimal/=mpreal(decimal_ratio).or.decimal==1) error stop "literal beyond quad precision"
     if (negative/=mpreal("-1/10")) error stop "signed decimal rounding"
