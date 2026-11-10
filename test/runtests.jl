@@ -1,6 +1,8 @@
 using SpheroidalWaves
 using Test
 
+include("require_backends.jl")
+
 const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
 TEST_GROUP in
 ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",

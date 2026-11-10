@@ -87,9 +87,9 @@ jobs:
             generator="MinGW Makefiles"
           fi
           cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DSWF_BUILD_TESTS=ON
-          cmake --build build --parallel 2
+          cmake --build build --parallel 1
       - name: Check native quadrature cache bounds and concurrency
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build -j1 --output-on-failure
       - uses: actions/upload-artifact@v7
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
@@ -107,6 +107,7 @@ jobs:
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
       SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.group }}
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
       contents: read

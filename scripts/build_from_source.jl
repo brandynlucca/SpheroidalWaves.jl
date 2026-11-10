@@ -223,6 +223,7 @@ function run_build()
         "cmake",
         "-S", PROJECT_DIR,
         "-B", BUILD_DIR,
+        "-DCMAKE_BUILD_TYPE=Release",
         "-DSWF_BUILD_MPFR=$(BUILD_MPFR ? "ON" : "OFF")"
     ]
 
@@ -246,7 +247,7 @@ function run_build()
 
     # Run CMake build
     info_msg("Running CMake build...")
-    build_cmd = ["cmake", "--build", BUILD_DIR, "--config", "Release"]
+    build_cmd = ["cmake", "--build", BUILD_DIR, "--config", "Release", "--parallel", "1"]
 
     info_msg("Command: $(join(build_cmd, " "))")
 

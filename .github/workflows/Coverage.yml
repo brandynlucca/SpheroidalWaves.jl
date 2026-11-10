@@ -21,6 +21,7 @@ jobs:
         timeout-minutes: 10
         env:
             JULIA_NUM_THREADS: '4'
+            SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
         steps:
             - name: Checkout repository
               uses: actions/checkout@v7
