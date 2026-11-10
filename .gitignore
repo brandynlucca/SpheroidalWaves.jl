@@ -5,6 +5,7 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 *.cmake
+!/deps/generate_mpfr_fortran.cmake
 fort.*
 tmp_*
 build_output.txt
