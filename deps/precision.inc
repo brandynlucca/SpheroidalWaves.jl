@@ -12,6 +12,7 @@
 #define SW_PROLATE_MODULE prolate_swf_mpfr
 #define SW_OBLATE_MODULE oblate_swf_mpfr
 #define SW_CPROLATE_MODULE complex_prolate_swf_mpfr
+#define SW_COBLATE_MODULE complex_oblate_swf_mpfr
 #define SW_REAL type(mp_real)
 #define SW_COMPLEX type(mp_complex)
 #define SW_REAL1 type(mp_real)
@@ -25,6 +26,7 @@
 #define SW_PROLATE_MODULE prolate_swf
 #define SW_OBLATE_MODULE oblate_swf
 #define SW_CPROLATE_MODULE complex_prolate_swf
+#define SW_COBLATE_MODULE complex_oblate_swf
 #define SW_REAL real(sw_kind)
 #define SW_COMPLEX complex(sw_kind)
 #define SW_REAL1 real(knd1)
