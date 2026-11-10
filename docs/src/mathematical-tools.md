@@ -1,7 +1,7 @@
 # Mathematical tools
 
 All examples use ordinary numeric arguments. Add `precision=:quad` for quad precision.
-Separation eigenvalues and `dmn` additionally accept `precision_bits` for arbitrary precision; see [Precision and outputs](@ref precision-and-outputs).
+For `precision_bits` support and limits, see [Precision and outputs](@ref precision-and-outputs).
 
 ## Expansion coefficients and connection factors
 
