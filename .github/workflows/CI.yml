@@ -273,13 +273,14 @@ jobs:
           - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-context, groups: 'native-context'}}
     steps:
       - uses: actions/checkout@v7
-      # Match the build job's Fortran/OpenMP runtime libraries and search path.
+      # Windows needs the build job's matching Fortran/OpenMP runtime search path.
       - uses: fortran-lang/setup-fortran@v1
-        if: runner.os != 'Linux'
+        if: runner.os == 'Windows'
         with:
           compiler: gcc
           version: '15'
       - uses: julia-actions/setup-julia@v2
+        if: startsWith(matrix.suite.groups, 'native-') == false
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.suite.arch }}
@@ -335,7 +336,12 @@ jobs:
             sudo apt-get update -qq
             sudo apt-get install -y libmpfr6 libmpc3 libgmp10
           else
-            brew install mpfr libmpc gmp
+            prefix=$(brew --prefix)
+            missing=()
+            for formula in gcc@15 mpfr libmpc gmp; do
+              [[ -d "$prefix/opt/$formula" ]] || missing+=("$formula")
+            done
+            if (( ${#missing[@]} )); then brew install "${missing[@]}"; fi
           fi
       - name: Configure MPFR/MPC runtime paths
         if: runner.os == 'Windows'
