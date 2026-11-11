@@ -12,7 +12,7 @@ on:
         type: string
         default: '1'
       cases:
-        description: JSON array of name, groups, threads, and optimize values
+        description: JSON array of name, groups, threads, optimize, and optional os/arch values
         required: true
         type: string
 
@@ -23,7 +23,7 @@ permissions:
 jobs:
   timing:
     name: ${{ matrix.case.name }} - Julia ${{ inputs.julia }}
-    runs-on: macos-26-intel
+    runs-on: ${{ matrix.case.os || 'macos-26-intel' }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
@@ -51,13 +51,18 @@ jobs:
           revision=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)
           git fetch --depth=1 origin "$revision"
           git diff --exit-code "$revision" HEAD -- src deps CMakeLists.txt Project.toml test
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os == 'Windows'
+        with:
+          compiler: gcc
+          version: '15'
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ inputs.julia }}
-          arch: x64
+          arch: ${{ matrix.case.arch || 'x64' }}
       - uses: actions/download-artifact@v8
         with:
-          name: julia-environment-macos-26-intel-x64-${{ inputs.julia }}
+          name: julia-environment-${{ matrix.case.os || 'macos-26-intel' }}-${{ matrix.case.arch || 'x64' }}-${{ inputs.julia }}
           path: .scratch/ci-environment
           run-id: ${{ inputs.source_run }}
           github-token: ${{ github.token }}
@@ -69,6 +74,7 @@ jobs:
           git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
           cp .scratch/ci-environment/Manifest.toml Manifest.toml
           depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
           mkdir -p "$depot"
           tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
           julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
@@ -77,22 +83,34 @@ jobs:
           fi
       - uses: actions/download-artifact@v8
         with:
-          name: native-backends-macos-26-intel-x64
+          name: native-backends-${{ matrix.case.os || 'macos-26-intel' }}-${{ matrix.case.arch || 'x64' }}
           path: build
           run-id: ${{ inputs.source_run }}
           github-token: ${{ github.token }}
       - name: Configure native runtimes
         shell: bash
         run: |
-          prefix=$(brew --prefix)
-          missing=()
-          for formula in gcc@15 mpfr libmpc gmp; do
-            [[ -d "$prefix/opt/$formula" ]] || missing+=("$formula")
-          done
-          if (( ${#missing[@]} )); then brew install "${missing[@]}"; fi
+          library_prefix=build/lib/libspheroidal_batch_
+          library_extension=so
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            library_prefix=build/bin/spheroidal_batch_
+            library_extension=dll
+            echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
+          elif [[ "$RUNNER_OS" == 'macOS' ]]; then
+            library_extension=dylib
+            prefix=$(brew --prefix)
+            missing=()
+            for formula in gcc@15 mpfr libmpc gmp; do
+              [[ -d "$prefix/opt/$formula" ]] || missing+=("$formula")
+            done
+            if (( ${#missing[@]} )); then brew install "${missing[@]}"; fi
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+          fi
           for precision in double quad mpfr; do
             variable=$(printf '%s' "$precision" | tr '[:lower:]' '[:upper:]')
-            echo "SPHEROIDALWAVES_LIBRARY_$variable=$GITHUB_WORKSPACE/build/lib/libspheroidal_batch_$precision.dylib" >> "$GITHUB_ENV"
+            echo "SPHEROIDALWAVES_LIBRARY_$variable=$GITHUB_WORKSPACE/${library_prefix}${precision}.${library_extension}" >> "$GITHUB_ENV"
           done
       - uses: julia-actions/julia-runtest@v1
         env:

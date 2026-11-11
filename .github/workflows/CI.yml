@@ -25,7 +25,7 @@ on:
         type: boolean
         default: false
       source_run:
-        description: Run focused Intel macOS timings using this CI run's artifacts (blank runs full CI)
+        description: Run focused timings using this CI run's artifacts (blank runs full CI)
         type: string
         default: ''
       timing_julia:
@@ -34,7 +34,7 @@ on:
         options: ['1', 'pre', '1.10']
         default: '1'
       timing_cases:
-        description: JSON timing cases with name, groups, threads, and optimize values
+        description: JSON cases with name, groups, threads, optimize, and optional os/arch values
         type: string
         default: '[{"name":"functions-2","groups":"angular-and-coefficients,functions-and-coefficients","threads":2,"optimize":1},{"name":"functions-4","groups":"angular-and-coefficients,functions-and-coefficients","threads":4,"optimize":1}]'
 concurrency:
