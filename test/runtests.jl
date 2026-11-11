@@ -6,7 +6,8 @@ include("require_backends.jl")
 const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
 TEST_GROUP in
 ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
-    "functions-and-coefficients", "arbitrary-precision", "precision-quantities",
+    "functions-and-coefficients", "quad-and-domain", "accuracy-and-roots",
+    "arbitrary-precision", "precision-quantities",
     "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior") ||
     error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
 
@@ -501,7 +502,8 @@ if TEST_GROUP in ("all", "api-and-precision")
                 0, 1, 1.0 + 0.1im, [-0.1]; spheroid = :oblate, precision = :double, kind = 1)
         end
     end
-
+end
+if TEST_GROUP in ("all", "quad-and-domain")
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
 end
@@ -522,7 +524,7 @@ elseif startswith(TEST_GROUP, "precision-wave-")
         include("precision_waves.jl")
     end
 end
-if TEST_GROUP in ("all", "api-and-precision")
+if TEST_GROUP in ("all", "quad-and-domain")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end
@@ -530,8 +532,7 @@ end
 # Independent numerical testsets share the process and its compiled methods.
 # Queue individual testsets so long files cannot leave the other workers idle.
 let file_groups = (
-        # Accuracy and regression checks reuse the API/precision group's methods.
-        "api-and-precision" => ["accuracy.jl", "numerical_regressions.jl"],
+        "accuracy-and-roots" => ["accuracy.jl", "numerical_regressions.jl"],
         "functions-and-coefficients" =>
             ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
                 "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
@@ -550,7 +551,7 @@ let file_groups = (
            expression.args[1] === Symbol("@testset")
             if expression.args[3] in serial_testsets
                 delete!(serial_testsets, expression.args[3])
-                return TEST_GROUP in ("all", "api-and-precision") ? expression : nothing
+                return TEST_GROUP in ("all", "accuracy-and-roots") ? expression : nothing
             end
             # Keep complex-coordinate Jacobians with continuation and endpoint
             # checks so each job compiles the numerical methods it needs.

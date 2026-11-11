@@ -240,6 +240,8 @@ jobs:
           - native-oblate
           - native-context
           - api-and-precision
+          - quad-and-domain
+          - accuracy-and-roots
           - arbitrary-precision
           - precision-quantities
           - precision-wave-references
