@@ -16,6 +16,7 @@ const SELECTED_FORTRAN = Ref{Union{Nothing, String}}(nothing)
 const BUILD_QUAD = lowercase(get(ENV, "SWF_BUILD_QUAD", "on")) ∉ ("off", "false", "0")
 const BUILD_MPFR = lowercase(get(ENV, "SWF_BUILD_MPFR", "on")) ∉ ("off", "false", "0")
 const BUILD_TESTS = lowercase(get(ENV, "SWF_BUILD_TESTS", "off")) ∉ ("off", "false", "0")
+const RUN_TESTS = BUILD_TESTS && lowercase(get(ENV, "SWF_RUN_TESTS", "on")) ∉ ("off", "false", "0")
 const BACKENDS = ["double"; BUILD_QUAD ? ["quad"] : []; BUILD_MPFR ? ["mpfr"] : []]
 
 # ============================================================================
@@ -345,7 +346,7 @@ function main()
         return false
     end
 
-    if BUILD_TESTS
+    if RUN_TESTS
         try
             run(Cmd(`ctest --build-config $BUILD_TYPE -j1 --output-on-failure`; dir=BUILD_DIR))
         catch e

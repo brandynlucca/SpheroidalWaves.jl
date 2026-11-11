@@ -25,7 +25,7 @@ concurrency:
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
   native-backends:
-    name: Build and check native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    name: Build native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 30
     permissions:
@@ -37,16 +37,12 @@ jobs:
         platform:
           - os: ubuntu-latest
             arch: x64
-            library-pattern: build/lib/libspheroidal_batch_*.so
           - os: windows-latest
             arch: x64
-            library-pattern: build/bin/*.dll
           - os: macos-26-intel
             arch: x64
-            library-pattern: build/lib/libspheroidal_batch_*.dylib
           - os: macos-latest
             arch: aarch64
-            library-pattern: build/lib/libspheroidal_batch_*.dylib
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
@@ -89,10 +85,11 @@ jobs:
           mkdir -p build/bin
           cp "$prefix/bin/"*.dll build/bin/
       # Share this checkout's libraries with the Julia version and test-group jobs.
-      - name: Build and test the shared-source backends
+      - name: Build the shared-source backends and native tests
         shell: bash
         env:
           SWF_BUILD_TESTS: 'ON'
+          SWF_RUN_TESTS: 'OFF'
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
@@ -119,7 +116,20 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
-          path: ${{ matrix.platform.library-pattern }}
+          path: |
+            build/lib/*.so
+            build/lib/*.dylib
+            build/bin/*.dll
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-tests-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: |
+            build/bin/*_test*
+            build/CTestTestfile.cmake
+            build/test/CTestTestfile.cmake
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -197,6 +207,11 @@ jobs:
             arch: aarch64
             library-prefix: build/lib/libspheroidal_batch_
             library-extension: dylib
+        include:
+          - {group: native, version: '1.10', platform: {os: ubuntu-latest, arch: x64, library-prefix: build/lib/libspheroidal_batch_, library-extension: so}}
+          - {group: native, version: '1.10', platform: {os: windows-latest, arch: x64, library-prefix: build/bin/spheroidal_batch_, library-extension: dll}}
+          - {group: native, version: '1.10', platform: {os: macos-26-intel, arch: x64, library-prefix: build/lib/libspheroidal_batch_, library-extension: dylib}}
+          - {group: native, version: '1.10', platform: {os: macos-latest, arch: aarch64, library-prefix: build/lib/libspheroidal_batch_, library-extension: dylib}}
     steps:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
@@ -210,7 +225,9 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.platform.arch }}
       - uses: julia-actions/cache@v2
+        if: matrix.group != 'native'
       - name: Resolve and instantiate dependencies
+        if: matrix.group != 'native'
         shell: julia --color=yes --project=. {0}
         env:
           # Pkg.test precompiles with its own bounds-checking and optimization flags.
@@ -230,7 +247,13 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
-          path: build/${{ runner.os == 'Windows' && 'bin' || 'lib' }}
+          path: build
+      - name: Download this platform's native tests
+        if: matrix.group == 'native'
+        uses: actions/download-artifact@v8
+        with:
+          name: native-tests-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: build
       - name: Point tests at the freshly built backends
         shell: bash
         env:
@@ -255,9 +278,27 @@ jobs:
         shell: bash
         run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
+        if: matrix.group != 'native'
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
+      - name: Run native regression tests
+        if: matrix.group == 'native'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          if [[ "$RUNNER_OS" != 'Windows' ]]; then chmod +x build/bin/*; fi
+          ctest --test-dir build --output-on-failure --parallel 1
+      - name: Capture the Windows test crash
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          printf 'set pagination off\nhandle SIGILL nostop noprint pass\nrun\nthread apply all bt 20\ninfo sharedlibrary\n' > build/windows-test.gdb
+          if [[ "$SPHEROIDALWAVES_TEST_GROUP" == 'native' ]]; then
+            gdb --batch --nx -x build/windows-test.gdb --args build/bin/spheroidal_shared_precision_mpfr_test.exe
+          else
+            gdb --batch --nx -x build/windows-test.gdb --args "$(command -v julia)" --startup-file=no --project=. --check-bounds=yes -O1 test/runtests.jl
+          fi
 
   jll-backends:
     name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
