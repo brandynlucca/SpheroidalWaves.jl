@@ -11,7 +11,8 @@ const VALID_TEST_GROUPS = ("all", "api-and-precision", "parameter-derivatives", 
     "quad-and-domain", "accuracy-and-roots",
     "accuracy-diagnostics", "numerical-regressions",
     "arbitrary-precision", "precision-quantities", "precision-edge-cases",
-    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior")
+    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior",
+    "precision-diagnostics", "precision-curvature", "precision-complex-curvature", "precision-differences")
 all(group -> group in VALID_TEST_GROUPS, TEST_GROUPS) ||
     error("Unknown SPHEROIDALWAVES_TEST_GROUP: $(join(TEST_GROUPS, ','))")
 test_group_selected(group) = "all" in TEST_GROUPS || group in TEST_GROUPS
@@ -522,8 +523,8 @@ end
 if test_group_selected("precision-edge-cases")
     include("precision_edge_cases.jl")
 end
-let cases = ("accuracy-diagnostics" => "accuracy", "accuracy-and-roots" => "roots",
-        "static-and-second-derivatives" => "curvature", "parameter-derivatives" => "differences")
+let cases = ("precision-diagnostics" => "accuracy,roots", "precision-curvature" => "curvature",
+        "precision-complex-curvature" => "complex-curvature", "precision-differences" => "differences")
     selected = [selection for (group, selection) in cases if test_group_selected(group)]
     if !isempty(selected)
         withenv("SPHEROIDALWAVES_PRECISION_API_CASE" => join(selected, ',')) do

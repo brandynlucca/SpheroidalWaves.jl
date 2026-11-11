@@ -128,7 +128,7 @@ function radial_zeros(m::Integer, n::Integer, c::Real, interval::Tuple{<:Real, <
 end
 
 function _coordinate_zeros_at_precision(m, n, c, interval, target, spheroid, precision,
-        kind, stationary, rtol, max_points, bits, max_terms)
+        kind, stationary, rtol, max_points, bits, max_terms; max_refinements = 4)
     bits = _validate_precision_bits(bits)
     _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, :orthonormal)
     workbits = max(bits+64, _precision_input_bits(c)+32,
@@ -141,7 +141,7 @@ function _coordinate_zeros_at_precision(m, n, c, interval, target, spheroid, pre
         end
     end
     previous = nothing
-    for attempt in 1:4
+    for attempt in 1:max_refinements
         roots, stable = _with_swprecision(workbits) do
             parameter = _SWFloat(c)
             a, b = _SWFloat.(interval)

@@ -355,30 +355,30 @@ jobs:
       matrix:
         version: ['1', 'pre', '1.10']
         suite:
-          - {os: ubuntu-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
-          - {os: ubuntu-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
+          - {os: ubuntu-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
+          - {os: ubuntu-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-curvature,precision-complex-curvature'}
           - {os: ubuntu-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
           - {os: ubuntu-latest, arch: x64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,angular-and-coefficients,degree-batches,functions-and-coefficients'}
-          - {os: ubuntu-latest, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
-          - {os: macos-latest, arch: aarch64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
-          - {os: macos-latest, arch: aarch64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
+          - {os: ubuntu-latest, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints,precision-differences'}
+          - {os: macos-latest, arch: aarch64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
+          - {os: macos-latest, arch: aarch64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-curvature,precision-complex-curvature'}
           - {os: macos-latest, arch: aarch64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
           - {os: macos-latest, arch: aarch64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,angular-and-coefficients,degree-batches,functions-and-coefficients'}
-          - {os: macos-latest, arch: aarch64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
+          - {os: macos-latest, arch: aarch64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints,precision-differences'}
           - {os: windows-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain'}
-          - {os: windows-latest, arch: x64, name: accuracy, groups: 'accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
+          - {os: windows-latest, arch: x64, name: accuracy, groups: 'accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
           - {os: windows-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
-          - {os: windows-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior'}
+          - {os: windows-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior,precision-curvature,precision-complex-curvature'}
           - {os: windows-latest, arch: x64, name: sensitivities, groups: 'precision-wave-sensitivities,parameter-derivatives,static-and-second-derivatives'}
           - {os: windows-latest, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
-          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints'}
+          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints,precision-differences'}
           - {os: windows-latest, arch: x64, name: functions, groups: 'angular-and-coefficients,degree-batches,functions-and-coefficients'}
-          - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision,degree-batches'}
-          - {os: macos-26-intel, arch: x64, name: thread-regressions, groups: 'thread-safety,precision-edge-cases,numerical-regressions'}
+          - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision,degree-batches,precision-differences'}
+          - {os: macos-26-intel, arch: x64, name: thread-regressions, groups: 'thread-safety,precision-edge-cases,numerical-regressions,precision-diagnostics'}
           - {os: macos-26-intel, arch: x64, name: accuracy, groups: 'quad-and-domain,accuracy-and-roots,accuracy-diagnostics'}
-          - {os: macos-26-intel, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities'}
+          - {os: macos-26-intel, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-curvature'}
           - {os: macos-26-intel, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior'}
-          - {os: macos-26-intel, arch: x64, name: wave-sensitivities, groups: 'precision-wave-sensitivities'}
+          - {os: macos-26-intel, arch: x64, name: wave-sensitivities, groups: 'precision-wave-sensitivities,precision-complex-curvature'}
           - {os: macos-26-intel, arch: x64, name: parameters, groups: 'parameter-derivatives,static-and-second-derivatives'}
           - {os: macos-26-intel, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
           - {os: macos-26-intel, arch: x64, name: functions, groups: 'angular-and-coefficients,functions-and-coefficients'}

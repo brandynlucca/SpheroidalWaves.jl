@@ -10,7 +10,7 @@ function _precision_stencil_metadata(first, second, step, bits, rtol, atol, orde
 end
 
 function _precision_parameter_stencil(evaluate, c, bits, h, order, adaptive, rtol, atol;
-        nonnegative = false, nonzero = false)
+        nonnegative = false, nonzero = false, max_refinements = 5)
     step, workbits = _with_swprecision(max(bits+64, _precision_input_bits(c)+32)) do
         parameter = c isa Real ? _SWFloat(c) : _SWFloat_complex(c)
         scale = nonzero && !iszero(parameter) ? abs(parameter) : max(one(_SWFloat), abs(parameter))
@@ -44,7 +44,7 @@ function _precision_parameter_stencil(evaluate, c, bits, h, order, adaptive, rto
         end
         function differentiate(direction)
             first = estimate(step, direction)
-            for attempt in 1:(h===nothing ? 5 : 2)
+            for attempt in 1:(h===nothing ? max_refinements : 2)
                 current_step = step/2^attempt
                 second = estimate(current_step, direction)
                 metadata = _precision_stencil_metadata(first, second,
@@ -143,12 +143,12 @@ function _wave_jacobian_at_precision(m, n, c, points, spheroid, precision, targe
                     precision_bits = p, max_terms, local_mode)
             (wave.value, wave.derivative)
         end
-        values = hcat(result...)
+        values = map(x -> x isa Real ? _SWFloat(x) : _SWFloat_complex(x), hcat(result...))
         if !isempty(endpoints)
             values[endpoints, 2] = _precision_endpoint_parameter(m, n, z, points[endpoints],
                 spheroid, precision, target, normalize, normalization, p, max_terms, order==2; local_mode)
         end
-        values
+        return values
     end
     data = _precision_parameter_stencil(evaluate, c, bits, h, order, adaptive, rtol, atol;
         nonzero = target===:radial && normalization===:standard)
@@ -178,10 +178,15 @@ function _wave_jacobian_at_precision(m, n, c, points, spheroid, precision, targe
             return diagnostics ? (; output..., metadata_value = metadata, metadata_derivative = metadata) : output
         end
         imaginary = restore(data.imag_value)
-        output = (; dvalue_dcreal = value, dderivative_dcreal = derivative,
-            dvalue_dcimag = imaginary[:, 1], dderivative_dcimag = imaginary[:, 2])
-        diagnostics ? (; output..., metadata_value_dcreal = metadata, metadata_derivative_dcreal = metadata,
-            metadata_value_dcimag = data.imag_metadata, metadata_derivative_dcimag = data.imag_metadata) : output
+        imaginary_metadata = data.imag_metadata
+        if any(isinf, imaginary[:, 2])
+            imaginary_metadata = (; imaginary_metadata..., finite_flag = false,
+                conditioning_flag = :singular, suggested_action = :singular_limit)
+        end
+        output = (; dvalue_dcreal = value, dvalue_dcimag = imaginary[:, 1],
+            dderivative_dcreal = derivative, dderivative_dcimag = imaginary[:, 2])
+        diagnostics ? (; output..., metadata_value_dcreal = metadata, metadata_value_dcimag = imaginary_metadata,
+            metadata_derivative_dcreal = metadata, metadata_derivative_dcimag = imaginary_metadata) : output
     end
 end
 
