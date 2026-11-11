@@ -88,7 +88,8 @@ function _radial_wronskian_at_precision(m, n, c, points, spheroid, precision, fo
 end
 
 function _eigen_jacobian_at_precision(m, n, c, spheroid, precision, operator, form,
-        bits, max_terms, order, h, diagnostics, adaptive = true, rtol = 1e-6, atol = 1e-10)
+        bits, max_terms, order, h, diagnostics, adaptive = true, rtol = 1e-6, atol = 1e-10;
+        local_mode = nothing)
     bits = _validate_precision_bits(bits)
     h === nothing || return _eigen_difference_at_precision(m, n, c, spheroid, precision,
         operator, form, bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
@@ -100,7 +101,7 @@ function _eigen_jacobian_at_precision(m, n, c, spheroid, precision, operator, fo
         _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
         result = _refine_quantity_at_precision(bits) do workbits
             eigenpair = _solve_coefficient_eigenpair_at_precision(
-                m, n, c, spheroid, precision, workbits, nothing, max_terms, true)
+                m, n, c, spheroid, precision, workbits, nothing, max_terms, true; local_mode)
             _with_swprecision(Base.precision(real(eigenpair.lambda))) do
                 value = if order==1
                     eigenpair.dlambda

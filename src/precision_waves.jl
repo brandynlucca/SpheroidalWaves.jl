@@ -106,7 +106,8 @@ function _angular_values_at_precision(eigenpair, points, kind, normalize, order;
 end
 
 function _refine_angular_values_at_precision(m, n, c, points, spheroid, precision,
-        bits, max_terms, kind, normalize, order; sensitivity = false, max_refinements = 4)
+        bits, max_terms, kind, normalize, order; sensitivity = false, max_refinements = 4,
+        local_mode = nothing)
     previous = nothing
     min_terms = 0
     input_bits = max(_precision_input_bits(c), maximum(_precision_input_bits, points; init = 0))
@@ -114,7 +115,7 @@ function _refine_angular_values_at_precision(m, n, c, points, spheroid, precisio
     endpoints = findall(x -> isreal(x) && abs(real(x))==1, points)
     for attempt in 1:max_refinements
         eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
-            requested, nothing, max_terms, sensitivity || kind==2; min_terms)
+            requested, nothing, max_terms, sensitivity || kind==2; min_terms, local_mode)
         result, change = try
             _with_swprecision(Base.precision(real(eigenpair.lambda))) do
                 tolerance = ldexp(one(_SWFloat), -requested-8)
@@ -147,7 +148,7 @@ end
 
 function _smn_at_precision(m, n, c, points; spheroid = :prolate, precision = :double,
         precision_bits, max_terms = 512, normalize = false, kind = 1, derivatives = 1,
-        second_derivative = false, scaled = false, logderivative = false)
+        second_derivative = false, scaled = false, logderivative = false, local_mode = nothing)
     bits = _validate_precision_bits(precision_bits)
     _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
     if eltype(points)<:Real
@@ -160,7 +161,7 @@ function _smn_at_precision(m, n, c, points; spheroid = :prolate, precision = :do
     kind in (1, 2) || throw(ArgumentError("angular kind must be 1 or 2"))
     order = max(derivatives, second_derivative ? 2 : 1)
     data = _refine_angular_values_at_precision(m, n, c, points, spheroid, precision,
-        bits, max_terms, kind, normalize, order)
+        bits, max_terms, kind, normalize, order; local_mode)
     return _with_swprecision(Base.precision(real(data.eigenpair.lambda))) do
         output = _precision_wave_output(data.result, bits; scaled)
         if logderivative
@@ -180,7 +181,7 @@ end
 
 function _angular_parameter_derivatives_at_precision(m, n, c, points;
         spheroid = :prolate, precision = :double, precision_bits, max_terms = 512,
-        normalize = false, kind = 1, diagnostics = false)
+        normalize = false, kind = 1, diagnostics = false, local_mode = nothing)
     bits = _validate_precision_bits(precision_bits)
     _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
     if eltype(points)<:Real
@@ -190,7 +191,7 @@ function _angular_parameter_derivatives_at_precision(m, n, c, points;
     end
     kind==2 && normalize && throw(ArgumentError("normalize=true is only defined for angular kind=1"))
     data = _refine_angular_values_at_precision(m, n, c, points, spheroid, precision,
-        bits, max_terms, kind, normalize, 1; sensitivity = true)
+        bits, max_terms, kind, normalize, 1; sensitivity = true, local_mode)
     return _with_swprecision(Base.precision(real(data.eigenpair.lambda))) do
         value = _round_to_bigfloat.(data.result.dvalue_dc, bits)
         derivative = _round_to_bigfloat.(data.result.dderivative_dc, bits)

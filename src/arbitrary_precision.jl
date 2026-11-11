@@ -122,7 +122,8 @@ function _cache_coefficient_eigenpair!(cache, key, result; native_label = false)
 end
 
 function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision, bits,
-        rtol, max_terms, derivatives; native_label = false, min_terms = 0, max_refinements = 4)
+        rtol, max_terms, derivatives; native_label = false, min_terms = 0, max_refinements = 4,
+        local_mode = nothing)
     0<=min_terms<=max_terms || throw(ArgumentError("min_terms must be between zero and max_terms"))
     cache = get!(task_local_storage(), _coefficient_eigenpair_cache_key) do
         Dict{Any, Any}()
@@ -130,11 +131,13 @@ function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
     # Cache original inputs, requested precision, rounding, and the MPFR library.
     key = (m, n, typeof(c), c, spheroid, precision, bits, rtol, max_terms, min_terms, native_label,
         derivatives, _swrounding(), Base.precision(BigFloat), rounding(BigFloat),
-        backend_library(; precision = :mpfr), max_refinements)
+        backend_library(; precision = :mpfr), max_refinements, local_mode)
     cached = _cached_coefficient_eigenpair(cache, key)
     cached===nothing || return cached
 
-    mode_state = if c isa Complex && !native_label
+    mode_state = if local_mode!==nothing
+        local_mode
+    elseif c isa Complex && !native_label
         _with_swprecision(max(192, bits+96)) do
             evaluate = _mpfr_angular_phase_evaluator(m, n, spheroid, precision, bits, max_terms)
             _initial_angular_phase(evaluate, m, n, _SWFloat_complex(c))

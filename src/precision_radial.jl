@@ -98,7 +98,7 @@ function _radial_coordinate_derivatives_at_precision(eigenpair, points, states, 
 end
 
 function _refine_radial_values_at_precision(m, n, c, points, spheroid, precision, kind,
-        normalization, bits, max_terms, order, sensitivity; max_refinements = 5)
+        normalization, bits, max_terms, order, sensitivity; max_refinements = 5, local_mode = nothing)
     input_bits = max(_precision_input_bits(c), maximum(_precision_input_bits, points; init = 0))
     workbits = max(bits+96, input_bits+64, bits+64+ceil(Int, 8abs(c)+4abs(imag(c))*maximum(abs, points)))
     previous = nothing
@@ -108,7 +108,7 @@ function _refine_radial_values_at_precision(m, n, c, points, spheroid, precision
         result, stable = _with_swprecision(workbits) do
             tolerance = ldexp(one(_SWFloat), -bits-24)
             eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
-                workbits-48, nothing, max_terms, true; min_terms = minimum)
+                workbits-48, nothing, max_terms, true; min_terms = minimum, local_mode)
             _with_swprecision(Base.precision(real(eigenpair.lambda))) do
                 data = _radial_states_at_precision(eigenpair, points, kind, normalization, tolerance, 1//attempt)
                 result = sensitivity ?
@@ -130,7 +130,7 @@ end
 
 function _rmn_at_precision(m, n, c, points; spheroid, precision, precision_bits, max_terms = 512,
         kind = 1, normalization = :standard, derivatives = 1, second_derivative = false,
-        scaled = false, logderivative = false)
+        scaled = false, logderivative = false, local_mode = nothing)
     bits = _validate_precision_bits(precision_bits)
     _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
@@ -141,7 +141,7 @@ function _rmn_at_precision(m, n, c, points; spheroid, precision, precision_bits,
     end
     order = max(derivatives, second_derivative ? 2 : 1)
     result = _refine_radial_values_at_precision(m, n, c, points, spheroid, precision, kind,
-        normalization, bits, max_terms, order, false)
+        normalization, bits, max_terms, order, false; local_mode)
     output = _with_swprecision(max(bits+64, Base.precision(real(first(result.value))))) do
         _precision_wave_output(result, bits; scaled)
     end
@@ -158,7 +158,8 @@ function _rmn_at_precision(m, n, c, points; spheroid, precision, precision_bits,
 end
 
 function _radial_parameter_derivatives_at_precision(m, n, c, points; spheroid, precision,
-        precision_bits, max_terms = 512, kind = 1, normalization = :standard, diagnostics = false)
+        precision_bits, max_terms = 512, kind = 1, normalization = :standard, diagnostics = false,
+        local_mode = nothing)
     bits = _validate_precision_bits(precision_bits)
     _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
     if eltype(points)<:Real
@@ -167,7 +168,7 @@ function _radial_parameter_derivatives_at_precision(m, n, c, points; spheroid, p
         _validate_complex_coordinates(m, n, c, points, spheroid, precision, :radial; kind, normalization)
     end
     result = _refine_radial_values_at_precision(m, n, c, points, spheroid, precision, kind,
-        normalization, bits, max_terms, 1, true)
+        normalization, bits, max_terms, 1, true; local_mode)
     output = _precision_wave_output(result, bits)
     if c isa Complex
         stored_bits = maximum(channel -> maximum(z -> Base.precision(real(z)), channel), values(result))

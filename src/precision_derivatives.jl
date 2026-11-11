@@ -70,10 +70,24 @@ function _precision_parameter_stencil(evaluate, c, bits, h, order, adaptive, rto
     end
 end
 
+function _precision_mode_selector(m, n, c, spheroid, precision, max_terms)
+    cache = Dict{Int, Any}()
+    (parameter, bits) -> begin
+        c isa Real && return nothing
+        evaluate, center, state = get!(cache, bits) do
+            center = _SWFloat_complex(c)
+            pair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
+                bits, nothing, max_terms, false)
+            (_mpfr_angular_phase_evaluator(m, n, spheroid, precision, bits, max_terms), center, pair.mode_state)
+        end
+        _transport_angular_phase(evaluate, center, state, parameter)
+    end
+end
+
 function _precision_endpoint_parameter(m, n, c, points, spheroid, precision, target,
-        normalize, normalization, bits, max_terms, sensitivity)
+        normalize, normalization, bits, max_terms, sensitivity; local_mode = nothing)
     pair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
-        bits, nothing, max_terms, true)
+        bits, nothing, max_terms, true; local_mode)
     _with_swprecision(Base.precision(real(pair.lambda))) do
         if target===:angular
             scale = _coefficient_scale_at_precision(pair, normalize)
@@ -106,29 +120,33 @@ function _wave_jacobian_at_precision(m, n, c, points, spheroid, precision, targe
         normalize, normalization, bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     bits = _validate_precision_bits(bits)
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
-    analytic(z, p; diagnostics = false) = target===:angular ?
+    select_mode = _precision_mode_selector(m, n, c, spheroid, precision, max_terms)
+    analytic(z, p; diagnostics = false, local_mode = nothing) = target===:angular ?
         _angular_parameter_derivatives_at_precision(m, n, z, points; spheroid, precision,
-            precision_bits = p, max_terms, kind, normalize, diagnostics) :
+            precision_bits = p, max_terms, kind, normalize, diagnostics, local_mode) :
         _radial_parameter_derivatives_at_precision(m, n, z, points; spheroid, precision,
-            precision_bits = p, max_terms, kind, normalization, diagnostics)
+            precision_bits = p, max_terms, kind, normalization, diagnostics, local_mode)
     order==1 && h===nothing && return analytic(c, bits; diagnostics)
     endpoints = m==1 && kind==1 ? findall(x -> isreal(x) &&
         (target===:angular ? abs(x)==1 : spheroid===:prolate && x==1), points) : Int[]
     evaluate(z, p) = begin
+        local_mode = select_mode(z, p)
         result = if order==2
-            sensitivity = analytic(z, p)
+            sensitivity = analytic(z, p; local_mode)
             z isa Real ? (sensitivity.dvalue_dc, sensitivity.dderivative_dc) :
                 (sensitivity.dvalue_dcreal, sensitivity.dderivative_dcreal)
         else
             wave = target===:angular ?
-                smn(m, n, z, points; spheroid, precision, kind, normalize, precision_bits = p, max_terms) :
-                rmn(m, n, z, points; spheroid, precision, kind, normalization, precision_bits = p, max_terms)
+                _smn_at_precision(m, n, z, points; spheroid, precision, kind, normalize,
+                    precision_bits = p, max_terms, local_mode) :
+                _rmn_at_precision(m, n, z, points; spheroid, precision, kind, normalization,
+                    precision_bits = p, max_terms, local_mode)
             (wave.value, wave.derivative)
         end
         values = hcat(result...)
         if !isempty(endpoints)
             values[endpoints, 2] = _precision_endpoint_parameter(m, n, z, points[endpoints],
-                spheroid, precision, target, normalize, normalization, p, max_terms, order==2)
+                spheroid, precision, target, normalize, normalization, p, max_terms, order==2; local_mode)
         end
         values
     end
@@ -173,9 +191,19 @@ function _eigen_difference_at_precision(m, n, c, spheroid, precision, operator, 
     operator===:separation || _validate_integral_precision_arguments(m, n, c, spheroid, operator, form)
     operator!==:separation && iszero(c) && form===:log &&
         throw(DomainError(c, "log concentration is singular at c=0"))
+    select_mode = _precision_mode_selector(m, n, c, spheroid, precision, max_terms)
     evaluate(z, p) = begin
-        value = order==1 ? eigenvalue(m, n, z; spheroid, precision, operator, form, precision_bits = p, max_terms) :
-            jacobian_eigen(m, n, z; spheroid, precision, operator, form, precision_bits = p, max_terms)
+        local_mode = select_mode(z, p)
+        value = if order==2
+            _eigen_jacobian_at_precision(m, n, z, spheroid, precision, operator, form,
+                p, max_terms, 1, nothing, false; local_mode)
+        elseif local_mode===nothing
+            eigenvalue(m, n, z; spheroid, precision, operator, form, precision_bits = p, max_terms)
+        else
+            pair = _solve_coefficient_eigenpair_at_precision(m, n, z, spheroid, precision,
+                p, nothing, max_terms, false; local_mode)
+            _round_to_bigfloat(pair.lambda, p)
+        end
         reshape([order==2 && z isa Complex ? value.d_dcreal : value], 1, 1)
     end
     data = _precision_parameter_stencil(evaluate, c, bits, h, order, adaptive, rtol, atol;

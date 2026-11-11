@@ -133,6 +133,13 @@ function _coordinate_zeros_at_precision(m, n, c, interval, target, spheroid, pre
     _validate_coefficient_options(m, n, c, spheroid, precision, rtol, max_terms, :orthonormal)
     workbits = max(bits+64, _precision_input_bits(c)+32,
         maximum(_precision_input_bits, interval)+32)
+    if rtol!==nothing
+        workbits = _with_swprecision(workbits) do
+            tolerance = _SWFloat(rtol)
+            isfinite(tolerance) && tolerance>0 || throw(ArgumentError("rtol must be finite and positive"))
+            max(workbits, ceil(Int, -log2(tolerance))+64)
+        end
+    end
     previous = nothing
     for attempt in 1:4
         roots, stable = _with_swprecision(workbits) do
