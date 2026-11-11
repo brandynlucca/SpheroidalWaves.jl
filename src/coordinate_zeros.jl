@@ -58,6 +58,8 @@ derivative with `stationary=true`. A Chebyshev grid is refined until the roots
 stabilize. Function-zero searches additionally require exactly n-m roots.
 An unresolved search throws an error. Constant functions have no isolated
 stationary points and are rejected for a stationary-point search.
+`precision_bits=p` returns p-bit roots after precision refinement; `rtol` defaults
+to `2^(-p-8)`, and `max_terms` bounds the coefficient expansion.
 """
 function angular_zeros(m::Integer, n::Integer, c::Real; stationary::Bool = false,
         spheroid::Symbol = :prolate, precision::Symbol = :double, rtol = nothing, max_points::Integer = 16384,
@@ -95,6 +97,8 @@ in a finite closed interval. Require 1<a<b for prolate, 0<=a<b for oblate.
 Two refined grids must agree before returning roots; bisection refines each
 sign change. Grid stability is a numerical check, not a proof of completeness.
 Use a larger `max_points` for long intervals or highly oscillatory solutions.
+`precision_bits=p` returns p-bit roots after precision refinement; `rtol` defaults
+to `2^(-p-8)`, and `max_terms` bounds the coefficient expansion.
 """
 function radial_zeros(m::Integer, n::Integer, c::Real, interval::Tuple{<:Real, <:Real};
         kind::Integer = 1, stationary::Bool = false, spheroid::Symbol = :prolate,
@@ -148,7 +152,7 @@ function _coordinate_zeros_at_precision(m, n, c, interval, target, spheroid, pre
             max_points>=2initial || throw(ArgumentError("max_points must allow two search grids (at least $(2initial))"))
             !stationary && target===:angular && n==m && return (_SWFloat[], true)
             pair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
-                workbits, nothing, max_terms, false)
+                workbits, nothing, max_terms, target===:radial)
             evaluate(points) = _with_swprecision(Base.precision(real(pair.lambda))) do
                 values = if target===:angular
                     _angular_values_at_precision(pair, points, 1, true, 1;

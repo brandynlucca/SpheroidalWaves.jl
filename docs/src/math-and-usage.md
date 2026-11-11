@@ -51,7 +51,7 @@ The difference measures agreement, not an accuracy guarantee. `accuracy` provide
 
 ### Explicit arbitrary precision
 
-Use `precision_bits=p` (`p≥2`) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, and analytic Jacobians. Wave Jacobians require `order=1`; all Jacobians require `h=nothing`. `accuracy` and coordinate-zero searches remain unsupported.
+Use `precision_bits=p` (`p≥2`) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, `accuracy`, coordinate-zero searches, and Jacobians of either parameter-derivative order. Supplying `h` selects finite differences; the step and adaptive tolerances then control derivative accuracy separately from arithmetic precision. Automatic second-order wave Jacobians refine a fourth-order stencil of analytic first derivatives.
 
 ~~~julia
 lambda = eigenvalue(1, 2, 5//4; precision_bits=256)
@@ -63,7 +63,7 @@ Outputs have `p`-bit `BigFloat` components regardless of ambient precision. Use 
 
 Higher precision costs more time and memory. Native workspaces and retained caches have byte budgets; oversized requests fail explicitly.
 
-CMake generates the MPFR backend from existing Fortran kernels. Source builds need MPFR, MPC, and GMP development libraries. The Yggdrasil recipe includes these dependencies; a matching JLL release is still required.
+CMake compiles the shared Fortran kernels for each backend. Source builds need MPFR, MPC, and GMP development libraries. Normal installations through the Julia General Registry use the libraries supplied by `SpheroidalWaves_jll`.
 
 ## Parallel evaluation
 

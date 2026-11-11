@@ -88,9 +88,10 @@ function _radial_wronskian_at_precision(m, n, c, points, spheroid, precision, fo
 end
 
 function _eigen_jacobian_at_precision(m, n, c, spheroid, precision, operator, form,
-        bits, max_terms, order, h, diagnostics)
+        bits, max_terms, order, h, diagnostics, adaptive = true, rtol = 1e-6, atol = 1e-10)
     bits = _validate_precision_bits(bits)
-    h === nothing || throw(ArgumentError("precision_bits requires h=nothing; derivatives use analytic identities"))
+    h === nothing || return _eigen_difference_at_precision(m, n, c, spheroid, precision,
+        operator, form, bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     if operator !== :separation
         value = _integral_eigen_jacobian_at_precision(
             m, n, c, spheroid, precision, operator, form, bits, max_terms, order)

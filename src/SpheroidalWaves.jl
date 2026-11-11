@@ -1405,7 +1405,8 @@ include("eigenvalue_sweep.jl")
 Differentiate [`eigenvalue`](@ref) with respect to `c`. Order and degree satisfy
 `0 <= m <= n`. The default uses analytic differentiation; an explicit `h`
 selects finite differences.
-`precision_bits=p` requires `h=nothing` and uses analytic identities for both orders.
+`precision_bits=p` uses analytic identities for both orders when `h=nothing`.
+Supplying `h` selects finite differences with guarded arithmetic at the requested precision.
 
 ### Keywords
 
@@ -1479,7 +1480,7 @@ function jacobian_eigen(m::Integer, n::Integer, c::Union{Real, Complex};
     operator === :separation && form !== :value &&
         throw(ArgumentError("the separation constant supports only form=:value"))
     precision_bits === nothing || return _eigen_jacobian_at_precision(
-        m, n, c, spheroid, precision, operator, form, precision_bits, max_terms, order, h, diagnostics)
+        m, n, c, spheroid, precision, operator, form, precision_bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     order == 2 && return _eigen_curvature(m, n, c, spheroid, precision, operator, form, h,
         diagnostics, adaptive, rtol, atol)
     operator!==:separation && return _integral_eigen_jacobian(m, n, c, spheroid, precision,
@@ -1533,6 +1534,9 @@ end
 """
 Numerical Jacobian of `smn` outputs with respect to `c`.
 
+`precision_bits=p` supports both orders and explicit `h`; automatic second derivatives
+refine the stencil until results agree at the requested precision.
+
 `order=2` returns `d2value_dc2` and `d2derivative_dc2` for real `c`.
 For complex `c`, use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`.
 It differences analytic first derivatives using fourth-order stencils.
@@ -1576,9 +1580,8 @@ function jacobian_smn(
         throw(ArgumentError("normalize=true is only defined for angular kind=1; Qs uses the DLMF second-kind normalization"))
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
     if precision_bits !== nothing
-        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
-        return _angular_parameter_derivatives_at_precision(m, n, c, eta;
-            spheroid, precision, precision_bits, max_terms, normalize, kind, diagnostics)
+        return _wave_jacobian_at_precision(m, n, c, eta, spheroid, precision, :angular, kind,
+            normalize, :standard, precision_bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     end
     order == 2 && return _wave_curvature(
         m, n, c, eta, spheroid, precision, kind, normalize, :angular,
@@ -1723,9 +1726,8 @@ function jacobian_rmn(
     _validate_wave_arguments(m, n, c, x, spheroid, precision, :radial; kind, normalization)
     order in (1, 2) || throw(ArgumentError("order must be 1 or 2"))
     if precision_bits !== nothing
-        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
-        return _radial_parameter_derivatives_at_precision(m, n, c, x;
-            spheroid, precision, precision_bits, max_terms, kind, normalization, diagnostics)
+        return _wave_jacobian_at_precision(m, n, c, x, spheroid, precision, :radial, kind,
+            false, normalization, precision_bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     end
     order == 2 &&
         return _wave_curvature(m, n, c, x, spheroid, precision, kind, false, :radial,
@@ -2198,9 +2200,8 @@ function jacobian_smn(
         precision_bits = nothing, max_terms::Integer = 512)
     if precision_bits !== nothing
         _validate_jacobian_tolerances(rtol, atol)
-        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
-        return _angular_parameter_derivatives_at_precision(m, n, c, z;
-            spheroid, precision, precision_bits, max_terms, normalize, kind, diagnostics)
+        return _wave_jacobian_at_precision(m, n, c, z, spheroid, precision, :angular, kind,
+            normalize, :standard, precision_bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     end
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :angular, kind, normalize, :standard,
@@ -2216,9 +2217,8 @@ function jacobian_rmn(
         precision_bits = nothing, max_terms::Integer = 512)
     if precision_bits !== nothing
         _validate_jacobian_tolerances(rtol, atol)
-        h === nothing && order==1 || throw(ArgumentError("precision_bits currently requires h=nothing and order=1 for wave Jacobians"))
-        return _radial_parameter_derivatives_at_precision(m, n, c, z;
-            spheroid, precision, precision_bits, max_terms, kind, normalization, diagnostics)
+        return _wave_jacobian_at_precision(m, n, c, z, spheroid, precision, :radial, kind,
+            false, normalization, precision_bits, max_terms, order, h, diagnostics, adaptive, rtol, atol)
     end
     _complex_coordinate_jacobian(
         m, n, c, z, spheroid, precision, :radial, kind, false, normalization,
@@ -2302,6 +2302,7 @@ end
 include("degree_ranges.jl")
 include("precision_waves.jl")
 include("precision_radial.jl")
+include("precision_derivatives.jl")
 
 function _initialize_backends!(configure_jll = _configure_backends_from_jll!,
         configure_local = _configure_backends_from_local_build!,

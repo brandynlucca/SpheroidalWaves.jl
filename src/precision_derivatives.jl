@@ -82,7 +82,14 @@ function _precision_endpoint_parameter(m, n, c, points, spheroid, precision, tar
             return -real.(points) .* regular.value
         end
         value = if iszero(c)
-            sensitivity ? zero(_SWFloat) : one(_SWFloat)/prod(_SWFloat(2j+1) for j in 0:n)
+            if sensitivity
+                zero(_SWFloat)
+            else
+                anchor = _SWFloat(2)
+                y, _ = _static_regular_radial(m, n, anchor, 1)
+                polynomial = _angular_endpoint_coefficients(m, pair.lambda, zero(_SWFloat), anchor-1)
+                y/((anchor^2-1)^(m//2)*_angular_endpoint_polynomial(polynomial, 1-anchor).value)
+            end
         else
             state = _radial_expansion_data(pair, one(_SWFloat), 1; regular_factor = true).state
             if normalization===:static

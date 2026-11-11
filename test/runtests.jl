@@ -522,6 +522,15 @@ end
 if test_group_selected("precision-edge-cases")
     include("precision_edge_cases.jl")
 end
+let cases = ("accuracy-diagnostics" => "accuracy", "accuracy-and-roots" => "roots",
+        "static-and-second-derivatives" => "curvature", "parameter-derivatives" => "differences")
+    selected = [selection for (group, selection) in cases if test_group_selected(group)]
+    if !isempty(selected)
+        withenv("SPHEROIDALWAVES_PRECISION_API_CASE" => join(selected, ',')) do
+            include("precision_api.jl")
+        end
+    end
+end
 if "all" in TEST_GROUPS
     include("precision_waves.jl")
 else

@@ -43,7 +43,7 @@ using SpheroidalWaves, Test
             end
             @test jacobian_eigen(0, 0, 0; operator = :concentration,
                 form = :log, precision_bits = bits)==Inf
-            @test_throws ArgumentError jacobian_eigen(0, 0, 1; precision_bits = bits, h = 1//100)
+            @test isfinite(jacobian_eigen(0, 0, 1; precision_bits = bits, h = 1//100))
         end
 
         @testset "Directed rounding of complex Jacobians" begin
@@ -120,8 +120,8 @@ using SpheroidalWaves, Test
             @test only(angular.value)==z
             @test only(angular.derivative)==1
             @test only(angular.fourth_derivative)==0
-            @test_throws ArgumentError jacobian_smn(0, 0, 1, [0]; precision_bits = bits, order = 2)
-            @test_throws ArgumentError jacobian_rmn(0, 0, 1, [2]; precision_bits = bits, h = 1//100)
+            @test all(isfinite, jacobian_smn(0, 0, 1, [0]; precision_bits = bits, order = 2).d2value_dc2)
+            @test all(isfinite, jacobian_rmn(0, 0, 1, [2]; precision_bits = bits, h = 1//100).dvalue_dc)
             wronskian = radial_wronskian(0, 0, 0, [2]; normalization = :static,
                 form = :normalized, precision_bits = bits)
             @test isapprox(only(wronskian), 1; rtol = tolerance)
