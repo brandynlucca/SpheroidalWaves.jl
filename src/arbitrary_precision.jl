@@ -68,6 +68,7 @@ end
 
 const _coefficient_eigenpair_cache_key = gensym(:coefficient_eigenpairs)
 const _coefficient_eigenpair_cache_limit = 16*1024^2
+const _coefficient_eigenpair_cache_entries = 128
 
 function _coefficient_eigenpair_bytes(result)
     stored = get(result, :cache_bytes, nothing)
@@ -103,7 +104,7 @@ function _cache_coefficient_eigenpair!(cache, key, result; native_label = false)
     result = (; result..., cache_bytes = required)
     required>limit && return result
     retained = sum(_coefficient_eigenpair_bytes, values(cache); init = 0)
-    while !isempty(cache) && (length(cache)>=32 || retained>limit-required)
+    while !isempty(cache) && (length(cache)>=_coefficient_eigenpair_cache_entries || retained>limit-required)
         victim = first(cache)
         for candidate in cache
             if (candidate.second.native_label && !victim.second.native_label) ||

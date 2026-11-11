@@ -265,30 +265,31 @@ const ARBITRARY_PRECISION_REFERENCES = (
 
         @testset "Cache priority and recency" begin
             SW = SpheroidalWaves
+            capacity = SW._coefficient_eigenpair_cache_entries
             pair = SW._solve_coefficient_eigenpair_at_precision(0, 0, 1,
                 :prolate, :double, 160, nothing, 512, true)
             cache = Dict{Any, Any}()
             canonical = [SW._cache_coefficient_eigenpair!(cache, key, pair) for key in 1:2]
-            for key in 3:96
+            for key in 3:(3capacity)
                 SW._cache_coefficient_eigenpair!(cache, key, pair; native_label = true)
             end
-            @test length(cache)==32
+            @test length(cache)==capacity
             @test all(cache[key]===canonical[key] for key in 1:2)
-            @test count(result -> result.native_label, values(cache))==30
+            @test count(result -> result.native_label, values(cache))==capacity-2
             @test sum(SW._coefficient_eigenpair_bytes, values(cache))<=SW._coefficient_eigenpair_cache_limit
             empty!(cache)
-            for key in 1:32
+            for key in 1:capacity
                 retained = SW._cache_coefficient_eigenpair!(cache, key, pair)
                 retained.last_used[] = UInt64(key)
             end
             @test SW._cached_coefficient_eigenpair(cache, 1)===cache[1]
-            @test cache[1].last_used[]>32
-            SW._cache_coefficient_eigenpair!(cache, 33, pair)
-            @test haskey(cache, 1) && !haskey(cache, 2) && haskey(cache, 33)
-            @test length(cache)==32
+            @test cache[1].last_used[]>capacity
+            SW._cache_coefficient_eigenpair!(cache, capacity+1, pair)
+            @test haskey(cache, 1) && !haskey(cache, 2) && haskey(cache, capacity+1)
+            @test length(cache)==capacity
             saved = copy(cache)
-            candidate = SW._cache_coefficient_eigenpair!(cache, 34, pair; native_label = true)
-            @test candidate.native_label && !haskey(cache, 34)
+            candidate = SW._cache_coefficient_eigenpair!(cache, capacity+2, pair; native_label = true)
+            @test candidate.native_label && !haskey(cache, capacity+2)
             @test keys(cache)==keys(saved) && all(cache[key]===saved[key] for key in keys(saved))
             @test sum(SW._coefficient_eigenpair_bytes, values(cache))<=SW._coefficient_eigenpair_cache_limit
         end
