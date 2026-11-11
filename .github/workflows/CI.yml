@@ -103,6 +103,7 @@ jobs:
           name: native-diagnostics-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
           path: |
             build/CMakeCache.txt
+            build/bin/
             build/build_output.txt
             build/Testing/Temporary/LastTest.log
           retention-days: 7
