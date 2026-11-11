@@ -489,6 +489,8 @@ jobs:
           # Use lower optimization only for groups measured in the focused timing workflow.
           optimize: >-
             ${{ matrix.suite.optimize ||
+                (matrix.suite.os == 'macos-26-intel' && matrix.version == 'pre' &&
+                 (matrix.suite.name == 'thread-regressions' || matrix.suite.name == 'quantities') && '0') ||
                 (matrix.suite.os == 'macos-26-intel' && matrix.suite.name == 'coordinates' && matrix.version != '1.10' && '0') || '1' }}
           # Keep cached stdlibs on Julia 1.10, which lacks the existing-images mode.
           compiled_modules: ${{ (contains(matrix.suite.groups, 'api-and-precision') || matrix.version == '1.10') && 'yes' || 'existing' }}
