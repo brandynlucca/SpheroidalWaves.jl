@@ -50,7 +50,8 @@ jobs:
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
           revision=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)
           git fetch --depth=1 origin "$revision"
-          git diff --exit-code "$revision" HEAD -- src deps CMakeLists.txt Project.toml test
+          # Artifacts contain package code and native libraries; tests come from this checkout.
+          git diff --exit-code "$revision" HEAD -- src deps CMakeLists.txt Project.toml
       - uses: fortran-lang/setup-fortran@v1
         if: runner.os == 'Windows'
         with:

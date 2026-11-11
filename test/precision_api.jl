@@ -166,8 +166,8 @@ if "complex-curvature" in precision_api_cases
         end
     end
 end
-if "differences" in precision_api_cases
-    @testset "Arbitrary-precision finite differences" begin
+if "differences" in precision_api_cases || "eigen-differences" in precision_api_cases
+    @testset "Arbitrary-precision eigenvalue finite differences" begin
         for c in (1//1, complex(1//1, 1//8)), order in (1, 2), adaptive in (false, true)
             result = jacobian_eigen(0, 0, c; precision_bits = 96, h = 1//10^10,
                 order, adaptive, diagnostics = true)
@@ -178,20 +178,6 @@ if "differences" in precision_api_cases
             @test isapprox(actual, reference; rtol = 1e-18)
             @test precision(real(actual))==96
             @test c isa Real || order==2 || isapprox(result.d_dcimag, analytic.d_dcimag; rtol = 1e-18)
-        end
-        for (evaluate, point, kwargs) in ((jacobian_smn, 1//4, (;)),
-                (jacobian_smn, complex(1//4, 1//8), (; kind = 2)),
-                (jacobian_rmn, 2, (;)),
-                (jacobian_rmn, complex(2, 1//8), (; normalization = :static)))
-            for c in (1, complex(1, 1//8))
-                result = evaluate(0, 0, c, [point]; kwargs..., precision_bits = 80,
-                    h = 1//10^8, diagnostics = true)
-                analytic = evaluate(0, 0, c, [point]; kwargs..., precision_bits = 128)
-                for name in keys(analytic)
-                    @test isapprox(getproperty(result, name), getproperty(analytic, name); rtol = 1e-14)
-                    @test precision(real(only(getproperty(result, name))))==80
-                end
-            end
         end
         for operator in (:concentration, :fourier), order in (1, 2), c in (0, 1)
             result = jacobian_eigen(0, 0, c; operator, order, precision_bits = 80, h = 1//10^8)
@@ -208,14 +194,32 @@ if "differences" in precision_api_cases
         end
         @test_throws ArgumentError jacobian_eigen(0, 0, 1; operator = :concentration, precision_bits = 80, h = 1)
         @test_throws DomainError jacobian_eigen(0, 0, 0; operator = :concentration, form = :log, precision_bits = 80, h = 1//100)
-        @test_throws ArgumentError jacobian_rmn(0, 0, 1, [2]; precision_bits = 80, h = 1, order = 2)
-        @test_throws ArgumentError jacobian_smn(0, 0, 1, [complex(0)]; precision_bits = 80, order = 3)
-        @test_throws ArgumentError jacobian_rmn(0, 0, 1, [complex(2)]; precision_bits = 80, order = 3)
         poor = jacobian_eigen(0, 0, 1; precision_bits = 80, h = 1//4,
             rtol = 1e-30, diagnostics = true)
         @test poor.metadata.conditioning_flag===:poor
         @test poor.metadata.suggested_action===:retry_smaller_h
         @test poor.metadata.step_used==1//16
+    end
+end
+if "differences" in precision_api_cases || "wave-differences" in precision_api_cases
+    @testset "Arbitrary-precision wave finite differences" begin
+        for (evaluate, point, kwargs) in ((jacobian_smn, 1//4, (;)),
+                (jacobian_smn, complex(1//4, 1//8), (; kind = 2)),
+                (jacobian_rmn, 2, (;)),
+                (jacobian_rmn, complex(2, 1//8), (; normalization = :static)))
+            for c in (1, complex(1, 1//8))
+                result = evaluate(0, 0, c, [point]; kwargs..., precision_bits = 80,
+                    h = 1//10^8, diagnostics = true)
+                analytic = evaluate(0, 0, c, [point]; kwargs..., precision_bits = 128)
+                for name in keys(analytic)
+                    @test isapprox(getproperty(result, name), getproperty(analytic, name); rtol = 1e-14)
+                    @test precision(real(only(getproperty(result, name))))==80
+                end
+            end
+        end
+        @test_throws ArgumentError jacobian_rmn(0, 0, 1, [2]; precision_bits = 80, h = 1, order = 2)
+        @test_throws ArgumentError jacobian_smn(0, 0, 1, [complex(0)]; precision_bits = 80, order = 3)
+        @test_throws ArgumentError jacobian_rmn(0, 0, 1, [complex(2)]; precision_bits = 80, order = 3)
         for (evaluate, kwargs) in ((jacobian_smn, (;)), (jacobian_rmn, (; normalization = :static)))
             endpoint = evaluate(1, 1, 0, [1]; kwargs..., precision_bits = 80,
                 h = 1//1000, diagnostics = true)
