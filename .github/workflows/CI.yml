@@ -95,9 +95,7 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
           echo 'CMAKE_GENERATOR=Ninja' >> "$GITHUB_ENV"
           mkdir -p build/bin
-          for dll in libgfortran-5 libgcc_s_seh-1 libquadmath-0 libgomp-1 libwinpthread-1 libmpc-3 libmpfr-6 libgmp-10; do
-            cp "$prefix/bin/$dll.dll" build/bin/
-          done
+          cp "$prefix/bin/"*.dll build/bin/
       # Share this checkout's libraries with the Julia version and test-group jobs.
       - name: Build and test the shared-source backends
         shell: bash
