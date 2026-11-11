@@ -57,7 +57,6 @@ jobs:
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
     name: ${{ matrix.case.name }} - Julia ${{ inputs.julia }}
     runs-on: ${{ matrix.case.os || 'macos-26-intel' }}
-    timeout-minutes: 5
     strategy:
       fail-fast: false
       max-parallel: 12

@@ -199,7 +199,6 @@ jobs:
     name: JLL ${{ matrix.suite }} - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
     needs: build
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:

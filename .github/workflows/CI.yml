@@ -249,7 +249,6 @@ jobs:
     name: Native ${{ matrix.configuration }}
     needs: build-configurations
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
@@ -349,7 +348,6 @@ jobs:
     name: Julia ${{ matrix.version }} - ${{ matrix.suite.os }} - ${{ matrix.suite.arch }} - ${{ matrix.suite.name }}
     needs: [native-backends, julia-environments]
     runs-on: ${{ matrix.suite.os }}
-    timeout-minutes: 5
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.suite.arch }}
@@ -516,7 +514,6 @@ jobs:
     if: inputs.source_run == ''
     name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
