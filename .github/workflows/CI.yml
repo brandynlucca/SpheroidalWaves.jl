@@ -54,7 +54,7 @@ jobs:
           version: '1.10'
           arch: ${{ matrix.platform.arch }}
       - uses: fortran-lang/setup-fortran@v1
-        if: runner.os == 'macOS'
+        if: runner.os != 'Linux'
         with:
           compiler: gcc
           version: '15'
@@ -77,23 +77,14 @@ jobs:
         if: runner.os == 'Windows'
         id: mpfr-msys
         with:
-          msystem: UCRT64
-          install: >-
-            mingw-w64-ucrt-x86_64-gcc-fortran
-            mingw-w64-ucrt-x86_64-ninja
-            mingw-w64-ucrt-x86_64-mpfr
-            mingw-w64-ucrt-x86_64-mpc
-            mingw-w64-ucrt-x86_64-gmp
-      - name: Configure the Windows toolchain and runtime
+          install: mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-gmp
+      - name: Configure MPFR/MPC search paths
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          prefix=$(cygpath -m '${{ steps.mpfr-msys.outputs.msys2-location }}/ucrt64')
+          prefix=$(cygpath -m '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64')
           echo "$prefix/bin" >> "$GITHUB_PATH"
-          echo "FC=$prefix/bin/gfortran.exe" >> "$GITHUB_ENV"
-          echo "CC=$prefix/bin/gcc.exe" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
-          echo 'CMAKE_GENERATOR=Ninja' >> "$GITHUB_ENV"
           mkdir -p build/bin
           cp "$prefix/bin/"*.dll build/bin/
       # Share this checkout's libraries with the Julia version and test-group jobs.
@@ -199,7 +190,7 @@ jobs:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
       - uses: fortran-lang/setup-fortran@v1
-        if: runner.os == 'macOS'
+        if: runner.os != 'Linux'
         with:
           compiler: gcc
           version: '15'
