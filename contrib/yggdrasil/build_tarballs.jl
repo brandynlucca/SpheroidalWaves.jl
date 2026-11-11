@@ -5,7 +5,7 @@ version = v"0.6.0"
 
 sources = [
     GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
-    "fddfd0786c7d6e93d1e90acb7d79000993816408"),
+    "db0821d7544e8ed284af8d12d2a0a97ab85698c0"),
 ]
 
 script = raw"""
