@@ -7,7 +7,8 @@ const TEST_GROUPS = Set(strip.(split(get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all
 const VALID_TEST_GROUPS = ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
     "static-and-second-derivatives",
     "coordinate-sensitivities",
-    "functions-and-coefficients", "thread-safety", "quad-and-domain", "accuracy-and-roots",
+    "functions-and-coefficients", "angular-and-coefficients", "thread-safety",
+    "quad-and-domain", "accuracy-and-roots",
     "accuracy-diagnostics", "numerical-regressions",
     "arbitrary-precision", "precision-quantities", "precision-edge-cases",
     "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior")
@@ -544,10 +545,12 @@ end
 let file_groups = (
         "accuracy-diagnostics" => ["accuracy.jl"],
         "numerical-regressions" => ["numerical_regressions.jl"],
+        "angular-and-coefficients" => ["angular_conventions.jl"],
         "functions-and-coefficients" =>
-            ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
-                "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
-                "oblate_precision.jl", "integral_eigenvalues.jl"],
+            ["radial_domain.jl", "radial_hankel.jl", "degree_ranges.jl"],
+        "angular-and-coefficients" => ["degree_batch.jl"],
+        "functions-and-coefficients" =>
+            ["angular_second_kind.jl", "oblate_precision.jl", "integral_eigenvalues.jl"],
         "parameter-derivatives" =>
             ["parameter_derivatives.jl",
                 "angular_parameter_derivatives.jl", "radial_parameter_derivatives.jl",
