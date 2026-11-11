@@ -101,7 +101,8 @@ jobs:
         shell: bash
         run: |
           where.exe libgfortran-5.dll
-          gdb --batch --nx -ex run -ex bt -ex 'info sharedlibrary' --args build/bin/spheroidal_shared_precision_mpfr_test.exe > build/windows-backtrace.log 2>&1
+          printf 'run\nbt\ninfo sharedlibrary\n' > build/windows-debug.gdb
+          gdb --batch --nx -x build/windows-debug.gdb --args build/bin/spheroidal_shared_precision_mpfr_test.exe > build/windows-backtrace.log 2>&1
           cat build/windows-backtrace.log
       - name: Upload native build and test diagnostics
         if: failure()

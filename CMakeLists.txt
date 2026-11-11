@@ -15,6 +15,10 @@ set(CMAKE_Fortran_STANDARD 2008)
 find_package(OpenMP REQUIRED COMPONENTS Fortran)
 
 if(CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
+  if(WIN32)
+    # Keep Fortran allocation and deallocation in the same Windows C runtime.
+    add_link_options(-static-libgfortran)
+  endif()
   add_compile_options("$<$<COMPILE_LANGUAGE:Fortran>:-ffree-line-length-none;-Wno-unused-label;-Wno-line-truncation>"
     "$<$<AND:$<COMPILE_LANGUAGE:Fortran>,$<CONFIG:Debug>>:-O0;-g3;-fcheck=all;-fbacktrace;-fno-omit-frame-pointer>")
 elseif(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
