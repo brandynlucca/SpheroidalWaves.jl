@@ -3,21 +3,23 @@ using Test
 
 include("require_backends.jl")
 
-const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
-TEST_GROUP in
-("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
+const TEST_GROUPS = Set(strip.(split(get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all"), ',')))
+const VALID_TEST_GROUPS = ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
+    "static-and-second-derivatives",
     "coordinate-sensitivities",
     "functions-and-coefficients", "thread-safety", "quad-and-domain", "accuracy-and-roots",
     "accuracy-diagnostics", "numerical-regressions",
     "arbitrary-precision", "precision-quantities", "precision-edge-cases",
-    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior") ||
-    error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
+    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior")
+all(group -> group in VALID_TEST_GROUPS, TEST_GROUPS) ||
+    error("Unknown SPHEROIDALWAVES_TEST_GROUP: $(join(TEST_GROUPS, ','))")
+test_group_selected(group) = "all" in TEST_GROUPS || group in TEST_GROUPS
 
 # Ordinary Pkg.test() and coverage run the complete suite.
-if TEST_GROUP in ("all", "thread-safety")
+if test_group_selected("thread-safety")
     include("thread_safety.jl")
 end
-if TEST_GROUP in ("all", "api-and-precision")
+if test_group_selected("api-and-precision")
     @testset "SpheroidalWaves.jl" begin
         assert_allclose(actual, expected; atol = 1e-10, rtol = 0.0) = begin
             @test length(actual) == length(expected)
@@ -506,30 +508,33 @@ if TEST_GROUP in ("all", "api-and-precision")
         end
     end
 end
-if TEST_GROUP in ("all", "quad-and-domain")
+if test_group_selected("quad-and-domain")
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
 end
-if TEST_GROUP in ("all", "arbitrary-precision")
+if test_group_selected("arbitrary-precision")
     include("arbitrary_precision.jl")
 end
-if TEST_GROUP in ("all", "precision-quantities")
+if test_group_selected("precision-quantities")
     include("precision_quantities.jl")
 end
-if TEST_GROUP in ("all", "precision-edge-cases")
+if test_group_selected("precision-edge-cases")
     include("precision_edge_cases.jl")
 end
-if TEST_GROUP == "all"
+if "all" in TEST_GROUPS
     include("precision_waves.jl")
-elseif startswith(TEST_GROUP, "precision-wave-")
-    cases = Dict("precision-wave-references" => "references",
+else
+    cases = ("precision-wave-references" => "references",
         "precision-wave-sensitivities" => "sensitivities",
         "precision-wave-behavior" => "derivatives,static,dispatch,storage,settings")
-    withenv("SPHEROIDALWAVES_PRECISION_CASE" => cases[TEST_GROUP]) do
-        include("precision_waves.jl")
+    selected = [selection for (group, selection) in cases if test_group_selected(group)]
+    if !isempty(selected)
+        withenv("SPHEROIDALWAVES_PRECISION_CASE" => join(selected, ',')) do
+            include("precision_waves.jl")
+        end
     end
 end
-if TEST_GROUP in ("all", "quad-and-domain")
+if test_group_selected("quad-and-domain")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end
@@ -557,15 +562,20 @@ let file_groups = (
            expression.args[1] === Symbol("@testset")
             if expression.args[3] in serial_testsets
                 delete!(serial_testsets, expression.args[3])
-                return TEST_GROUP in ("all", "accuracy-and-roots") ? expression : nothing
+                return test_group_selected("accuracy-and-roots") ? expression : nothing
             end
-            # Complex-coordinate Jacobians share their compilation work.
-            group = expression.args[3] in
-                    ("Complex angular parameter sensitivities",
-                "Complex coordinate parameter sensitivities",
-                "Complex-coordinate Jacobian diagnostics keyword") ?
-                    "coordinate-sensitivities" : current_group[]
-            if TEST_GROUP == "all" || TEST_GROUP == group
+            # Keep costly derivative groups separate on slower runners.
+            group = if expression.args[3] in ("Complex angular parameter sensitivities",
+                    "Complex coordinate parameter sensitivities",
+                    "Complex-coordinate Jacobian diagnostics keyword")
+                "coordinate-sensitivities"
+            elseif expression.args[3] in ("Static radial sensitivities",
+                    "Second parameter derivatives", "Second integral eigenvalue derivatives")
+                "static-and-second-derivatives"
+            else
+                current_group[]
+            end
+            if test_group_selected(group)
                 push!(testsets, expression)
             end
             return nothing

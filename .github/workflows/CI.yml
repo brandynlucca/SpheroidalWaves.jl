@@ -187,7 +187,7 @@ jobs:
           retention-days: 1
 
   configuration-tests:
-    name: Native ${{ matrix.configuration }} - ${{ matrix.group }}
+    name: Native ${{ matrix.configuration }}
     needs: build-configurations
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -195,11 +195,6 @@ jobs:
       fail-fast: false
       matrix:
         configuration: ['double-only', 'mpfr-without-quad', 'debug']
-        group: ['native-basic', 'native-prolate', 'native-oblate', 'native-context']
-        exclude:
-          - {configuration: double-only, group: native-prolate}
-          - {configuration: double-only, group: native-oblate}
-          - {configuration: double-only, group: native-context}
     steps:
       - uses: actions/checkout@v7
       - name: Install arithmetic runtime dependencies
@@ -210,22 +205,20 @@ jobs:
           name: native-configuration-${{ matrix.configuration }}
           path: build
       - name: Run native regression group
-        env:
-          NATIVE_GROUP: ${{ matrix.group }}
         run: |
           ulimit -v 3145728
           chmod +x build/bin/*
-          ctest --test-dir build -L "$NATIVE_GROUP" --no-tests=error --output-on-failure --parallel 1
+          ctest --test-dir build --no-tests=error --output-on-failure --parallel 1
 
   test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
+    name: Julia ${{ matrix.version }} - ${{ matrix.suite.os }} - ${{ matrix.suite.arch }} - ${{ matrix.suite.name }}
     needs: native-backends
-    runs-on: ${{ matrix.platform.os }}
+    runs-on: ${{ matrix.suite.os }}
     timeout-minutes: 5
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
-      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
-      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.group }}
+      EXPECTED_JULIA_ARCH: ${{ matrix.suite.arch }}
+      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.suite.groups }}
       SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
     permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
       actions: write
@@ -234,58 +227,49 @@ jobs:
       fail-fast: false
       max-parallel: 48
       matrix:
-        group:
-          - native-basic
-          - native-prolate
-          - native-oblate
-          - native-context
-          - api-and-precision
-          - thread-safety
-          - quad-and-domain
-          - accuracy-and-roots
-          - accuracy-diagnostics
-          - numerical-regressions
-          - arbitrary-precision
-          - precision-quantities
-          - precision-edge-cases
-          - precision-wave-references
-          - precision-wave-sensitivities
-          - precision-wave-behavior
-          - parameter-derivatives
-          - coordinate-sensitivities
-          - coordinates-and-endpoints
-          - functions-and-coefficients
-        version:
-          - '1'
-          - 'pre'
-          - '1.10'
-          # - 'nightly'
-        platform:
-          - os: ubuntu-latest
-            arch: x64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: so
-          - os: windows-latest
-            arch: x64
-            library-prefix: build/bin/spheroidal_batch_
-            library-extension: dll
-          - os: macos-26-intel
-            arch: x64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: dylib
-          - os: macos-latest
-            arch: aarch64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: dylib
-        exclude:
-          - {group: native-basic, version: '1'}
-          - {group: native-basic, version: 'pre'}
-          - {group: native-prolate, version: '1'}
-          - {group: native-prolate, version: 'pre'}
-          - {group: native-oblate, version: '1'}
-          - {group: native-oblate, version: 'pre'}
-          - {group: native-context, version: '1'}
-          - {group: native-context, version: 'pre'}
+        version: ['1', 'pre', '1.10']
+        suite:
+          - {os: ubuntu-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
+          - {os: ubuntu-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
+          - {os: ubuntu-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
+          - {os: ubuntu-latest, arch: x64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,functions-and-coefficients'}
+          - {os: ubuntu-latest, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
+          - {os: macos-latest, arch: aarch64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
+          - {os: macos-latest, arch: aarch64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
+          - {os: macos-latest, arch: aarch64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
+          - {os: macos-latest, arch: aarch64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,functions-and-coefficients'}
+          - {os: macos-latest, arch: aarch64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
+          - {os: windows-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain'}
+          - {os: windows-latest, arch: x64, name: accuracy, groups: 'accuracy-and-roots,accuracy-diagnostics,numerical-regressions'}
+          - {os: windows-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases'}
+          - {os: windows-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior'}
+          - {os: windows-latest, arch: x64, name: sensitivities, groups: 'precision-wave-sensitivities,parameter-derivatives,static-and-second-derivatives'}
+          - {os: windows-latest, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
+          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints'}
+          - {os: windows-latest, arch: x64, name: functions, groups: 'functions-and-coefficients'}
+          - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision'}
+          - {os: macos-26-intel, arch: x64, name: thread-safety, groups: 'thread-safety'}
+          - {os: macos-26-intel, arch: x64, name: quad-and-roots, groups: 'quad-and-domain,accuracy-and-roots'}
+          - {os: macos-26-intel, arch: x64, name: accuracy-diagnostics, groups: 'accuracy-diagnostics'}
+          - {os: macos-26-intel, arch: x64, name: edge-regressions, groups: 'precision-edge-cases,numerical-regressions'}
+          - {os: macos-26-intel, arch: x64, name: arbitrary-precision, groups: 'arbitrary-precision'}
+          - {os: macos-26-intel, arch: x64, name: precision-quantities, groups: 'precision-quantities'}
+          - {os: macos-26-intel, arch: x64, name: wave-references, groups: 'precision-wave-references'}
+          - {os: macos-26-intel, arch: x64, name: wave-sensitivities, groups: 'precision-wave-sensitivities'}
+          - {os: macos-26-intel, arch: x64, name: wave-behavior, groups: 'precision-wave-behavior'}
+          - {os: macos-26-intel, arch: x64, name: parameter-derivatives, groups: 'parameter-derivatives'}
+          - {os: macos-26-intel, arch: x64, name: static-and-second-derivatives, groups: 'static-and-second-derivatives'}
+          - {os: macos-26-intel, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
+          - {os: macos-26-intel, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints'}
+          - {os: macos-26-intel, arch: x64, name: functions, groups: 'functions-and-coefficients'}
+        include:
+          - {version: '1.10', suite: {os: ubuntu-latest, arch: x64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
+          - {version: '1.10', suite: {os: macos-latest, arch: aarch64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
+          - {version: '1.10', suite: {os: windows-latest, arch: x64, name: native-context, groups: 'native-basic,native-context'}}
+          - {version: '1.10', suite: {os: windows-latest, arch: x64, name: native-kernels, groups: 'native-prolate,native-oblate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-prolate, groups: 'native-basic,native-prolate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-oblate, groups: 'native-oblate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-context, groups: 'native-context'}}
     steps:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
@@ -297,11 +281,11 @@ jobs:
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
-          arch: ${{ matrix.platform.arch }}
+          arch: ${{ matrix.suite.arch }}
       - uses: julia-actions/cache@v2
-        if: startsWith(matrix.group, 'native-') == false
+        if: startsWith(matrix.suite.groups, 'native-') == false
       - name: Resolve and instantiate dependencies
-        if: startsWith(matrix.group, 'native-') == false
+        if: startsWith(matrix.suite.groups, 'native-') == false
         shell: julia --color=yes --project=. {0}
         env:
           # Pkg.test precompiles with its own bounds-checking and optimization flags.
@@ -311,7 +295,7 @@ jobs:
           using Pkg
           # Test normal startup once per Julia/platform combination. Other groups
           # compile the methods they exercise without repeating the startup workload.
-          if ENV["SPHEROIDALWAVES_TEST_GROUP"] != "api-and-precision"
+          if !in("api-and-precision", split(ENV["SPHEROIDALWAVES_TEST_GROUP"], ','))
               write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
           end
           Pkg.Registry.add("General")
@@ -320,23 +304,28 @@ jobs:
       - name: Download this platform's source-built backends
         uses: actions/download-artifact@v8
         with:
-          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          name: native-backends-${{ matrix.suite.os }}-${{ matrix.suite.arch }}
           path: build
       - name: Download this platform's native tests
-        if: startsWith(matrix.group, 'native-')
+        if: startsWith(matrix.suite.groups, 'native-')
         uses: actions/download-artifact@v8
         with:
-          name: native-tests-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          name: native-tests-${{ matrix.suite.os }}-${{ matrix.suite.arch }}
           path: build
       - name: Point tests at the freshly built backends
         shell: bash
-        env:
-          LIBRARY_PREFIX: ${{ matrix.platform.library-prefix }}
-          LIBRARY_EXTENSION: ${{ matrix.platform.library-extension }}
         run: |
-          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}double.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
-          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}quad.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
-          echo "SPHEROIDALWAVES_LIBRARY_MPFR=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}mpfr.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+          library_prefix=build/lib/libspheroidal_batch_
+          library_extension=so
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            library_prefix=build/bin/spheroidal_batch_
+            library_extension=dll
+          elif [[ "$RUNNER_OS" == 'macOS' ]]; then
+            library_extension=dylib
+          fi
+          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${library_prefix}double.${library_extension}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${library_prefix}quad.${library_extension}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_MPFR=${GITHUB_WORKSPACE}/${library_prefix}mpfr.${library_extension}" >> "$GITHUB_ENV"
       - name: Install MPFR/MPC runtime dependencies
         if: runner.os != 'Windows'
         shell: bash
@@ -352,17 +341,17 @@ jobs:
         shell: bash
         run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
-        if: startsWith(matrix.group, 'native-') == false
+        if: startsWith(matrix.suite.groups, 'native-') == false
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
       - name: Run native regression tests
-        if: startsWith(matrix.group, 'native-')
+        if: startsWith(matrix.suite.groups, 'native-')
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
           if [[ "$RUNNER_OS" != 'Windows' ]]; then chmod +x build/bin/*; fi
-          ctest --test-dir build -L "$SPHEROIDALWAVES_TEST_GROUP" --no-tests=error --output-on-failure --parallel 1
+          ctest --test-dir build -L "${SPHEROIDALWAVES_TEST_GROUP//,/|}" --no-tests=error --output-on-failure --parallel 1
       - name: Capture the Windows test crash
         if: failure() && runner.os == 'Windows'
         shell: bash
