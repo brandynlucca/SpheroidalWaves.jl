@@ -286,8 +286,8 @@ jobs:
       - uses: julia-actions/cache@v2
         if: startsWith(matrix.suite.groups, 'native-') == false
         with:
-          # Share dependencies between suites with matching Julia, platform, and startup settings.
-          cache-name: julia-ci-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}-${{ contains(matrix.suite.groups, 'api-and-precision') }}
+          # Share dependencies and usable package images across this Julia/platform combination.
+          cache-name: julia-ci-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
           include-matrix: 'false'
           delete-old-caches: 'false'
       - name: Resolve and instantiate dependencies
@@ -299,11 +299,6 @@ jobs:
         run: |
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           using Pkg
-          # Test normal startup once per Julia/platform combination. Other groups
-          # compile the methods they exercise without repeating the startup workload.
-          if !in("api-and-precision", split(ENV["SPHEROIDALWAVES_TEST_GROUP"], ','))
-              write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
-          end
           Pkg.Registry.add("General")
           Pkg.resolve()
           Pkg.instantiate()
@@ -348,9 +343,13 @@ jobs:
         run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
         if: startsWith(matrix.suite.groups, 'native-') == false
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: ${{ contains(matrix.suite.groups, 'api-and-precision') && '1' || '0' }}
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
+          # Exercise normal precompilation in API suites; other suites compile only what they execute.
+          compiled_modules: ${{ contains(matrix.suite.groups, 'api-and-precision') && 'yes' || matrix.version == '1.10' && 'no' || 'existing' }}
       - name: Run native regression tests
         if: startsWith(matrix.suite.groups, 'native-')
         shell: bash
