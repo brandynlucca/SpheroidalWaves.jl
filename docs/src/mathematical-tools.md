@@ -308,6 +308,8 @@ The prolate identity is [DLMF 30.11.7](https://dlmf.nist.gov/30.11#E7), while th
 
 ## Accuracy estimates
 
+With `precision_bits=p`, estimates compare the requested wave with evaluations at $p+32$ and $p+64$ bits, including both angular kinds and static radial normalization. `diagnostics=true` adds separate value and derivative errors; `working_precision` lists the comparison precisions and `max_terms` records the expansion limit. Estimates remain heuristic, including when more than 33 digits are reported. The native-backend behavior below applies when `precision_bits` is omitted.
+
 `accuracy(m,n,c,arg; target=:radial, spheroid=:prolate, precision=:double, kind=1, normalize=false, normalization=:standard, diagnostics=false)` returns one integer per coordinate.
 
 | Argument / keyword | Meaning |

@@ -1685,6 +1685,9 @@ end
 """
 Numerical Jacobian of `rmn` outputs with respect to `c`.
 
+`precision_bits=p` supports both orders and explicit `h`; automatic second derivatives
+refine the stencil until results agree at the requested precision.
+
 `order=2` returns `d2value_dc2` and `d2derivative_dc2` for real `c`.
 For complex `c`, use suffixes `dcreal2`, `dcreal_dcimag`, and `dcimag2`.
 It differences analytic first derivatives using fourth-order stencils.
@@ -2049,13 +2052,19 @@ end
 """
     accuracy(m, n, c, arg; target=:radial, spheroid=:prolate,
              precision=:double, kind=1, normalize=false,
-             normalization=:standard, diagnostics=false)
+             normalization=:standard, diagnostics=false, precision_bits=nothing,
+             max_terms=512)
 
 Estimate numerical accuracy for [`smn`](@ref) (`target=:angular`) or
 [`rmn`](@ref) (`target=:radial`). Arguments, geometry, precision, kinds,
 normalization and coordinate domains follow those functions. Wrap a single
 coordinate in a vector, such as `[0.3]`. Angular `normalize=true` applies only
 to kind 1 and is ignored for radial calls.
+
+With `precision_bits=p`, estimates compare p-bit results against evaluations at
+p+32 and p+64 bits. Both angular kinds and static radial normalization are supported.
+Diagnostic errors have p-bit components; `max_terms` bounds the expansions.
+The native estimates described below apply when `precision_bits` is omitted.
 
 The default returns one integer per coordinate for function values. Positive
 entries estimate decimal digits, `0` means no reliable digits, and `-1` means no
