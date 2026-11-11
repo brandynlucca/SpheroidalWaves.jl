@@ -356,7 +356,7 @@ jobs:
           cp ../validated/build_tarballs.jl S/SpheroidalWaves/build_tarballs.jl
           git add S/SpheroidalWaves/build_tarballs.jl
           if ! git diff --cached --quiet; then
-            git -c user.name=github-actions\[bot\] -c user.email=41898282+github-actions\[bot\]@users.noreply.github.com commit -m "[SpheroidalWaves] Build v$BACKEND_VERSION"
+            git -c user.name=github-actions\[bot\] -c user.email=41898282+github-actions\[bot\]@users.noreply.github.com commit -m "[SpheroidalWaves] Update to v$BACKEND_VERSION"
             git push origin "$branch"
           fi
           existing="$(gh pr list --repo JuliaPackaging/Yggdrasil --head "$owner:$branch" --json url --jq '.[0].url // empty')"
@@ -366,5 +366,5 @@ jobs:
             printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all recipe targets. Native double, quad, and MPFR checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
               "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/yggdrasil-pr.md"
             gh pr create --repo JuliaPackaging/Yggdrasil --base master --head "$owner:$branch" \
-              --title "[SpheroidalWaves] Build v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
+              --title "[SpheroidalWaves] Update to v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
           fi
