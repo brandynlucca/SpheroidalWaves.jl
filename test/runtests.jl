@@ -6,7 +6,8 @@ include("require_backends.jl")
 const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
 TEST_GROUP in
 ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
-    "functions-and-coefficients") ||
+    "functions-and-coefficients", "arbitrary-precision", "precision-quantities",
+    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior") ||
     error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
 
 # Ordinary Pkg.test() and coverage run the complete suite.
@@ -503,10 +504,25 @@ if TEST_GROUP in ("all", "api-and-precision")
 
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
+end
+if TEST_GROUP in ("all", "arbitrary-precision")
     include("arbitrary_precision.jl")
+end
+if TEST_GROUP in ("all", "precision-quantities")
     include("precision_quantities.jl")
     include("precision_edge_cases.jl")
+end
+if TEST_GROUP == "all"
     include("precision_waves.jl")
+elseif startswith(TEST_GROUP, "precision-wave-")
+    cases = Dict("precision-wave-references" => "references",
+        "precision-wave-sensitivities" => "sensitivities",
+        "precision-wave-behavior" => "derivatives,static,dispatch,storage,settings")
+    withenv("SPHEROIDALWAVES_PRECISION_CASE" => cases[TEST_GROUP]) do
+        include("precision_waves.jl")
+    end
+end
+if TEST_GROUP in ("all", "api-and-precision")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end

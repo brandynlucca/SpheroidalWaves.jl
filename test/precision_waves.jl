@@ -1,7 +1,7 @@
 using SpheroidalWaves, Test
 
 const PRECISION_WAVE_CASE = get(ENV, "SPHEROIDALWAVES_PRECISION_CASE", "all")
-precision_wave_case(name) = PRECISION_WAVE_CASE=="all" || PRECISION_WAVE_CASE==name
+precision_wave_case(name) = PRECISION_WAVE_CASE=="all" || name in split(PRECISION_WAVE_CASE, ',')
 
 function test_wave_bits(result, bits)
     for channel in values(result)

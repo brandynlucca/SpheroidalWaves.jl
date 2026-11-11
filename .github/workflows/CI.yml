@@ -84,34 +84,41 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
           mkdir -p build/bin
           cp "$prefix/bin/"*.dll build/bin/
-      # Share this checkout's libraries with the Julia version and test-group jobs.
-      - name: Build the shared-source backends and native tests
+      - name: Configure native backends
         shell: bash
-        env:
-          SWF_BUILD_TESTS: 'ON'
-          SWF_RUN_TESTS: 'OFF'
+        run: |
+          generator='Unix Makefiles'
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then generator='MinGW Makefiles'; fi
+          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DCMAKE_BUILD_TYPE=Release -DSWF_BUILD_TESTS=ON
+      - name: Compile double backend
+        shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
-          julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
-      - name: Capture the Windows native crash
-        if: failure() && runner.os == 'Windows'
+          cmake --build build --target spheroidal_batch_double --parallel 1
+      - name: Compile quad backend
         shell: bash
         run: |
-          where.exe libgfortran-5.dll
-          printf 'run\nbt\ninfo sharedlibrary\n' > build/windows-debug.gdb
-          gdb --batch --nx -x build/windows-debug.gdb --args build/bin/spheroidal_shared_precision_mpfr_test.exe > build/windows-backtrace.log 2>&1
-          cat build/windows-backtrace.log
-      - name: Upload native build and test diagnostics
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --target spheroidal_batch_quad --parallel 1
+      - name: Compile MPFR backend
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --target spheroidal_batch_mpfr --parallel 1
+      - name: Compile native test executables
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --parallel 1
+      - name: Upload native build diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: native-diagnostics-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
           path: |
             build/CMakeCache.txt
+            build/CMakeFiles/CMakeConfigureLog.yaml
             build/bin/
-            build/build_output.txt
-            build/windows-backtrace.log
-            build/Testing/Temporary/LastTest.log
           retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
@@ -156,22 +163,65 @@ jobs:
       - name: Install MPFR/MPC development files
         if: matrix.configuration.mpfr == 'ON'
         run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
-      - name: Build and test the selected backends
+      - name: Build the selected backends and native tests
         shell: bash
         env:
           SWF_BUILD_QUAD: ${{ matrix.configuration.quad }}
           SWF_BUILD_MPFR: ${{ matrix.configuration.mpfr }}
           SWF_BUILD_TYPE: ${{ matrix.configuration.type }}
           SWF_BUILD_TESTS: 'ON'
+          SWF_RUN_TESTS: 'OFF'
         run: |
           ulimit -v 3145728
           julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-configuration-${{ matrix.configuration.name }}
+          path: |
+            build/lib/*.so
+            build/bin/*_test*
+            build/CTestTestfile.cmake
+            build/test/CTestTestfile.cmake
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  configuration-tests:
+    name: Native ${{ matrix.configuration }} - ${{ matrix.group }}
+    needs: build-configurations
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: ['double-only', 'mpfr-without-quad', 'debug']
+        group: ['native-basic', 'native-prolate', 'native-oblate', 'native-context']
+        exclude:
+          - {configuration: double-only, group: native-prolate}
+          - {configuration: double-only, group: native-oblate}
+          - {configuration: double-only, group: native-context}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install arithmetic runtime dependencies
+        if: matrix.configuration != 'double-only'
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-configuration-${{ matrix.configuration }}
+          path: build
+      - name: Run native regression group
+        env:
+          NATIVE_GROUP: ${{ matrix.group }}
+        run: |
+          ulimit -v 3145728
+          chmod +x build/bin/*
+          ctest --test-dir build -L "$NATIVE_GROUP" --no-tests=error --output-on-failure --parallel 1
 
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
     needs: native-backends
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 30
+    timeout-minutes: 5
     continue-on-error: ${{ matrix.version == 'nightly' }}
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
@@ -184,7 +234,20 @@ jobs:
       fail-fast: false
       max-parallel: 48
       matrix:
-        group: ['native', 'api-and-precision', 'parameter-derivatives', 'coordinates-and-endpoints', 'functions-and-coefficients']
+        group:
+          - native-basic
+          - native-prolate
+          - native-oblate
+          - native-context
+          - api-and-precision
+          - arbitrary-precision
+          - precision-quantities
+          - precision-wave-references
+          - precision-wave-sensitivities
+          - precision-wave-behavior
+          - parameter-derivatives
+          - coordinates-and-endpoints
+          - functions-and-coefficients
         version:
           - '1'
           - 'pre'
@@ -208,8 +271,14 @@ jobs:
             library-prefix: build/lib/libspheroidal_batch_
             library-extension: dylib
         exclude:
-          - {group: native, version: '1'}
-          - {group: native, version: 'pre'}
+          - {group: native-basic, version: '1'}
+          - {group: native-basic, version: 'pre'}
+          - {group: native-prolate, version: '1'}
+          - {group: native-prolate, version: 'pre'}
+          - {group: native-oblate, version: '1'}
+          - {group: native-oblate, version: 'pre'}
+          - {group: native-context, version: '1'}
+          - {group: native-context, version: 'pre'}
     steps:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
@@ -223,9 +292,9 @@ jobs:
           version: ${{ matrix.version }}
           arch: ${{ matrix.platform.arch }}
       - uses: julia-actions/cache@v2
-        if: matrix.group != 'native'
+        if: startsWith(matrix.group, 'native-') == false
       - name: Resolve and instantiate dependencies
-        if: matrix.group != 'native'
+        if: startsWith(matrix.group, 'native-') == false
         shell: julia --color=yes --project=. {0}
         env:
           # Pkg.test precompiles with its own bounds-checking and optimization flags.
@@ -247,7 +316,7 @@ jobs:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
           path: build
       - name: Download this platform's native tests
-        if: matrix.group == 'native'
+        if: startsWith(matrix.group, 'native-')
         uses: actions/download-artifact@v8
         with:
           name: native-tests-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
@@ -276,23 +345,23 @@ jobs:
         shell: bash
         run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
-        if: matrix.group != 'native'
+        if: startsWith(matrix.group, 'native-') == false
         with:
           coverage: false # Collected by Coverage.yml.
           optimize: 1
       - name: Run native regression tests
-        if: matrix.group == 'native'
+        if: startsWith(matrix.group, 'native-')
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
           if [[ "$RUNNER_OS" != 'Windows' ]]; then chmod +x build/bin/*; fi
-          ctest --test-dir build --output-on-failure --parallel 1
+          ctest --test-dir build -L "$SPHEROIDALWAVES_TEST_GROUP" --no-tests=error --output-on-failure --parallel 1
       - name: Capture the Windows test crash
         if: failure() && runner.os == 'Windows'
         shell: bash
         run: |
           printf 'set pagination off\nhandle SIGILL nostop noprint pass\nrun\nthread apply all bt 20\ninfo sharedlibrary\n' > build/windows-test.gdb
-          if [[ "$SPHEROIDALWAVES_TEST_GROUP" == 'native' ]]; then
+          if [[ "$SPHEROIDALWAVES_TEST_GROUP" == native-* ]]; then
             gdb --batch --nx -x build/windows-test.gdb --args build/bin/spheroidal_shared_precision_mpfr_test.exe
           else
             gdb --batch --nx -x build/windows-test.gdb --args "$(command -v julia)" --startup-file=no --project=. --check-bounds=yes -O1 test/runtests.jl
@@ -301,7 +370,7 @@ jobs:
   jll-backends:
     name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:

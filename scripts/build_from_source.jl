@@ -228,7 +228,20 @@ function run_build()
 
     try
         open(BUILD_LOG, "w") do io
-            run(pipeline(Cmd(build_cmd), stdout = io, stderr = io))
+            output = Pipe()
+            process = run(pipeline(Cmd(build_cmd), stdout = output, stderr = output); wait = false)
+            close(output.in)
+            try
+                for line in eachline(output)
+                    println(io, line)
+                    flush(io)
+                    println(line)
+                end
+            finally
+                close(output)
+            end
+            wait(process)
+            success(process) || error("CMake build exited with code $(process.exitcode)")
         end
     catch e
         error_msg("CMake build failed: $e")
