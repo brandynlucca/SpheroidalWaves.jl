@@ -9,7 +9,7 @@ module spheroidal_mpfr_real
   integer(c_int), public, save :: mpfr_status = 0
   integer(c_int64_t), public, save :: mpfr_workspace_limit_bytes = 268435456_c_int64_t
 !$omp threadprivate(mpfr_bits, mpfr_rounding, mpfr_status, mpfr_workspace_limit_bytes)
-  public :: mpreal, mp_init, mp_to_string, mp_to_double, mp_to_integer64, mp_is_finite
+  public :: mpreal, mp_init, mp_to_string, mp_get_string, mp_to_double, mp_to_integer64, mp_is_finite
   public :: assignment(=), operator(+), operator(-), operator(*), operator(/), operator(**)
   public :: operator(==), operator(/=), operator(<), operator(<=), operator(>), operator(>=)
   public :: abs, sqrt, exp, log, log10, sin, cos, sinh, cosh, atan, asin, acos, tan, tanh
@@ -1728,6 +1728,12 @@ contains
   function mp_to_string(a) result(text)
     type(mp_real), intent(in) :: a
     character(len=:), allocatable :: text
+    call mp_get_string(a,text)
+  end function
+
+  subroutine mp_get_string(a,text)
+    type(mp_real), intent(in) :: a
+    character(len=:), allocatable, intent(out) :: text
     character(c_char), allocatable :: buffer(:)
     integer(c_int) :: count,capacity
     integer :: i
@@ -1743,7 +1749,7 @@ contains
     do i=1,count
       text(i:i)=buffer(i)
     end do
-  end function
+  end subroutine
 
   impure elemental function mp_max_m(a,b,c,d) result(y)
     type(mp_real), intent(in) :: a

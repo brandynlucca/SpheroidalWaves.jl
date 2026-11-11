@@ -32,7 +32,8 @@ contains
     integer(c_int), intent(inout) :: status
     character(len=:), allocatable :: text
     integer :: index
-    text=mp_to_string(value)
+    ! Avoid gfortran's shared length temporary for deferred-length function results.
+    call mp_get_string(value,text)
     output=c_null_char
     if (len(text)>=size(output)) then
       status=3

@@ -96,6 +96,13 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
+      - name: Capture the Windows native crash
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          where.exe libgfortran-5.dll
+          gdb --batch --nx -ex run -ex bt -ex 'info sharedlibrary' --args build/bin/spheroidal_shared_precision_mpfr_test.exe > build/windows-backtrace.log 2>&1
+          cat build/windows-backtrace.log
       - name: Upload native build and test diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -105,6 +112,7 @@ jobs:
             build/CMakeCache.txt
             build/bin/
             build/build_output.txt
+            build/windows-backtrace.log
             build/Testing/Temporary/LastTest.log
           retention-days: 7
       - uses: actions/upload-artifact@v7
