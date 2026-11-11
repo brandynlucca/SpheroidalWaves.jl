@@ -64,7 +64,7 @@ jobs:
       matrix:
         case: ${{ fromJSON(inputs.cases) }}
     env:
-      REUSE_JULIA_RUNTIME: ${{ inputs.prepare_runtime && (matrix.case.os == '' || matrix.case.os == 'macos-26-intel') }}
+      NEW_RUNTIME_ARTIFACT: ${{ inputs.prepare_runtime && (matrix.case.os == '' || matrix.case.os == 'macos-26-intel') }}
       JULIA_NUM_THREADS: ${{ matrix.case.threads }}
       JULIA_NUM_PRECOMPILE_TASKS: '1'
       JULIA_CPU_TARGET: generic
@@ -91,21 +91,25 @@ jobs:
         with:
           compiler: gcc
           version: '15'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && format('timing-julia-environment-{0}', inputs.julia) || format('julia-environment-{0}-{1}-{2}', matrix.case.os || 'macos-26-intel', matrix.case.arch || 'x64', inputs.julia) }}
+          path: .scratch/ci-environment
+          run-id: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && github.run_id || inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Restore the prepared Julia runtime
+        id: prepared-runtime
+        shell: bash
+        run: |
+          if [[ -f .scratch/ci-environment/julia-runtime.tar.gz ]]; then
+            bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
+            echo 'restored=true' >> "$GITHUB_OUTPUT"
+          fi
       - uses: julia-actions/setup-julia@v2
-        if: env.REUSE_JULIA_RUNTIME != 'true'
+        if: steps.prepared-runtime.outputs.restored != 'true'
         with:
           version: ${{ inputs.julia }}
           arch: ${{ matrix.case.arch || 'x64' }}
-      - uses: actions/download-artifact@v8
-        with:
-          name: ${{ env.REUSE_JULIA_RUNTIME == 'true' && format('timing-julia-environment-{0}', inputs.julia) || format('julia-environment-{0}-{1}-{2}', matrix.case.os || 'macos-26-intel', matrix.case.arch || 'x64', inputs.julia) }}
-          path: .scratch/ci-environment
-          run-id: ${{ env.REUSE_JULIA_RUNTIME == 'true' && github.run_id || inputs.source_run }}
-          github-token: ${{ github.token }}
-      - name: Restore the prepared Julia runtime
-        if: env.REUSE_JULIA_RUNTIME == 'true'
-        shell: bash
-        run: bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
       - name: Restore the prepared Julia environment
         shell: bash
         env:
