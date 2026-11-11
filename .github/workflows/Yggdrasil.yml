@@ -11,31 +11,45 @@ on:
         description: Your Yggdrasil fork (owner/Yggdrasil)
         type: string
         default: brandynlucca/Yggdrasil
+      targets:
+        description: Comma-separated targets for focused build timings (blank validates all targets)
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
+env:
+  BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+  JULIA_CPU_TARGET: generic
+  JULIA_NUM_THREADS: '1'
+  JULIA_NUM_PRECOMPILE_TASKS: '1'
+
 concurrency:
-  group: yggdrasil-${{ github.ref }}
+  group: yggdrasil-${{ github.ref }}-${{ inputs.targets || 'all' }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: BinaryBuilder builds and audits for all supported targets
+  prepare:
+    name: Prepare BinaryBuilder and select targets
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 15
     env:
-      BINARYBUILDER_AUTOMATIC_APPLE: 'true'
-      JULIA_NUM_THREADS: '1'
-      JULIA_NUM_PRECOMPILE_TASKS: '1'
+      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
     outputs:
       version: ${{ steps.recipe.outputs.version }}
+      platforms: ${{ steps.targets.outputs.platforms }}
+      targets: ${{ steps.targets.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           # BinaryBuilder's RISC-V audit needs Julia's newer architecture table.
           version: '1.12'
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/binarybuilder-depot
+          key: binarybuilder-tools-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
       - name: Select the shared-source commit and version
         id: recipe
         shell: julia --color=yes {0}
@@ -60,21 +74,116 @@ jobs:
               println(io, "version=$version")
           end
       - name: Install BinaryBuilder and check target support
+        id: targets
         shell: julia --color=yes --project=@binarybuilder {0}
+        env:
+          SELECTED_TARGETS: ${{ inputs.targets }}
         run: |
           using Pkg
-          Pkg.add("BinaryBuilder")
+          isfile(Base.active_project()) ? Pkg.instantiate() : Pkg.add("BinaryBuilder")
           using BinaryBuilder
           for platform in supported_platforms()
               BinaryBuilder.Auditor.generic_march(platform)
           end
-      - name: Build and audit all precision libraries
+          push!(ARGS, "--meta-json=$(ENV["RUNNER_TEMP"])/recipe.json")
+          include(joinpath(ENV["GITHUB_WORKSPACE"], "contrib/yggdrasil/build_tarballs.jl"))
+          supported = BinaryBuilder.JSON.parsefile(joinpath(ENV["RUNNER_TEMP"], "recipe.json"))["platforms"]
+          selected = isempty(ENV["SELECTED_TARGETS"]) ? supported : strip.(split(ENV["SELECTED_TARGETS"], ','))
+          @assert !isempty(selected) && all(in(supported), selected) "Unknown or empty build target"
+          @assert length(unique(selected)) == length(selected) "Duplicate build target"
+          open(ENV["GITHUB_OUTPUT"], "a") do io
+              println(io, "platforms=$(BinaryBuilder.JSON.json(selected))")
+              println(io, "targets=$(join(selected, ','))")
+          end
+      - name: Save the prepared build tools and recipe
+        run: |
+          mkdir -p .scratch/binarybuilder-tools
+          tar -czf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH" .
+          cp contrib/yggdrasil/build_tarballs.jl .scratch/binarybuilder-tools/build_tarballs.jl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools/
+          compression-level: 0
+          retention-days: 1
+
+  target-build:
+    name: Build and audit ${{ matrix.target }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: actions/download-artifact@v8
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools
+      - name: Restore the prepared build tools and recipe
+        run: |
+          mkdir -p "$JULIA_DEPOT_PATH"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH"
+          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+      - name: Build and audit all three precision libraries
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
         run: |
           ulimit -v 3145728
-          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl --verbose --deploy=local
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl "$BUILD_TARGET" --verbose
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: yggdrasil-target-${{ matrix.target }}
+          path: products/
+          if-no-files-found: ignore
+          compression-level: 0
+
+  build:
+    name: Assemble the audited JLL artifacts
+    needs: [prepare, target-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
+    outputs:
+      version: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: actions/download-artifact@v8
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools
+      - name: Restore the prepared build tools and recipe
+        run: |
+          mkdir -p "$JULIA_DEPOT_PATH"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH"
+          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: yggdrasil-target-*
+          merge-multiple: true
+          path: products
+      - name: Generate the JLL from the audited tarballs
+        env:
+          BUILD_TARGETS: ${{ needs.prepare.outputs.targets }}
+        run: |
+          ulimit -v 3145728
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl "$BUILD_TARGETS" --skip-build --deploy=local --verbose
       - name: Collect the generated JLL and recipe
         run: |
-          cp -R "$HOME/.julia/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
+          cp -R "$JULIA_DEPOT_PATH/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
           cp contrib/yggdrasil/build_tarballs.jl products/build_tarballs.jl
       - uses: actions/upload-artifact@v7
         if: always()
@@ -84,6 +193,7 @@ jobs:
           if-no-files-found: ignore
 
   runtime:
+    if: inputs.targets == ''
     name: JLL ${{ matrix.suite }} - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
     needs: build
     runs-on: ${{ matrix.platform.os }}
@@ -208,7 +318,7 @@ jobs:
 
   submit:
     name: Open Yggdrasil update
-    if: github.event_name == 'workflow_dispatch' && inputs.submit
+    if: github.event_name == 'workflow_dispatch' && inputs.submit && inputs.targets == ''
     needs: [build, runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 10
