@@ -10,6 +10,7 @@ fort.*
 tmp_*
 build_output.txt
 validation/*
+*.cov
 
 # Compiled files
 *.o
