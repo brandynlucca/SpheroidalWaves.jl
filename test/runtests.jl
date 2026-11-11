@@ -7,7 +7,7 @@ const TEST_GROUPS = Set(strip.(split(get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all
 const VALID_TEST_GROUPS = ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
     "static-and-second-derivatives",
     "coordinate-sensitivities",
-    "functions-and-coefficients", "angular-and-coefficients", "thread-safety",
+    "functions-and-coefficients", "angular-and-coefficients", "degree-batches", "thread-safety",
     "quad-and-domain", "accuracy-and-roots",
     "accuracy-diagnostics", "numerical-regressions",
     "arbitrary-precision", "precision-quantities", "precision-edge-cases",
@@ -548,7 +548,7 @@ let file_groups = (
         "angular-and-coefficients" => ["angular_conventions.jl"],
         "functions-and-coefficients" =>
             ["radial_domain.jl", "radial_hankel.jl", "degree_ranges.jl"],
-        "angular-and-coefficients" => ["degree_batch.jl"],
+        "degree-batches" => ["degree_batch.jl"],
         "functions-and-coefficients" =>
             ["angular_second_kind.jl", "oblate_precision.jl", "integral_eigenvalues.jl"],
         "parameter-derivatives" =>
