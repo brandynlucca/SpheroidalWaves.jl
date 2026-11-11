@@ -4,6 +4,7 @@ env:
   JULIA_NUM_PRECOMPILE_TASKS: 1
   OPENBLAS_NUM_THREADS: 1
   OMP_NUM_THREADS: 1
+  JULIA_CPU_TARGET: generic
 
 on:
   push:
@@ -18,6 +19,11 @@ on:
     paths-ignore:
       - 'README.md'
   workflow_dispatch:
+    inputs:
+      clean:
+        description: Bypass native and Julia compilation caches
+        type: boolean
+        default: false
 concurrency:
   # Skip intermediate builds: always.
   # Cancel intermediate builds: only if it is a pull request build.
@@ -90,26 +96,48 @@ jobs:
           generator='Unix Makefiles'
           if [[ "$RUNNER_OS" == 'Windows' ]]; then generator='MinGW Makefiles'; fi
           cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DCMAKE_BUILD_TYPE=Release -DSWF_BUILD_TESTS=ON
+      - name: Fingerprint native build inputs
+        id: native-key
+        run: julia --startup-file=no scripts/native_cache_key.jl build
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        if: inputs.clean != true
+        with:
+          path: |
+            build/lib
+            build/bin
+          key: native-v1-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ steps.native-key.outputs.key }}
       - name: Compile double backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           cmake --build build --target spheroidal_batch_double --parallel 1
       - name: Compile quad backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           cmake --build build --target spheroidal_batch_quad --parallel 1
       - name: Compile MPFR backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           cmake --build build --target spheroidal_batch_mpfr --parallel 1
       - name: Compile native test executables
+        if: steps.native-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           cmake --build build --parallel 1
+      - uses: actions/cache/save@v4
+        if: inputs.clean != true && steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/lib
+            build/bin
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
       - name: Upload native build diagnostics
         if: failure()
         uses: actions/upload-artifact@v7
@@ -210,9 +238,81 @@ jobs:
           chmod +x build/bin/*
           ctest --test-dir build --no-tests=error --output-on-failure --parallel 1
 
+  julia-environments:
+    name: Prepare Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        version: ['1', 'pre', '1.10']
+        platform:
+          - {os: ubuntu-latest, arch: x64}
+          - {os: windows-latest, arch: x64}
+          - {os: macos-latest, arch: aarch64}
+          - {os: macos-26-intel, arch: x64}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.platform.arch }}
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: julia-packages-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
+          include-matrix: 'false'
+          cache-compiled: 'false'
+          delete-old-caches: 'false'
+      - name: Resolve the shared environment and fingerprint compilation inputs
+        id: julia-key
+        shell: bash
+        run: |
+          # Julia 1.10 checks source mtimes; the compilation key checks source contents.
+          git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
+          julia --startup-file=no --project=. scripts/prepare_ci_environment.jl
+      - uses: actions/cache/restore@v4
+        id: compiled-cache
+        if: inputs.clean != true
+        with:
+          path: ${{ steps.julia-key.outputs.depot }}/compiled
+          key: julia-compiled-v1-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ steps.julia-key.outputs.key }}
+      - name: Compile the shared test environment
+        if: steps.compiled-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G --project=. --check-bounds=yes --inline=yes -O1 scripts/precompile_ci_environment.jl
+      - uses: actions/cache/save@v4
+        if: inputs.clean != true && steps.compiled-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.julia-key.outputs.depot }}/compiled
+          key: ${{ steps.compiled-cache.outputs.cache-primary-key }}
+      - name: Package the prepared environment
+        shell: bash
+        env:
+          PREPARED_DEPOT: ${{ steps.julia-key.outputs.depot }}
+        run: |
+          mkdir -p .scratch/ci-environment
+          cp Manifest.toml .scratch/ci-environment/
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then PREPARED_DEPOT=$(cygpath -u "$PREPARED_DEPOT"); fi
+          mkdir -p "$PREPARED_DEPOT"/{artifacts,packages,registries,compiled,logs,scratchspaces}
+          tar -czf .scratch/ci-environment/depot.tar.gz -C "$PREPARED_DEPOT" artifacts packages registries compiled logs scratchspaces
+          julia --startup-file=no -e 'print(VERSION, " ", Base.GIT_VERSION_INFO.commit)' > .scratch/ci-environment/julia-version.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: julia-environment-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
+          path: .scratch/ci-environment/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   test:
     name: Julia ${{ matrix.version }} - ${{ matrix.suite.os }} - ${{ matrix.suite.arch }} - ${{ matrix.suite.name }}
-    needs: native-backends
+    needs: [native-backends, julia-environments]
     runs-on: ${{ matrix.suite.os }}
     timeout-minutes: 5
     continue-on-error: ${{ matrix.version == 'nightly' }}
@@ -220,8 +320,7 @@ jobs:
       EXPECTED_JULIA_ARCH: ${{ matrix.suite.arch }}
       SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.suite.groups }}
       SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
-    permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
-      actions: write
+    permissions:
       contents: read
     strategy:
       fail-fast: false
@@ -284,29 +383,26 @@ jobs:
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.suite.arch }}
-      - uses: julia-actions/cache@v2
+      - name: Download the prepared Julia environment
         if: startsWith(matrix.suite.groups, 'native-') == false
+        uses: actions/download-artifact@v8
         with:
-          # Share dependencies and usable package images across this Julia/platform combination.
-          cache-name: julia-ci-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
-          include-matrix: 'false'
-          delete-old-caches: 'false'
-      - name: Resolve and instantiate dependencies
+          name: julia-environment-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
+          path: .scratch/ci-environment
+      - name: Restore the prepared Julia environment
         if: startsWith(matrix.suite.groups, 'native-') == false
-        shell: julia --color=yes --project=. {0}
-        env:
-          # Pkg.test precompiles with its own bounds-checking and optimization flags.
-          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        shell: bash
         run: |
-          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
-          using Pkg
-          # Julia 1.10 caches modules without repeating the API startup workload.
-          if VERSION < v"1.11" && !in("api-and-precision", split(ENV["SPHEROIDALWAVES_TEST_GROUP"], ','))
-              write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
-          end
-          Pkg.Registry.add("General")
-          Pkg.resolve()
-          Pkg.instantiate()
+          git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
+          cp .scratch/ci-environment/Manifest.toml Manifest.toml
+          depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
+          mkdir -p "$depot"
+          tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
+          julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
+          if [[ '${{ matrix.version }}' == '1.10' && "$SPHEROIDALWAVES_TEST_GROUP" != *api-and-precision* ]]; then
+            printf '[SpheroidalWaves]\nprecompile_workload = false\n' > LocalPreferences.toml
+          fi
       - name: Download this platform's source-built backends
         uses: actions/download-artifact@v8
         with:
@@ -357,6 +453,7 @@ jobs:
           JULIA_PKG_PRECOMPILE_AUTO: ${{ contains(matrix.suite.groups, 'api-and-precision') && '1' || '0' }}
         with:
           coverage: false # Collected by Coverage.yml.
+          allow_reresolve: false
           # Limit lower optimization to the measured Intel complex-coordinate bottleneck.
           optimize: ${{ matrix.suite.os == 'macos-26-intel' && matrix.suite.name == 'coordinate-sensitivities' && matrix.version != '1.10' && '0' || '1' }}
           # Keep cached stdlibs on Julia 1.10, which lacks the existing-images mode.
