@@ -374,21 +374,14 @@ jobs:
           - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints'}
           - {os: windows-latest, arch: x64, name: functions, groups: 'angular-and-coefficients,degree-batches,functions-and-coefficients'}
           - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision,degree-batches'}
-          - {os: macos-26-intel, arch: x64, name: thread-safety, groups: 'thread-safety'}
-          - {os: macos-26-intel, arch: x64, name: quad-and-roots, groups: 'quad-and-domain,accuracy-and-roots'}
-          - {os: macos-26-intel, arch: x64, name: accuracy-diagnostics, groups: 'accuracy-diagnostics'}
-          - {os: macos-26-intel, arch: x64, name: edge-regressions, groups: 'precision-edge-cases,numerical-regressions'}
-          - {os: macos-26-intel, arch: x64, name: arbitrary-precision, groups: 'arbitrary-precision'}
-          - {os: macos-26-intel, arch: x64, name: precision-quantities, groups: 'precision-quantities'}
-          - {os: macos-26-intel, arch: x64, name: wave-references, groups: 'precision-wave-references'}
+          - {os: macos-26-intel, arch: x64, name: thread-regressions, groups: 'thread-safety,precision-edge-cases,numerical-regressions'}
+          - {os: macos-26-intel, arch: x64, name: accuracy, groups: 'quad-and-domain,accuracy-and-roots,accuracy-diagnostics'}
+          - {os: macos-26-intel, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities'}
+          - {os: macos-26-intel, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior'}
           - {os: macos-26-intel, arch: x64, name: wave-sensitivities, groups: 'precision-wave-sensitivities'}
-          - {os: macos-26-intel, arch: x64, name: wave-behavior, groups: 'precision-wave-behavior'}
-          - {os: macos-26-intel, arch: x64, name: parameter-derivatives, groups: 'parameter-derivatives'}
-          - {os: macos-26-intel, arch: x64, name: static-and-second-derivatives, groups: 'static-and-second-derivatives'}
-          - {os: macos-26-intel, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
-          - {os: macos-26-intel, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints'}
-          - {os: macos-26-intel, arch: x64, name: angular-and-coefficients, groups: 'angular-and-coefficients'}
-          - {os: macos-26-intel, arch: x64, name: functions, groups: 'functions-and-coefficients'}
+          - {os: macos-26-intel, arch: x64, name: parameters, groups: 'parameter-derivatives,static-and-second-derivatives'}
+          - {os: macos-26-intel, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints'}
+          - {os: macos-26-intel, arch: x64, name: functions, groups: 'angular-and-coefficients,functions-and-coefficients'}
         include:
           - {version: '1.10', suite: {os: ubuntu-latest, arch: x64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
           - {version: '1.10', suite: {os: macos-latest, arch: aarch64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
@@ -482,7 +475,7 @@ jobs:
           coverage: false # Collected by Coverage.yml.
           allow_reresolve: false
           # Limit lower optimization to the measured Intel complex-coordinate bottleneck.
-          optimize: ${{ matrix.suite.os == 'macos-26-intel' && matrix.suite.name == 'coordinate-sensitivities' && matrix.version != '1.10' && '0' || '1' }}
+          optimize: ${{ matrix.suite.os == 'macos-26-intel' && matrix.suite.name == 'coordinates' && matrix.version != '1.10' && '0' || '1' }}
           # Keep cached stdlibs on Julia 1.10, which lacks the existing-images mode.
           compiled_modules: ${{ (contains(matrix.suite.groups, 'api-and-precision') || matrix.version == '1.10') && 'yes' || 'existing' }}
       - name: Run native regression tests
