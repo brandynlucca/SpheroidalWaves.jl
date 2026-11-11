@@ -57,8 +57,8 @@ contains
       do rounding=0,4
         do mode=0,1
           call evaluate(worker,rounding,mode,normal_budget,0,.false.,output,accuracy,failures)
-          if (any(output/=reference(:,:,:,rounding+1,mode+1))) failures=failures+1
-          if (any(accuracy/=reference_accuracy(:,rounding+1,mode+1))) failures=failures+1
+          call compare(worker,rounding,mode,output,accuracy,reference(:,:,:,rounding+1,mode+1), &
+            reference_accuracy(:,rounding+1,mode+1),failures)
         end do
       end do
     end do
@@ -71,12 +71,31 @@ contains
     end if
     call evaluate(worker,worker,1,budget,expected_status,.true.,output,accuracy,failures)
     if (expected_status==0) then
-      if (any(output/=reference(:,:,:,worker+1,2))) failures=failures+1
-      if (any(accuracy/=reference_accuracy(:,worker+1,2))) failures=failures+1
+      call compare(worker,worker,1,output,accuracy,reference(:,:,:,worker+1,2),reference_accuracy(:,worker+1,2),failures)
     end if
     call evaluate(worker,worker,1,normal_budget,0,.true.,output,accuracy,failures)
-    if (any(output/=reference(:,:,:,worker+1,2))) failures=failures+1
-    if (any(accuracy/=reference_accuracy(:,worker+1,2))) failures=failures+1
+    call compare(worker,worker,1,output,accuracy,reference(:,:,:,worker+1,2),reference_accuracy(:,worker+1,2),failures)
+  end subroutine
+
+  recursive subroutine compare(worker,rounding,mode,output,accuracy,reference,reference_accuracy,failures)
+    integer, intent(in) :: worker,rounding,mode
+    character(kind=c_char), intent(in) :: output(width,10,1),reference(width,10,1)
+    integer(c_int), intent(in) :: accuracy(1),reference_accuracy(1)
+    integer, intent(inout) :: failures
+    integer :: field
+    do field=1,10
+      if (all(output(:,field,1)==reference(:,field,1))) cycle
+!$omp critical
+      print *, 'MPFR prolate worker/bits/rounding/mode/field:',worker,requested_bits(worker),rounding,mode,field
+      print *, 'Expected: ',pack(reference(:,field,1),reference(:,field,1)/=c_null_char)
+      print *, 'Actual:   ',pack(output(:,field,1),output(:,field,1)/=c_null_char)
+!$omp end critical
+      failures=failures+1
+    end do
+    if (any(accuracy/=reference_accuracy)) then
+      print *, 'MPFR prolate worker/rounding/mode/accuracy/expected:',worker,rounding,mode,accuracy,reference_accuracy
+      failures=failures+1
+    end if
   end subroutine
 
   recursive subroutine evaluate(worker,rounding,mode,budget,expected_status,synchronize,output,accuracy,failures)
@@ -111,9 +130,15 @@ contains
     if (synchronize) then
 !$omp barrier
     end if
-    if (status/=expected_status) failures=failures+1
+    if (status/=expected_status) then
+      print *, 'MPFR prolate worker/rounding/mode/budget/status/expected:',worker,rounding,mode,budget,status,expected_status
+      failures=failures+1
+    end if
     if (mpfr_bits/=384+8*worker.or.mpfr_rounding/=mod(worker+1,5).or. &
-        mpfr_status/=20+worker.or.mpfr_workspace_limit_bytes/=budget) failures=failures+1
+        mpfr_status/=20+worker.or.mpfr_workspace_limit_bytes/=budget) then
+      print *, 'MPFR prolate caller context changed for worker:',worker
+      failures=failures+1
+    end if
     if (status==0) then
       if (output(1,1,1)==c_null_char) failures=failures+1
       if (mode==1) then

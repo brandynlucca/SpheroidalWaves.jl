@@ -40,7 +40,7 @@ jobs:
             library-pattern: build/lib/libspheroidal_batch_*.so
           - os: windows-latest
             arch: x64
-            library-pattern: build/bin/spheroidal_batch_*.dll
+            library-pattern: build/bin/*.dll
           - os: macos-26-intel
             arch: x64
             library-pattern: build/lib/libspheroidal_batch_*.dylib
@@ -54,7 +54,7 @@ jobs:
           version: '1.10'
           arch: ${{ matrix.platform.arch }}
       - uses: fortran-lang/setup-fortran@v1
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         with:
           compiler: gcc
           version: '15'
@@ -77,13 +77,27 @@ jobs:
         if: runner.os == 'Windows'
         id: mpfr-msys
         with:
-          install: mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-gmp
-      - name: Configure MPFR/MPC search paths
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc-fortran
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-mpfr
+            mingw-w64-ucrt-x86_64-mpc
+            mingw-w64-ucrt-x86_64-gmp
+      - name: Configure the Windows toolchain and runtime
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          echo '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64/bin' >> "$GITHUB_PATH"
-          echo 'CMAKE_PREFIX_PATH=${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64' >> "$GITHUB_ENV"
+          prefix=$(cygpath -m '${{ steps.mpfr-msys.outputs.msys2-location }}/ucrt64')
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+          echo "FC=$prefix/bin/gfortran.exe" >> "$GITHUB_ENV"
+          echo "CC=$prefix/bin/gcc.exe" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
+          echo 'CMAKE_GENERATOR=Ninja' >> "$GITHUB_ENV"
+          mkdir -p build/bin
+          for dll in libgfortran-5 libgcc_s_seh-1 libquadmath-0 libgomp-1 libwinpthread-1 libmpc-3 libmpfr-6 libgmp-10; do
+            cp "$prefix/bin/$dll.dll" build/bin/
+          done
       # Share this checkout's libraries with the Julia version and test-group jobs.
       - name: Build and test the shared-source backends
         shell: bash
@@ -92,6 +106,16 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
+      - name: Upload native build and test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-diagnostics-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: |
+            build/CMakeCache.txt
+            build/build_output.txt
+            build/Testing/Temporary/LastTest.log
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
@@ -177,7 +201,7 @@ jobs:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
       - uses: fortran-lang/setup-fortran@v1
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         with:
           compiler: gcc
           version: '15'
@@ -226,15 +250,10 @@ jobs:
           else
             brew install mpfr libmpc gmp
           fi
-      - uses: msys2/setup-msys2@v2
-        if: runner.os == 'Windows'
-        id: mpfr-msys
-        with:
-          install: mingw-w64-x86_64-mpfr mingw-w64-x86_64-mpc mingw-w64-x86_64-gmp
       - name: Configure MPFR/MPC runtime paths
         if: runner.os == 'Windows'
         shell: bash
-        run: echo '${{ steps.mpfr-msys.outputs.msys2-location }}/mingw64/bin' >> "$GITHUB_PATH"
+        run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
         with:
           coverage: false # Collected by Coverage.yml.

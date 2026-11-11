@@ -75,11 +75,12 @@ function _coefficient_eigenpair_bytes(result)
 end
 
 function _coefficient_eigenpair_bytes(result, key)
-    limb_bytes = sizeof(Base.GMP.Limb)
     try
-        limbs = cld(Base.precision(real(result.lambda)), 8limb_bytes)
-        element_bytes = Base.Checked.checked_add(64, Base.Checked.checked_mul(limb_bytes, limbs))
-        count = Base.Checked.checked_mul(2, max(0, last(result.degrees)-result.m))
+        # Reserve both tuple storage and array slots, including Julia-version-dependent BigFloat storage.
+        element_bytes = Base.Checked.checked_add(
+            Base.Checked.checked_mul(2, Base.summarysize(real(result.lambda))),
+            2sizeof(Tuple{_SWFloat, _SWFloat}))
+        count = max(0, last(result.degrees)-result.m)
         factor_bytes = Base.Checked.checked_add(128, Base.Checked.checked_mul(count, element_bytes))
         retained = Base.summarysize((key, result))
         Base.Checked.checked_add(retained, Base.Checked.checked_add(factor_bytes, 1024))

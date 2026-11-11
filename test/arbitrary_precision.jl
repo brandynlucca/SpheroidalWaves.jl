@@ -247,6 +247,18 @@ const ARBITRARY_PRECISION_REFERENCES = (
             end
             @test reservation==SW._coefficient_eigenpair_bytes(retained)
             @test reservation>=Base.summarysize((large_key, retained))
+            for bits in (64, 160, 512), degree in (16, 256, 2048)
+                SW._with_swprecision(bits) do
+                    sample = (; pair..., lambda = SW._SWFloat(1), degrees = [0, degree],
+                        legendre_factors = typeof(pair.legendre_factors)(nothing))
+                    retained = SW._cache_coefficient_eigenpair!(Dict{Any, Any}(), short_key, sample)
+                    reservation = SW._coefficient_eigenpair_bytes(retained)
+                    factors = SW._legendre_recurrence_factors(retained)
+                    @test length(factors)==degree
+                    @test factors===retained.legendre_factors[][3]
+                    @test reservation>=Base.summarysize((short_key, retained))
+                end
+            end
             overflow = (; pair..., degrees = [0, typemax(Int)])
             @test SW._coefficient_eigenpair_bytes(overflow, nothing)==typemax(Int)
         end
