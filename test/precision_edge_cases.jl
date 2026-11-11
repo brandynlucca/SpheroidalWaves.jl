@@ -87,6 +87,14 @@ using SpheroidalWaves, Test
             end
             derivative = jacobian_smn(0, 0, 0, [1//4]; precision_bits = bits)
             @test iszero(only(derivative.dvalue_dc)) && iszero(only(derivative.dderivative_dc))
+            SW._with_swprecision(256) do
+                x = one(SW._SWFloat)-ldexp(one(SW._SWFloat), -180)
+                @test SW._precision_input_bits(x)==180
+                expected = sqrt((1-x)*(1+x))
+                near_endpoint = smn(1, 1, 0, [x]; precision_bits = bits)
+                @test isapprox(abs(only(near_endpoint.value)), BigFloat(expected); rtol = tolerance)
+                @test isapprox(abs(only(near_endpoint.derivative)), BigFloat(x/expected); rtol = tolerance)
+            end
         end
 
         @testset "Scaled rounding and bounded coefficient refinement" begin
