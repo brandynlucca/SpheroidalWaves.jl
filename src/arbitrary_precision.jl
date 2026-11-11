@@ -93,7 +93,7 @@ end
 function _cached_coefficient_eigenpair(cache, key)
     result = get(cache, key, nothing)
     result===nothing || (result.last_used[] = time_ns())
-    result
+    return result
 end
 
 function _cache_coefficient_eigenpair!(cache, key, result; native_label = false)
@@ -117,11 +117,11 @@ function _cache_coefficient_eigenpair!(cache, key, result; native_label = false)
         retained -= _coefficient_eigenpair_bytes(removed)
     end
     cache[key] = result
-    result
+    return result
 end
 
 function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision, bits,
-        rtol, max_terms, derivatives; native_label = false, min_terms = 0)
+        rtol, max_terms, derivatives; native_label = false, min_terms = 0, max_refinements = 4)
     0<=min_terms<=max_terms || throw(ArgumentError("min_terms must be between zero and max_terms"))
     cache = get!(task_local_storage(), _coefficient_eigenpair_cache_key) do
         Dict{Any, Any}()
@@ -129,7 +129,7 @@ function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
     # Cache original inputs, requested precision, rounding, and the MPFR library.
     key = (m, n, typeof(c), c, spheroid, precision, bits, rtol, max_terms, min_terms, native_label,
         derivatives, _swrounding(), Base.precision(BigFloat), rounding(BigFloat),
-        backend_library(; precision = :mpfr))
+        backend_library(; precision = :mpfr), max_refinements)
     cached = _cached_coefficient_eigenpair(cache, key)
     cached===nothing || return cached
 
@@ -160,7 +160,7 @@ function _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
         max(192, requested+64)
     end
     previous = nothing
-    for attempt in 1:4
+    for attempt in 1:max_refinements
         result, stable = _with_swprecision(workbits) do
             tolerance = ldexp(one(_SWFloat), -bits-8)
             rtol === nothing || (tolerance = min(tolerance, _SWFloat(rtol)/256))

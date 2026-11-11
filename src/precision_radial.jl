@@ -98,13 +98,13 @@ function _radial_coordinate_derivatives_at_precision(eigenpair, points, states, 
 end
 
 function _refine_radial_values_at_precision(m, n, c, points, spheroid, precision, kind,
-        normalization, bits, max_terms, order, sensitivity)
+        normalization, bits, max_terms, order, sensitivity; max_refinements = 5)
     input_bits = max(_precision_input_bits(c), maximum(_precision_input_bits, points; init = 0))
     workbits = max(bits+96, input_bits+64, bits+64+ceil(Int, 8abs(c)+4abs(imag(c))*maximum(abs, points)))
     previous = nothing
     minimum = min(max_terms, max(32, cld(bits, 2)+32))
     endpoints = findall(x -> spheroid===:prolate && isone(x), points)
-    for attempt in 1:5
+    for attempt in 1:max_refinements
         result, stable = _with_swprecision(workbits) do
             tolerance = ldexp(one(_SWFloat), -bits-24)
             eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
@@ -154,7 +154,7 @@ function _rmn_at_precision(m, n, c, points; spheroid, precision, precision_bits,
         end
         output = (; output..., logderivative = ratio)
     end
-    output
+    return output
 end
 
 function _radial_parameter_derivatives_at_precision(m, n, c, points; spheroid, precision,

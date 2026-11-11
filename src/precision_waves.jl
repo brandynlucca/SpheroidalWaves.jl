@@ -106,13 +106,13 @@ function _angular_values_at_precision(eigenpair, points, kind, normalize, order;
 end
 
 function _refine_angular_values_at_precision(m, n, c, points, spheroid, precision,
-        bits, max_terms, kind, normalize, order; sensitivity = false)
+        bits, max_terms, kind, normalize, order; sensitivity = false, max_refinements = 4)
     previous = nothing
     min_terms = 0
     input_bits = max(_precision_input_bits(c), maximum(_precision_input_bits, points; init = 0))
     requested = max(bits+32, input_bits)
     endpoints = findall(x -> isreal(x) && abs(real(x))==1, points)
-    for attempt in 1:4
+    for attempt in 1:max_refinements
         eigenpair = _solve_coefficient_eigenpair_at_precision(m, n, c, spheroid, precision,
             requested, nothing, max_terms, sensitivity || kind==2; min_terms)
         result, change = try
@@ -174,7 +174,7 @@ function _smn_at_precision(m, n, c, points; spheroid = :prolate, precision = :do
             end
             return (; output..., logderivative = _round_to_bigfloat.(ratios, bits))
         end
-        output
+        return output
     end
 end
 
