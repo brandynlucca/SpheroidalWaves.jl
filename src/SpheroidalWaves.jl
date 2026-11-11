@@ -2111,7 +2111,11 @@ function accuracy(
         m::Integer, n::Integer, c::Union{Real, Complex}, arg::AbstractVector{<:Real};
         spheroid::Symbol = :prolate, precision::Symbol = :double, kind::Integer = 1,
         target::Symbol = :radial, normalize::Bool = false,
-        normalization::Symbol = :standard, diagnostics::Bool = false)
+        normalization::Symbol = :standard, diagnostics::Bool = false,
+        precision_bits = nothing, max_terms::Integer = 512)
+    precision_bits === nothing || return _accuracy_at_precision(
+        m, n, c, arg, spheroid, precision, target, kind, normalize, normalization,
+        diagnostics, precision_bits, max_terms)
     if diagnostics
         digits = accuracy(
             m, n, c, arg; spheroid, precision, kind, target, normalize, normalization)
@@ -2285,9 +2289,12 @@ function accuracy(
         m::Integer, n::Integer, c::Union{Real, Complex}, z::AbstractVector{<:Number};
         spheroid::Symbol = :prolate, precision::Symbol = :double, target::Symbol = :radial,
         kind::Integer = 1, normalize::Bool = false, normalization::Symbol = :standard,
-        diagnostics::Bool = false)
+        diagnostics::Bool = false, precision_bits = nothing, max_terms::Integer = 512)
     target in (:angular, :radial) ||
         throw(ArgumentError("target must be :angular or :radial"))
+    precision_bits === nothing || return _accuracy_at_precision(
+        m, n, c, z, spheroid, precision, target, kind, normalize, normalization,
+        diagnostics, precision_bits, max_terms)
     return _complex_coordinate_accuracy(m, n, c, z, spheroid, precision, target,
         kind, normalize, normalization, diagnostics)
 end
