@@ -240,14 +240,19 @@ jobs:
           - native-oblate
           - native-context
           - api-and-precision
+          - thread-safety
           - quad-and-domain
           - accuracy-and-roots
+          - accuracy-diagnostics
+          - numerical-regressions
           - arbitrary-precision
           - precision-quantities
+          - precision-edge-cases
           - precision-wave-references
           - precision-wave-sensitivities
           - precision-wave-behavior
           - parameter-derivatives
+          - coordinate-sensitivities
           - coordinates-and-endpoints
           - functions-and-coefficients
         version:

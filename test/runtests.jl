@@ -6,15 +6,18 @@ include("require_backends.jl")
 const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
 TEST_GROUP in
 ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
-    "functions-and-coefficients", "quad-and-domain", "accuracy-and-roots",
-    "arbitrary-precision", "precision-quantities",
+    "coordinate-sensitivities",
+    "functions-and-coefficients", "thread-safety", "quad-and-domain", "accuracy-and-roots",
+    "accuracy-diagnostics", "numerical-regressions",
+    "arbitrary-precision", "precision-quantities", "precision-edge-cases",
     "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior") ||
     error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
 
 # Ordinary Pkg.test() and coverage run the complete suite.
-if TEST_GROUP in ("all", "api-and-precision")
+if TEST_GROUP in ("all", "thread-safety")
     include("thread_safety.jl")
-
+end
+if TEST_GROUP in ("all", "api-and-precision")
     @testset "SpheroidalWaves.jl" begin
         assert_allclose(actual, expected; atol = 1e-10, rtol = 0.0) = begin
             @test length(actual) == length(expected)
@@ -512,6 +515,8 @@ if TEST_GROUP in ("all", "arbitrary-precision")
 end
 if TEST_GROUP in ("all", "precision-quantities")
     include("precision_quantities.jl")
+end
+if TEST_GROUP in ("all", "precision-edge-cases")
     include("precision_edge_cases.jl")
 end
 if TEST_GROUP == "all"
@@ -532,7 +537,8 @@ end
 # Independent numerical testsets share the process and its compiled methods.
 # Queue individual testsets so long files cannot leave the other workers idle.
 let file_groups = (
-        "accuracy-and-roots" => ["accuracy.jl", "numerical_regressions.jl"],
+        "accuracy-diagnostics" => ["accuracy.jl"],
+        "numerical-regressions" => ["numerical_regressions.jl"],
         "functions-and-coefficients" =>
             ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
                 "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
@@ -553,13 +559,12 @@ let file_groups = (
                 delete!(serial_testsets, expression.args[3])
                 return TEST_GROUP in ("all", "accuracy-and-roots") ? expression : nothing
             end
-            # Keep complex-coordinate Jacobians with continuation and endpoint
-            # checks so each job compiles the numerical methods it needs.
+            # Complex-coordinate Jacobians share their compilation work.
             group = expression.args[3] in
                     ("Complex angular parameter sensitivities",
                 "Complex coordinate parameter sensitivities",
                 "Complex-coordinate Jacobian diagnostics keyword") ?
-                    "coordinates-and-endpoints" : current_group[]
+                    "coordinate-sensitivities" : current_group[]
             if TEST_GROUP == "all" || TEST_GROUP == group
                 push!(testsets, expression)
             end
