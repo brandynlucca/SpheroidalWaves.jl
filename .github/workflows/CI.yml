@@ -24,13 +24,38 @@ on:
         description: Bypass native and Julia compilation caches
         type: boolean
         default: false
+      source_run:
+        description: Run focused Intel macOS timings using this CI run's artifacts (blank runs full CI)
+        type: string
+        default: ''
+      timing_julia:
+        description: Julia version for focused timings
+        type: choice
+        options: ['1', 'pre', '1.10']
+        default: '1'
+      timing_cases:
+        description: JSON timing cases with name, groups, threads, and optimize values
+        type: string
+        default: '[{"name":"functions-2","groups":"angular-and-coefficients,functions-and-coefficients","threads":2,"optimize":1},{"name":"functions-4","groups":"angular-and-coefficients,functions-and-coefficients","threads":4,"optimize":1}]'
 concurrency:
   # Skip intermediate builds: always.
   # Cancel intermediate builds: only if it is a pull request build.
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
+  timing:
+    if: inputs.source_run != ''
+    uses: ./.github/workflows/Timings.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      source_run: ${{ inputs.source_run }}
+      julia: ${{ inputs.timing_julia }}
+      cases: ${{ inputs.timing_cases }}
+
   native-backends:
+    if: inputs.source_run == ''
     name: Build native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 30
@@ -170,6 +195,7 @@ jobs:
           retention-days: 1
 
   build-configurations:
+    if: inputs.source_run == ''
     name: Shared-source build - ${{ matrix.configuration.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -239,6 +265,7 @@ jobs:
           ctest --test-dir build --no-tests=error --output-on-failure --parallel 1
 
   julia-environments:
+    if: inputs.source_run == ''
     name: Prepare Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.os }}
     timeout-minutes: 15
@@ -477,6 +504,7 @@ jobs:
           fi
 
   jll-backends:
+    if: inputs.source_run == ''
     name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
