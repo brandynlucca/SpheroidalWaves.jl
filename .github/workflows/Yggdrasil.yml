@@ -21,6 +21,7 @@ permissions:
 
 env:
   BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+  BUILDER_DEPOT: ${{ github.workspace }}/.scratch/binarybuilder-depot
   JULIA_CPU_TARGET: generic
   JULIA_NUM_THREADS: '1'
   JULIA_NUM_PRECOMPILE_TASKS: '1'
@@ -35,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     outputs:
       version: ${{ steps.recipe.outputs.version }}
       platforms: ${{ steps.targets.outputs.platforms }}
@@ -50,6 +51,7 @@ jobs:
         with:
           path: .scratch/binarybuilder-depot
           key: binarybuilder-tools-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
+          restore-keys: binarybuilder-tools-v1-${{ runner.os }}-
       - name: Select the shared-source commit and version
         id: recipe
         shell: julia --color=yes {0}
@@ -98,7 +100,7 @@ jobs:
       - name: Save the prepared build tools and recipe
         run: |
           mkdir -p .scratch/binarybuilder-tools
-          tar -czf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH" .
+          tar -czf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT" .
           cp contrib/yggdrasil/build_tarballs.jl .scratch/binarybuilder-tools/build_tarballs.jl
       - uses: actions/upload-artifact@v7
         with:
@@ -113,7 +115,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -130,8 +132,8 @@ jobs:
           path: .scratch/binarybuilder-tools
       - name: Restore the prepared build tools and recipe
         run: |
-          mkdir -p "$JULIA_DEPOT_PATH"
-          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH"
+          mkdir -p "$BUILDER_DEPOT"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
           cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
       - name: Build and audit all three precision libraries
         env:
@@ -153,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      JULIA_DEPOT_PATH: ${{ github.workspace }}/.scratch/binarybuilder-depot
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     outputs:
       version: ${{ needs.prepare.outputs.version }}
     steps:
@@ -167,8 +169,8 @@ jobs:
           path: .scratch/binarybuilder-tools
       - name: Restore the prepared build tools and recipe
         run: |
-          mkdir -p "$JULIA_DEPOT_PATH"
-          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$JULIA_DEPOT_PATH"
+          mkdir -p "$BUILDER_DEPOT"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
           cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
       - uses: actions/download-artifact@v8
         with:
@@ -183,7 +185,7 @@ jobs:
           julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl "$BUILD_TARGETS" --skip-build --deploy=local --verbose
       - name: Collect the generated JLL and recipe
         run: |
-          cp -R "$JULIA_DEPOT_PATH/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
+          cp -R "$BUILDER_DEPOT/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
           cp contrib/yggdrasil/build_tarballs.jl products/build_tarballs.jl
       - uses: actions/upload-artifact@v7
         if: always()
