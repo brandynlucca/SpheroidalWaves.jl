@@ -184,7 +184,7 @@ jobs:
       fail-fast: false
       max-parallel: 48
       matrix:
-        group: ['api-and-precision', 'parameter-derivatives', 'coordinates-and-endpoints', 'functions-and-coefficients']
+        group: ['native', 'api-and-precision', 'parameter-derivatives', 'coordinates-and-endpoints', 'functions-and-coefficients']
         version:
           - '1'
           - 'pre'
@@ -207,11 +207,9 @@ jobs:
             arch: aarch64
             library-prefix: build/lib/libspheroidal_batch_
             library-extension: dylib
-        include:
-          - {group: native, version: '1.10', platform: {os: ubuntu-latest, arch: x64, library-prefix: build/lib/libspheroidal_batch_, library-extension: so}}
-          - {group: native, version: '1.10', platform: {os: windows-latest, arch: x64, library-prefix: build/bin/spheroidal_batch_, library-extension: dll}}
-          - {group: native, version: '1.10', platform: {os: macos-26-intel, arch: x64, library-prefix: build/lib/libspheroidal_batch_, library-extension: dylib}}
-          - {group: native, version: '1.10', platform: {os: macos-latest, arch: aarch64, library-prefix: build/lib/libspheroidal_batch_, library-extension: dylib}}
+        exclude:
+          - {group: native, version: '1'}
+          - {group: native, version: 'pre'}
     steps:
       - uses: actions/checkout@v7
       # Match the build job's Fortran/OpenMP runtime libraries and search path.
