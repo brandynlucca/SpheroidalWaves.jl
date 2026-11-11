@@ -15,13 +15,46 @@ on:
         description: JSON array of name, groups, threads, optimize, and optional os/arch values
         required: true
         type: string
+      prepare_runtime:
+        description: Package Julia once for the Intel macOS timing jobs
+        type: boolean
+        default: false
 
 permissions:
   contents: read
   actions: read
 
 jobs:
+  runtime:
+    if: inputs.prepare_runtime
+    name: Prepare the Intel Julia runtime
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.julia }}
+          arch: x64
+      - uses: actions/download-artifact@v8
+        with:
+          name: julia-environment-macos-26-intel-x64-${{ inputs.julia }}
+          path: .scratch/ci-environment
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Package the installed Julia runtime
+        shell: bash
+        run: bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+      - uses: actions/upload-artifact@v7
+        with:
+          name: timing-julia-environment-${{ inputs.julia }}
+          path: .scratch/ci-environment/
+          compression-level: 0
+          retention-days: 1
+
   timing:
+    needs: runtime
+    if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
     name: ${{ matrix.case.name }} - Julia ${{ inputs.julia }}
     runs-on: ${{ matrix.case.os || 'macos-26-intel' }}
     timeout-minutes: 5
@@ -31,6 +64,7 @@ jobs:
       matrix:
         case: ${{ fromJSON(inputs.cases) }}
     env:
+      REUSE_JULIA_RUNTIME: ${{ inputs.prepare_runtime && (matrix.case.os == '' || matrix.case.os == 'macos-26-intel') }}
       JULIA_NUM_THREADS: ${{ matrix.case.threads }}
       JULIA_NUM_PRECOMPILE_TASKS: '1'
       JULIA_CPU_TARGET: generic
@@ -58,15 +92,20 @@ jobs:
           compiler: gcc
           version: '15'
       - uses: julia-actions/setup-julia@v2
+        if: env.REUSE_JULIA_RUNTIME != 'true'
         with:
           version: ${{ inputs.julia }}
           arch: ${{ matrix.case.arch || 'x64' }}
       - uses: actions/download-artifact@v8
         with:
-          name: julia-environment-${{ matrix.case.os || 'macos-26-intel' }}-${{ matrix.case.arch || 'x64' }}-${{ inputs.julia }}
+          name: ${{ env.REUSE_JULIA_RUNTIME == 'true' && format('timing-julia-environment-{0}', inputs.julia) || format('julia-environment-{0}-{1}-{2}', matrix.case.os || 'macos-26-intel', matrix.case.arch || 'x64', inputs.julia) }}
           path: .scratch/ci-environment
-          run-id: ${{ inputs.source_run }}
+          run-id: ${{ env.REUSE_JULIA_RUNTIME == 'true' && github.run_id || inputs.source_run }}
           github-token: ${{ github.token }}
+      - name: Restore the prepared Julia runtime
+        if: env.REUSE_JULIA_RUNTIME == 'true'
+        shell: bash
+        run: bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
       - name: Restore the prepared Julia environment
         shell: bash
         env:

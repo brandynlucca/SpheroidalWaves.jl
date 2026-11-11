@@ -33,6 +33,10 @@ on:
         type: choice
         options: ['1', 'pre', '1.10']
         default: '1'
+      timing_runtime:
+        description: Measure reuse of the prepared Intel macOS Julia runtime
+        type: boolean
+        default: false
       timing_cases:
         description: JSON cases with name, groups, threads, optimize, and optional os/arch values
         type: string
@@ -53,6 +57,7 @@ jobs:
       source_run: ${{ inputs.source_run }}
       julia: ${{ inputs.timing_julia }}
       cases: ${{ inputs.timing_cases }}
+      prepare_runtime: ${{ inputs.timing_runtime || false }}
 
   native-backends:
     if: inputs.source_run == ''
@@ -329,6 +334,9 @@ jobs:
           mkdir -p "$PREPARED_DEPOT"/{artifacts,packages,registries,compiled,logs,scratchspaces}
           tar -czf .scratch/ci-environment/depot.tar.gz -C "$PREPARED_DEPOT" artifacts packages registries compiled logs scratchspaces
           julia --startup-file=no -e 'print(VERSION, " ", Base.GIT_VERSION_INFO.commit)' > .scratch/ci-environment/julia-version.txt
+          if [[ '${{ matrix.platform.os }}' == 'macos-26-intel' ]]; then
+            bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+          fi
       - uses: actions/upload-artifact@v7
         with:
           name: julia-environment-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
@@ -365,13 +373,13 @@ jobs:
           - {os: macos-latest, arch: aarch64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
           - {os: macos-latest, arch: aarch64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,angular-and-coefficients,degree-batches,functions-and-coefficients'}
           - {os: macos-latest, arch: aarch64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints,precision-eigen-differences,precision-wave-differences'}
-          - {os: windows-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain'}
+          - {os: windows-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,precision-eigen-differences'}
           - {os: windows-latest, arch: x64, name: accuracy, groups: 'accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
           - {os: windows-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-complex-curvature', optimize: '0'}
           - {os: windows-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior,precision-curvature', optimize: '0'}
           - {os: windows-latest, arch: x64, name: sensitivities, groups: 'precision-wave-sensitivities,parameter-derivatives,static-and-second-derivatives'}
           - {os: windows-latest, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
-          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints,precision-eigen-differences,precision-wave-differences', optimize: '0'}
+          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints,precision-wave-differences', optimize: '0'}
           - {os: windows-latest, arch: x64, name: functions, groups: 'angular-and-coefficients,degree-batches,functions-and-coefficients'}
           - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision,quad-and-domain'}
           - {os: macos-26-intel, arch: x64, name: wave-differences, groups: 'precision-wave-differences', optimize: '0'}
@@ -401,7 +409,7 @@ jobs:
           compiler: gcc
           version: '15'
       - uses: julia-actions/setup-julia@v2
-        if: startsWith(matrix.suite.groups, 'native-') == false
+        if: startsWith(matrix.suite.groups, 'native-') == false && matrix.suite.os != 'macos-26-intel'
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.suite.arch }}
@@ -411,6 +419,10 @@ jobs:
         with:
           name: julia-environment-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
           path: .scratch/ci-environment
+      - name: Restore the prepared Julia runtime
+        if: startsWith(matrix.suite.groups, 'native-') == false && matrix.suite.os == 'macos-26-intel'
+        shell: bash
+        run: bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
       - name: Restore the prepared Julia environment
         if: startsWith(matrix.suite.groups, 'native-') == false
         shell: bash
