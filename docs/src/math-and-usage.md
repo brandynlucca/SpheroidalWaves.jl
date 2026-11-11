@@ -51,7 +51,7 @@ The difference measures agreement, not an accuracy guarantee. `accuracy` provide
 
 ### Explicit arbitrary precision
 
-Use `precision_bits=p` (`p≥2`) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, `accuracy`, coordinate-zero searches, and Jacobians of either parameter-derivative order. Supplying `h` selects finite differences; the step and adaptive tolerances then control derivative accuracy separately from arithmetic precision. Automatic second-order wave Jacobians refine a fourth-order stencil of analytic first derivatives.
+Use `precision_bits=p` ($p \geq 2$) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, `accuracy`, coordinate-zero searches, and Jacobians of either parameter-derivative order. Supplying $h$ selects finite differences; the step and adaptive tolerances then control derivative accuracy separately from arithmetic precision. Automatic second-order wave Jacobians refine a fourth-order stencil of analytic first derivatives.
 
 ~~~julia
 lambda = eigenvalue(1, 2, 5//4; precision_bits=256)
