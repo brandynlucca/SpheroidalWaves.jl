@@ -69,9 +69,9 @@ jobs:
               BinaryBuilder.Auditor.generic_march(platform)
           end
       - name: Build and audit all precision libraries
-        run: >-
-          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
-          --verbose --deploy=local
+        run: |
+          ulimit -v 3145728
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl --verbose --deploy=local
       - name: Collect the generated JLL and recipe
         run: |
           cp -R "$HOME/.julia/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
@@ -84,14 +84,15 @@ jobs:
           if-no-files-found: ignore
 
   runtime:
-    name: JLL runtime and accuracy - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
+    name: JLL ${{ matrix.suite }} - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
     needs: build
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 30
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
         julia: ['1.10', '1']
+        suite: ['native', 'wave-references-and-behavior', 'wave-sensitivities']
         platform:
           - os: ubuntu-latest
             arch: x64
@@ -103,7 +104,9 @@ jobs:
             arch: x64
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
-      JULIA_NUM_THREADS: '1'
+      JULIA_NUM_THREADS: '2'
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      JLL_TEST_SUITE: ${{ matrix.suite }}
       JULIA_NUM_PRECOMPILE_TASKS: '1'
       OPENBLAS_NUM_THREADS: '1'
       OMP_NUM_THREADS: '1'
@@ -114,6 +117,12 @@ jobs:
         with:
           version: ${{ matrix.julia }}
           arch: ${{ matrix.platform.arch }}
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: jll-validation-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.julia }}
+          include-matrix: 'false'
+          cache-compiled: 'false'
+          delete-old-caches: 'false'
       - uses: actions/download-artifact@v8
         with:
           name: yggdrasil-build
@@ -133,14 +142,15 @@ jobs:
           end
           open(io -> TOML.print(io, artifacts), path, "w")
       - name: Load JLL runtimes and test the cross-built libraries
-        timeout-minutes: 25
         shell: bash
         run: |
           unset LD_LIBRARY_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
-          julia --startup-file=no --heap-size-hint=1G - <<'JULIA'
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G --check-bounds=yes -O1 - <<'JULIA'
           using Pkg, Libdl, Test
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           Pkg.activate(;temp=true)
+          write(joinpath(dirname(Base.active_project()), "LocalPreferences.toml"), "[SpheroidalWaves]\nprecompile_workload = false\n")
           Pkg.develop([
               Pkg.PackageSpec(path=pwd()),
               Pkg.PackageSpec(path="binarybuilder-products/SpheroidalWaves_jll"),
@@ -186,9 +196,14 @@ jobs:
               @test precision(value) == 160
               @test isapprox(value, reference; rtol=big"1e-46")
           end
-          include("test/quad_precision.jl")
-          include("test/numerical_regressions.jl")
-          include("test/precision_waves.jl")
+          if ENV["JLL_TEST_SUITE"] == "native"
+              include("test/quad_precision.jl")
+              include("test/numerical_regressions.jl")
+          else
+              ENV["SPHEROIDALWAVES_PRECISION_CASE"] = ENV["JLL_TEST_SUITE"] == "wave-sensitivities" ?
+                  "sensitivities" : "references,derivatives,static,dispatch,storage,settings"
+              include("test/precision_waves.jl")
+          end
           JULIA
 
   submit:
