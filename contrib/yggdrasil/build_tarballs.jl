@@ -1,7 +1,7 @@
 using BinaryBuilder
 
 name = "SpheroidalWaves"
-version = v"0.6.0"
+version = v"0.7.0"
 
 sources = [
     GitSource("https://github.com/brandynlucca/SpheroidalWaves.jl.git",
