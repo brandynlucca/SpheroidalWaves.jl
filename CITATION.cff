@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "SpheroidalWaves.jl: Arbitrary-precision prolate and oblate spheroidal wave functions."
+version: 0.7.0
+identifiers:
+- type: doi
+  value: 10.5281/zenodo.19728039
+- type: url
+  value: https://brandynlucca.github.io/SpheroidalWaves.jl
+abstract: SpheroidalWaves.jl is a Julia package for the numerical evaluation and analysis of 
+  prolate and oblate spheroidal wave functions. It combines a Julia interface with shared 
+  Fortran numerical kernels, supporting real and complex spheroidal parameters, complex evaluation 
+  coordinates, and double, quadruple, and runtime-selectable arbitrary precision using MPFR and 
+  MPC. The package computes angular and radial functions, characteristic values, expansion 
+  coefficients, and connection and normalization quantities. Additional capabilities include 
+  coordinate and parameter derivatives, combined evaluations, parameter sweeps, inverse eigenvalue 
+  calculations, and searches for zeros and stationary points. Numerical diagnostics provide 
+  accuracy estimates and consistency checks, while scaled representations and endpoint treatments 
+  support calculations in challenging parameter regimes. Batch evaluation, thread-safe execution, 
+  and reusable numerical workspaces support repeated computations. These capabilities provide a 
+  consistent interface for incorporating spheroidal wave functions into scientific calculations 
+  requiring flexible precision, sensitivity analysis, and numerical verification.
+authors:
+- family-names: Lucca
+  given-names: Brandyn
+  email: brandyn.lucca@gmail.com
+  orcid: https://orcid.org/0000-0003-3145-2969
+contact:
+- family-names: Lucca
+  given-names: Brandyn
+  email: brandyn.lucca@gmail.com
+  orcid: https://orcid.org/0000-0003-3145-2969
+keywords:
+- spheroidal wave functions
+- special functions
+- numerical analysis
+- scientific computing
+- arbitrary precision
+- eigenvalues 
+- Fortran
+- Julia
+license: GPL-3.0-only
+doi: 10.5281/zenodo.19728039
+repository-code: https://github.com/brandynlucca/SpheroidalWaves.jl
+url: https://brandynlucca.github.io/SpheroidalWaves.jl
