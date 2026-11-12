@@ -1,3 +1,5 @@
+#include "precision.inc"
+
 ! ---------------------------------------------------------------------------
 ! Modified Source Notice
 ! ---------------------------------------------------------------------------
@@ -23,21 +25,46 @@
 ! Note: This file is NOT a pristine upstream copy.
 ! ---------------------------------------------------------------------------
 
+#ifdef SWF_PRECISION_MPFR
+module complex_oblate_parameters_mpfr
+    use spheroidal_precision_mpfr
+#else
 module complex_oblate_parameters
-    integer, parameter :: knd = selected_real_kind(8)
-    integer, parameter :: knd1 = selected_real_kind(8)
+#ifdef SWF_PRECISION_QUAD
+    use spheroidal_precision_quad
+#else
+    use spheroidal_precision_double
+#endif
+#endif
+    implicit none
+    integer, parameter :: knd = sw_kind
+    integer, parameter :: knd1 = sw_kind
     logical, parameter :: debug = .false.
     logical, parameter :: warn = .false.
     logical, parameter :: output = .false.
     logical, parameter :: suffix = .false.
-end module complex_oblate_parameters
+end module
 
+#ifdef SWF_PRECISION_MPFR
+module complex_oblate_swf_mpfr
+#else
 module complex_oblate_swf
-  use complex_oblate_parameters
+#endif
+ use, intrinsic :: iso_fortran_env, only: int64
+#ifdef SWF_PRECISION_MPFR
+ use complex_oblate_parameters_mpfr
+#else
+ use complex_oblate_parameters
+#endif
+ implicit none
 
  integer, parameter :: pleg_cache_slots = 48
 
+ integer(int64), save :: auxiliary_cache_limit_bytes = 67108864_int64
+!$omp threadprivate(auxiliary_cache_limit_bytes)
+
  type :: pleg_cache_entry
+   integer(int64) :: bytes = 0_int64
    logical :: valid = .false.
    integer :: m = -1
    integer :: iopd = -1
@@ -47,19 +74,20 @@ module complex_oblate_swf
    integer :: lim = 0
    integer :: ndec = 0
    integer :: nex = 0
-   real(knd), allocatable :: barg(:)
-   real(knd), allocatable :: pr(:,:), pdr(:,:)
-   real(knd), allocatable :: pdnorm(:), pnorm(:)
+   SW_REAL, allocatable :: barg(:)
+   SW_REAL, allocatable :: pr(:,:), pdr(:,:)
+   SW_REAL, allocatable :: pdnorm(:), pnorm(:)
    integer, allocatable :: ipdnorm(:), ipnorm(:)
-   real(knd), allocatable :: alpha(:), beta(:), gamma(:)
-   real(knd), allocatable :: coefa(:), coefb(:), coefc(:), coefd(:), coefe(:)
+   SW_REAL, allocatable :: alpha(:), beta(:), gamma(:)
+   SW_REAL, allocatable :: coefa(:), coefb(:), coefc(:), coefd(:), coefe(:)
  end type
 
  type :: gauss_cache_entry
+   integer(int64) :: bytes = 0_int64
    logical :: valid = .false.
    integer :: ndec = 0
    integer :: n = 0
-   real(knd), allocatable :: x(:), w(:)
+   SW_REAL, allocatable :: x(:), w(:)
  end type
 
  type(pleg_cache_entry), save :: pleg_cache(pleg_cache_slots)
@@ -70,16 +98,53 @@ module complex_oblate_swf
 
  contains
 
+  logical function add_cache_bytes(bytes, element_bytes, rows, columns) result(fits)
+    integer(int64), intent(inout) :: bytes
+    integer(int64), intent(in) :: element_bytes
+    integer, intent(in) :: rows
+    integer, optional, intent(in) :: columns
+    integer(int64) :: count, row_bytes, available
+    fits = .false.
+    if(bytes<0.or.bytes>auxiliary_cache_limit_bytes.or.element_bytes<=0.or.rows<0) return
+    count = 1_int64
+    if(present(columns)) count = int(columns,int64)
+    if(count<0) return
+    available = auxiliary_cache_limit_bytes-bytes
+    if(int(rows,int64)>available/element_bytes) return
+    row_bytes = int(rows,int64)*element_bytes
+    if(row_bytes>0) then
+      if(count>available/row_bytes) return
+    end if
+    bytes = bytes+row_bytes*count
+    fits = .true.
+  end function
+
+  logical function reserve_cache_bytes(requested) result(fits)
+    integer(int64), intent(in) :: requested
+    integer(int64) :: retained
+    integer :: slot
+    fits = .false.
+    if(requested<0.or.requested>auxiliary_cache_limit_bytes) return
+    retained = gauss_cache%bytes+sum(pleg_cache%bytes)
+    if(retained>auxiliary_cache_limit_bytes-requested) then
+      do slot=1,pleg_cache_slots
+        call clear_pleg_cache_slot(slot)
+      end do
+      if(allocated(gauss_cache%x)) deallocate(gauss_cache%x)
+      if(allocated(gauss_cache%w)) deallocate(gauss_cache%w)
+      gauss_cache%bytes = 0_int64
+      gauss_cache%valid = .false.
+    end if
+    fits = .true.
+  end function
+
   logical function cache_real_equal(a, b)
-    real(knd), intent(in) :: a, b
-    real(knd) :: scale, tol
-    scale = max(1.0_knd, max(abs(a), abs(b)))
-    tol = 64.0_knd * epsilon(1.0_knd) * scale
-    cache_real_equal = abs(a - b) <= tol
+    SW_REAL, intent(in) :: a, b
+    cache_real_equal = sw_cache_equal(a,b)
   end function
 
   logical function cache_real_vector_equal(a, b, n)
-    real(knd), intent(in) :: a(:), b(:)
+    SW_REAL, intent(in) :: a(:), b(:)
     integer, intent(in) :: n
     integer :: i
     cache_real_vector_equal = .false.
@@ -92,6 +157,7 @@ module complex_oblate_swf
 
   subroutine clear_pleg_cache_slot(idx)
     integer, intent(in) :: idx
+    pleg_cache(idx)%bytes = 0_int64
     pleg_cache(idx)%valid = .false.
     pleg_cache(idx)%m = -1
     pleg_cache(idx)%iopd = -1
@@ -120,7 +186,7 @@ module complex_oblate_swf
 
   integer function find_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp)
     integer, intent(in) :: m, iopd, ndec, nex, narg, maxt, lim, maxp
-    real(knd), intent(in) :: barg(:)
+    SW_REAL, intent(in) :: barg(:)
     integer :: i
     find_pleg_cache = 0
     do i = 1, pleg_cache_slots
@@ -139,11 +205,22 @@ module complex_oblate_swf
     end do
   end function
 
-  subroutine store_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+  subroutine store_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp, pr, pdr, pdnorm, ipdnorm, pnorm, &
+      & ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
     integer, intent(in) :: m, iopd, ndec, nex, narg, maxt, lim, maxp
-    real(knd), intent(in) :: barg(maxt), pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt), alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp)
+    SW_REAL, intent(in) :: barg(maxt), pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt), alpha(maxp), &
+      & beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp)
     integer, intent(in) :: ipdnorm(maxt), ipnorm(maxt)
     integer :: idx
+    integer(int64) :: requested_bytes, real_bytes, integer_bytes
+    requested_bytes = 0_int64
+    real_bytes = sw_real_bytes()
+    integer_bytes = storage_size(1)/8
+    if(.not.add_cache_bytes(requested_bytes,real_bytes,narg)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes,maxt,lim)) return
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes+2*integer_bytes,maxt)) return
+    if(.not.add_cache_bytes(requested_bytes,8*real_bytes,lim)) return
+    if(.not.reserve_cache_bytes(requested_bytes)) return
     idx = find_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp)
     if(idx == 0) then
       idx = 1
@@ -159,20 +236,21 @@ module complex_oblate_swf
     end if
     call clear_pleg_cache_slot(idx)
     allocate(pleg_cache(idx)%barg(narg))
-    allocate(pleg_cache(idx)%pr(maxt, maxp))
-    allocate(pleg_cache(idx)%pdr(maxt, maxp))
+    allocate(pleg_cache(idx)%pr(maxt, lim))
+    allocate(pleg_cache(idx)%pdr(maxt, lim))
     allocate(pleg_cache(idx)%pdnorm(maxt))
     allocate(pleg_cache(idx)%pnorm(maxt))
     allocate(pleg_cache(idx)%ipdnorm(maxt))
     allocate(pleg_cache(idx)%ipnorm(maxt))
-    allocate(pleg_cache(idx)%alpha(maxp))
-    allocate(pleg_cache(idx)%beta(maxp))
-    allocate(pleg_cache(idx)%gamma(maxp))
-    allocate(pleg_cache(idx)%coefa(maxp))
-    allocate(pleg_cache(idx)%coefb(maxp))
-    allocate(pleg_cache(idx)%coefc(maxp))
-    allocate(pleg_cache(idx)%coefd(maxp))
-    allocate(pleg_cache(idx)%coefe(maxp))
+    allocate(pleg_cache(idx)%alpha(lim))
+    allocate(pleg_cache(idx)%beta(lim))
+    allocate(pleg_cache(idx)%gamma(lim))
+    allocate(pleg_cache(idx)%coefa(lim))
+    allocate(pleg_cache(idx)%coefb(lim))
+    allocate(pleg_cache(idx)%coefc(lim))
+    allocate(pleg_cache(idx)%coefd(lim))
+    allocate(pleg_cache(idx)%coefe(lim))
+    pleg_cache(idx)%bytes = requested_bytes
     pleg_cache(idx)%valid = .true.
     pleg_cache(idx)%m = m
     pleg_cache(idx)%iopd = iopd
@@ -183,16 +261,16 @@ module complex_oblate_swf
     pleg_cache(idx)%ndec = ndec
     pleg_cache(idx)%nex = nex
     pleg_cache(idx)%barg(1:narg) = barg(1:narg)
-    pleg_cache(idx)%pr = 0.0_knd
-    pleg_cache(idx)%pdr = 0.0_knd
-    pleg_cache(idx)%alpha = 0.0_knd
-    pleg_cache(idx)%beta = 0.0_knd
-    pleg_cache(idx)%gamma = 0.0_knd
-    pleg_cache(idx)%coefa = 0.0_knd
-    pleg_cache(idx)%coefb = 0.0_knd
-    pleg_cache(idx)%coefc = 0.0_knd
-    pleg_cache(idx)%coefd = 0.0_knd
-    pleg_cache(idx)%coefe = 0.0_knd
+    pleg_cache(idx)%pr = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%pdr = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%alpha = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%beta = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%gamma = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%coefa = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%coefb = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%coefc = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%coefd = SW_LITERAL(0.0_knd,"0.0")
+    pleg_cache(idx)%coefe = SW_LITERAL(0.0_knd,"0.0")
     pleg_cache(idx)%pr(1:maxt, 1:lim) = pr(1:maxt, 1:lim)
     pleg_cache(idx)%pdr(1:maxt, 1:lim) = pdr(1:maxt, 1:lim)
     pleg_cache(idx)%pdnorm(1:maxt) = pdnorm(1:maxt)
@@ -209,26 +287,37 @@ module complex_oblate_swf
     pleg_cache(idx)%coefe(1:lim) = coefe(1:lim)
   end subroutine
 
-  subroutine pleg_cached(m, lim, maxp, limcsav, iopd, ndec, nex, barg, narg, maxt, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+  subroutine pleg_cached(m, lim, maxp, limcsav, iopd, ndec, nex, barg, narg, maxt, pr, pdr, pdnorm, ipdnorm, &
+      & pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
     integer, intent(in) :: m, lim, maxp, iopd, ndec, nex, narg, maxt
     integer, intent(inout) :: limcsav
-    real(knd), intent(inout) :: barg(maxt)
-    real(knd), intent(out) :: pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt), alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp)
+    SW_REAL, intent(inout) :: barg(maxt)
+    SW_REAL, intent(out) :: pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt)
+    SW_REAL, intent(inout) :: alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), &
+      & coefc(maxp), coefd(maxp), coefe(maxp)
     integer, intent(out) :: ipdnorm(maxt), ipnorm(maxt)
     integer :: idx
     idx = find_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp)
     if(idx /= 0) then
-      call load_pleg_cache(idx, maxt, narg, lim, maxp, barg, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+      call load_pleg_cache(idx, maxt, narg, lim, maxp, barg, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, &
+      & beta, gamma, coefa, coefb, coefc, coefd, coefe)
+      ! Restore the two coefficient entries needed beyond the cached ratio prefix.
+      call pleg_coefficients(m,lim+1,lim+2,maxp,alpha,beta,gamma,coefa,coefb,coefc,coefd,coefe)
       limcsav = max(limcsav, lim)
       return
     end if
-                call pleg(m, lim, maxp, limcsav, iopd, ndec, nex, barg, narg, maxt, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
-    call store_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+        call pleg(m, lim, maxp, limcsav, iopd, ndec, nex, barg, narg, maxt, pr, pdr, pdnorm, ipdnorm, pnorm, &
+      & ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+    call store_pleg_cache(m, iopd, ndec, nex, barg, narg, maxt, lim, maxp, pr, pdr, pdnorm, ipdnorm, pnorm, &
+      & ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
   end subroutine
 
-  subroutine load_pleg_cache(idx, maxt, narg, lim, maxp, barg, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+  subroutine load_pleg_cache(idx, maxt, narg, lim, maxp, barg, pr, pdr, pdnorm, ipdnorm, pnorm, ipnorm, alpha, &
+      & beta, gamma, coefa, coefb, coefc, coefd, coefe)
     integer, intent(in) :: idx, maxt, narg, lim, maxp
-    real(knd), intent(out) :: barg(maxt), pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt), alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp)
+    SW_REAL, intent(out) :: barg(maxt), pr(maxt, maxp), pdr(maxt, maxp), pdnorm(maxt), pnorm(maxt)
+    SW_REAL, intent(inout) :: alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), &
+      & coefc(maxp), coefd(maxp), coefe(maxp)
     integer, intent(out) :: ipdnorm(maxt), ipnorm(maxt)
     barg(1:narg) = pleg_cache(idx)%barg(1:narg)
     pr(1:maxt, 1:lim) = pleg_cache(idx)%pr(1:maxt, 1:lim)
@@ -247,9 +336,47 @@ module complex_oblate_swf
     coefe(1:lim) = pleg_cache(idx)%coefe(1:lim)
   end subroutine
 
+  subroutine pleg_coefficients(m, first, last, maxp, alpha, beta, gamma, coefa, coefb, coefc, coefd, coefe)
+    integer, intent(in) :: m, first, last, maxp
+    SW_REAL, intent(inout) :: alpha(maxp), beta(maxp), gamma(maxp), coefa(maxp), coefb(maxp), &
+      & coefc(maxp), coefd(maxp), coefe(maxp)
+    integer :: j, mm1, mm2, msqp1, n, n2, n2p3, n2p1, n2m1, nmmm2, nmmm1, npmm1, npm, npmp1, npmp2
+    SW_REAL :: an2tnp1, anden1, anden2
+    mm1 = m - 1
+    mm2 = m - 2
+    msqp1 = 2 * m * m + 1
+    do j = max(3,first), min(last,maxp)
+      n = m + j - 3
+      n2 = n + n
+      n2p3 = n2 + 3
+      n2p1 = n2 + 1
+      n2m1 = n2 - 1
+      nmmm2 = n - mm2
+      nmmm1 = n - mm1
+      npmm1 = n + mm1
+      npm = n + m
+      npmp1 = n + m + 1
+      npmp2 = npmp1 + 1
+      an2tnp1 = 2 * n * SW_CONVERT_REAL(n + 1, knd)
+      anden1 = nmmm2 * SW_CONVERT_REAL(nmmm1, knd)
+      anden2 = n2m1 * anden1
+      alpha(j) = SW_CONVERT_REAL(n2p3, knd) * n2p1 / anden1
+      beta(j) = SW_CONVERT_REAL(n2p1, knd) * (SW_CONVERT_REAL(msqp1, knd) - an2tnp1) / anden2
+      gamma(j) = -SW_CONVERT_REAL(n2p3, knd) * SW_CONVERT_REAL(npm, knd) * SW_CONVERT_REAL(npmm1, knd) / anden2
+      coefa(j) = -SW_CONVERT_REAL(npmp2, knd) / SW_CONVERT_REAL(nmmm1, knd)
+      coefb(j) = SW_CONVERT_REAL(n2p3, knd) * (n + 2) / anden1
+      coefc(j) = -SW_CONVERT_REAL(npmp1, knd) * npmp2 / anden1
+      coefd(j) = SW_CONVERT_REAL(npmp1, knd) / SW_CONVERT_REAL(nmmm2, knd)
+      coefe(j) = -SW_CONVERT_REAL(n + 1, knd) * n2p3 / anden1
+    end do
+    if(maxp >= 3) gamma(3) = SW_LITERAL(0.0e0_knd,"0.0e0")
+    if(maxp >= 4) gamma(4) = SW_LITERAL(0.0e0_knd,"0.0e0")
+  end subroutine pleg_coefficients
+
   subroutine gauss_cached(ndec, n, x, w)
     integer, intent(in) :: ndec, n
-    real(knd), intent(out) :: x(n), w(n)
+    SW_REAL, intent(out) :: x(n), w(n)
+    integer(int64) :: requested_bytes, real_bytes
     if(gauss_cache%valid) then
       if(gauss_cache%ndec == ndec .and. gauss_cache%n == n) then
         x(1:n) = gauss_cache%x(1:n)
@@ -258,10 +385,17 @@ module complex_oblate_swf
       end if
       if(allocated(gauss_cache%x)) deallocate(gauss_cache%x)
       if(allocated(gauss_cache%w)) deallocate(gauss_cache%w)
+      gauss_cache%bytes = 0_int64
+      gauss_cache%valid = .false.
     end if
         call gauss(n, ndec, x, w)
+    requested_bytes = 0_int64
+    real_bytes = sw_real_bytes()
+    if(.not.add_cache_bytes(requested_bytes,2*real_bytes,n)) return
+    if(.not.reserve_cache_bytes(requested_bytes)) return
     allocate(gauss_cache%x(n))
     allocate(gauss_cache%w(n))
+    gauss_cache%bytes = requested_bytes
     gauss_cache%valid = .true.
     gauss_cache%ndec = ndec
     gauss_cache%n = n
@@ -274,6 +408,9 @@ module complex_oblate_swf
     subroutine coblfcn(c, m, lnum, ioprad, x, iopang, iopnorm, narg, arg, &
                        r1c, ir1e, r1dc, ir1de, r2c, ir2e, r2dc, ir2de, naccr, &
                        s1c, is1e, s1dc, is1de, naccs, naccds, eigout)
+    integer :: jnebmax, jnenmax, kindd, kindq, maxd, maxdr, maxe, maxe2, maxint, maxj
+    integer :: maxlp, maxm, maxmp, maxn, maxp, maxpdr, maxq, maxt, minacc, minc
+    integer :: mmin, mnum, nbp, ndec, neta, nex, ngau, nstep1, nstep2, nstep3
 
 !      version 1.08 May 2021
 !
@@ -306,8 +443,8 @@ module complex_oblate_swf
 !  arithmetic.The choice is set in the module param provided in the github
 !  repository. If this is not available, then create param as follows:
 !    module param
-!    integer, parameter :: knd = selected_real_kind(8)
-!    integer, parameter :: knd1 = selected_real_kind(8)
+!    integer, parameter :: knd = selected_real_kind(16)
+!    integer, parameter :: knd1 = selected_real_kind(16)
 !    logical, parameter :: debug = .true.
 !    logical, parameter :: warn = .true.
 !    logical, parameter :: output = .true.
@@ -443,29 +580,39 @@ module complex_oblate_swf
 !  Information about these files as well as a discussion about accuracy,
 !  expansion d coefficients and eigenvalues is given in the readme file.
 !
-        complex(knd), intent(in)   ::  c
-        real(knd), intent (in)     ::  x, arg(narg)
+        SW_COMPLEX, intent(in)   ::  c
+        SW_REAL, intent (in)     ::  x, arg(narg)
         integer, intent (in)       ::  m, lnum, ioprad, iopang, iopnorm, narg
-        complex(knd), intent (out) ::  r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), &
+        SW_COMPLEX, intent (out) ::  r1c(lnum), r1dc(lnum), r2c(lnum), r2dc(lnum), &
                                        s1c(lnum, narg), s1dc(lnum, narg)
-        complex(knd), intent (out) ::  eigout(lnum)
+        SW_COMPLEX, intent (out) ::  eigout(lnum)
         integer, intent (out)      ::  ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), &
                                        is1e(lnum, narg), is1de(lnum, narg), &
                                        naccr(lnum), naccs(lnum, narg), naccds(lnum, narg)
 
-        real(knd) ca, step1, step2, step3, xneu
+        SW_REAL ca, step1, step2, step3, xneu
 !
 !  open output files
 if (output) then
+#ifndef SWF_PRECISION_MPFR
         open(20, file='fort.20')
+#endif
+#ifndef SWF_PRECISION_MPFR
         open(30, file='fort.30')
+#endif
 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         open(40, file='fort.40')
+#endif
+#ifndef SWF_PRECISION_MPFR
         open(50, file='fort.50')
+#endif
 end if
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
         open(60, file='fort.60')
+#endif
 end if
 !
 !  Here is where the user sets kindd, the number of bytes available
@@ -485,9 +632,13 @@ end if
 !  and to 8 decimal digits when aimag(c) > 20. These can be changed
 !  if desired. See the readme file.
 !
+#ifdef SWF_PRECISION_MPFR
+    minacc = max(8, int(mpfr_bits * 0.3010299956639812d0) - 8)
+#else
         if(knd == kindd) minacc = 8
-        if(knd == kindq .and. aimag(c) <= 20.0e0_knd) minacc = 15
-        if(knd == kindq .and. aimag(c) > 20.0e0_knd) minacc = 8
+        if(knd == kindq .and. aimag(c) <= SW_LITERAL(20.0e0_knd,"20.0e0")) minacc = 15
+        if(knd == kindq .and. aimag(c) > SW_LITERAL(20.0e0_knd,"20.0e0")) minacc = 8
+#endif
 !
 !     ndec: the maximum number of decimal digits available in real
 !           arithmetic.
@@ -501,7 +652,7 @@ end if
         mnum = 1
         mmin = m
         minc = 0
-        nbp = int(2 * (real(c) + aimag(c)) / 3.1416)
+        nbp = int(2 * (SW_CONVERT_REAL(c) + aimag(c)) / SW_LITERAL(3.1416,"3.1416"))
         maxe = max(50, nbp + 30) + 10
         maxe2 = maxe + maxe
         if(maxe2 < lnum) maxe2 = lnum
@@ -513,136 +664,146 @@ end if
         maxn = maxj
         maxpdr = 2 * int(ca) + 4 * ndec + int(100 * x) + 8
         neta = 30
-        step1 = 0.1e0_knd
-        step2 = 0.1e0_knd
-        step3 = 0.8e0_knd
+        step1 = SW_LITERAL(0.1e0_knd,"0.1e0")
+        step2 = SW_LITERAL(0.1e0_knd,"0.1e0")
+        step3 = SW_LITERAL(0.8e0_knd,"0.8e0")
         nstep1 = 1
         nstep2 = 1
         nstep3 = 3
-        ngau = 100 * (2 + int(ca / 500.0e0_knd))
+        ngau = 100 * (2 + int(ca / SW_LITERAL(500.0e0_knd,"500.0e0")))
+        xneu = SW_LITERAL(0.3e0_knd,"0.3e0")
         if(ioprad /= 2) go to 10
-          if(x < 0.2e0_knd) then
-          step1 = x / 4.0e0_knd
-          step2 = 0.075e0_knd
-          step3 = 1.0e0_knd - step1 - step2
+          if(x < SW_LITERAL(0.2e0_knd,"0.2e0")) then
+          step1 = x / SW_LITERAL(4.0e0_knd,"4.0e0")
+          step2 = SW_LITERAL(0.075e0_knd,"0.075e0")
+          step3 = SW_LITERAL(1.0e0_knd,"1.0e0") - step1 - step2
           nstep1 = 1
           nstep2 = 1
           nstep3 = 4
-          ngau = 100 * (2 + int(ca / 500.0e0_knd))
+          ngau = 100 * (2 + int(ca / SW_LITERAL(500.0e0_knd,"500.0e0")))
           end if
 !
-          if(x < 0.1e0_knd) then
-          step1 = x / 4.0e0_knd
-          step2 = 0.025e0_knd
-          step3 = 1.0e0_knd - step1 - step2
+          if(x < SW_LITERAL(0.1e0_knd,"0.1e0")) then
+          step1 = x / SW_LITERAL(4.0e0_knd,"4.0e0")
+          step2 = SW_LITERAL(0.025e0_knd,"0.025e0")
+          step3 = SW_LITERAL(1.0e0_knd,"1.0e0") - step1 - step2
           nstep1 = 1
           nstep2 = 1
           nstep3 = 4
           ngau = 200
-          if(ca > 500.0e0_knd) ngau = 200 * (2 + int(ca / 1000.0e0_knd))
+          if(ca > SW_LITERAL(500.0e0_knd,"500.0e0")) ngau = 200 * (2 + int(ca / SW_LITERAL(1000.0e0_knd,"1000.0e0")))
           end if
 !
-          if(x < 0.05e0_knd) then
-          step1 = x / 15.0e0_knd
-          step2 = 0.002e0_knd
-          step3 = 1.0e0_knd - step1 - step2
+          if(x < SW_LITERAL(0.05e0_knd,"0.05e0")) then
+          step1 = x / SW_LITERAL(15.0e0_knd,"15.0e0")
+          step2 = SW_LITERAL(0.002e0_knd,"0.002e0")
+          step3 = SW_LITERAL(1.0e0_knd,"1.0e0") - step1 - step2
           nstep1 = 1
           nstep2 = 1
           nstep3 = 2
           ngau = 300
-          if(ca > 500.0e0_knd) ngau = 500
-          if(ca > 1000.0e0_knd) ngau = 800
-          if(ca > 1500.0e0_knd) ngau = 1000
-          if(ca > 2000.0e0_knd) ngau = 1200
-          if(ca > 2500.0e0_knd) ngau = 1500
-          if(ca > 3000.0e0_knd) ngau = 1700
-          if(ca > 3500.0e0_knd) ngau = 1900
-          if(ca > 4000.0e0_knd) ngau = 2200
-          if(ca > 4500.0e0_knd) ngau = 2500
-          if(ca > 5000.0e0_knd) ngau = 2500 + 300 * int((ca - 4500.0e0_knd)/ &
-             500.0e0_knd)
+          if(ca > SW_LITERAL(500.0e0_knd,"500.0e0")) ngau = 500
+          if(ca > SW_LITERAL(1000.0e0_knd,"1000.0e0")) ngau = 800
+          if(ca > SW_LITERAL(1500.0e0_knd,"1500.0e0")) ngau = 1000
+          if(ca > SW_LITERAL(2000.0e0_knd,"2000.0e0")) ngau = 1200
+          if(ca > SW_LITERAL(2500.0e0_knd,"2500.0e0")) ngau = 1500
+          if(ca > SW_LITERAL(3000.0e0_knd,"3000.0e0")) ngau = 1700
+          if(ca > SW_LITERAL(3500.0e0_knd,"3500.0e0")) ngau = 1900
+          if(ca > SW_LITERAL(4000.0e0_knd,"4000.0e0")) ngau = 2200
+          if(ca > SW_LITERAL(4500.0e0_knd,"4500.0e0")) ngau = 2500
+          if(ca > SW_LITERAL(5000.0e0_knd,"5000.0e0")) ngau = 2500 + 300 * int((ca - &
+      & SW_LITERAL(4500.0e0_knd,"4500.0e0"))/ &
+             SW_LITERAL(500.0e0_knd,"500.0e0"))
           end if
 !
-          if(x < 0.01e0_knd) then
-          step1 = x / 15.0e0_knd
-          step2 = 0.002e0_knd
-          step3 = 1.0e0_knd - step1 - step2
+          if(x < SW_LITERAL(0.01e0_knd,"0.01e0")) then
+          step1 = x / SW_LITERAL(15.0e0_knd,"15.0e0")
+          step2 = SW_LITERAL(0.002e0_knd,"0.002e0")
+          step3 = SW_LITERAL(1.0e0_knd,"1.0e0") - step1 - step2
           nstep1 = 1
           nstep2 = 1
           nstep3 = 2
           ngau = 300
-          if(ca > 500.0e0_knd) ngau = 600
-          if(ca > 1000.0e0_knd) ngau = 800
-          if(ca > 1500.0e0_knd) ngau = 1000
-          if(ca > 2000.0e0_knd) ngau = 300 * int(ca / 500.0e0_knd)
+          if(ca > SW_LITERAL(500.0e0_knd,"500.0e0")) ngau = 600
+          if(ca > SW_LITERAL(1000.0e0_knd,"1000.0e0")) ngau = 800
+          if(ca > SW_LITERAL(1500.0e0_knd,"1500.0e0")) ngau = 1000
+          if(ca > SW_LITERAL(2000.0e0_knd,"2000.0e0")) ngau = 300 * int(ca / SW_LITERAL(500.0e0_knd,"500.0e0"))
           end if
 !
-          if(x < 0.001e0_knd) then
-          step1 = x / 15.0e0_knd
-          step2 = 0.002e0_knd
-          step3 = 1.0e0_knd - step1 - step2
+          if(x < SW_LITERAL(0.001e0_knd,"0.001e0")) then
+          step1 = x / SW_LITERAL(15.0e0_knd,"15.0e0")
+          step2 = SW_LITERAL(0.002e0_knd,"0.002e0")
+          step3 = SW_LITERAL(1.0e0_knd,"1.0e0") - step1 - step2
           nstep1 = 3
           nstep2 = 1
           nstep3 = 2
           ngau = 600
-          if(ca > 300.0e0_knd) ngau = 800
-          if(ca > 1000.0e0_knd) ngau = 900
-          if(ca > 1500.0e0_knd) ngau = 1000
-          if(ca > 2000.0e0_knd) ngau = 300 * int(ca / 500.0e0_knd)
-            if(aimag(c) > 5.0e0_knd) then
+          if(ca > SW_LITERAL(300.0e0_knd,"300.0e0")) ngau = 800
+          if(ca > SW_LITERAL(1000.0e0_knd,"1000.0e0")) ngau = 900
+          if(ca > SW_LITERAL(1500.0e0_knd,"1500.0e0")) ngau = 1000
+          if(ca > SW_LITERAL(2000.0e0_knd,"2000.0e0")) ngau = 300 * int(ca / SW_LITERAL(500.0e0_knd,"500.0e0"))
+            if(aimag(c) > SW_LITERAL(5.0e0_knd,"5.0e0")) then
             ngau = ngau + (ngau / 5) * min(5, int(aimag(c)) - 5)
             end if
-          if(knd == kindq .and. x < 0.00001e0_knd) ngau = 2 * ngau
-          if(knd == kindq .and. x < 0.000001e0_knd) ngau = 2 * ngau
-          if(knd == kindd .and. aimag(c) > 4.0e0_knd .and. x < &
-               0.00001e0_knd) ngau = 2 * ngau
-          if(knd == kindd .and. aimag(c) > 4.0e0_knd .and. x < &
-               0.000001e0_knd) ngau = 2 * ngau
+          if(knd == kindq .and. x < SW_LITERAL(0.00001e0_knd,"0.00001e0")) ngau = 2 * ngau
+          if(knd == kindq .and. x < SW_LITERAL(0.000001e0_knd,"0.000001e0")) ngau = 2 * ngau
+          if(knd == kindd .and. aimag(c) > SW_LITERAL(4.0e0_knd,"4.0e0") .and. x < &
+               SW_LITERAL(0.00001e0_knd,"0.00001e0")) ngau = 2 * ngau
+          if(knd == kindd .and. aimag(c) > SW_LITERAL(4.0e0_knd,"4.0e0") .and. x < &
+               SW_LITERAL(0.000001e0_knd,"0.000001e0")) ngau = 2 * ngau
           end if
 !
-        xneu = 0.3e0_knd
-        if(ca > 100.0e0_knd) xneu = 0.04e0_knd
-        if(ca > 600.0e0_knd) xneu = 0.03e0_knd
-        if(ca > 800.0e0_knd) xneu = 0.01e0_knd
-        if(aimag(c) > 50.0e0_knd) xneu = 0.01e0_knd
+        xneu = SW_LITERAL(0.3e0_knd,"0.3e0")
+        if(ca > SW_LITERAL(100.0e0_knd,"100.0e0")) xneu = SW_LITERAL(0.04e0_knd,"0.04e0")
+        if(ca > SW_LITERAL(600.0e0_knd,"600.0e0")) xneu = SW_LITERAL(0.03e0_knd,"0.03e0")
+        if(ca > SW_LITERAL(800.0e0_knd,"800.0e0")) xneu = SW_LITERAL(0.01e0_knd,"0.01e0")
+        if(aimag(c) > SW_LITERAL(50.0e0_knd,"50.0e0")) xneu = SW_LITERAL(0.01e0_knd,"0.01e0")
 !
-        if(x < 0.01e0_knd) go to 10
+        if(x < SW_LITERAL(0.01e0_knd,"0.01e0")) go to 10
           if(knd == kindd) then
-          if(x >= 0.01e0_knd) maxn = 2 * int(25 / (x * x) + 300 / x + 3 * ca+ &
+          if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) maxn = 2 * int(25 / (x * x) + 300 / x + 3 * ca+ &
                                      1250 * knd) + 5
-          if(x >= 0.1e0_knd) maxn = 2 * int((lnum + ca / 5 + 0.5e0_knd * maxm+ &
-                                   200) * 1.4e0_knd / x) + 5
-          if(x >= 0.5e0_knd) maxn = 2 * int((lnum + ca / 5 + 0.5e0_knd * maxm+ &
+          if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) maxn = 2 * int((lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
+                                   200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 5
+          if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) maxn = 2 * int((lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                    300) / x) + 5
-          if(x >= 1.0e0_knd) maxn = 2 * int(lnum + ca / 5 + 0.5e0_knd * maxm+ &
+          if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) maxn = 2 * int(lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                    300) + 5
           end if
           if(knd == kindq) then
-          if(x >= 0.01e0_knd) maxn = 2 * int(25 / (x * x) + 400 / x + 3 * ca+ &
+          if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) maxn = 2 * int(25 / (x * x) + 400 / x + 3 * ca+ &
                                      1250 * knd) + 5
-          if(x >= 0.1e0_knd) maxn = 2 * int((lnum + ca / 5 + 0.5e0_knd * maxm+ &
-                                   350) * 1.4e0_knd / x) + 5
-          if(x >= 0.5e0_knd) maxn = 2 * int((lnum + ca / 5 + 0.5e0_knd * maxm+ &
+          if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) maxn = 2 * int((lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
+                                   350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 5
+          if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) maxn = 2 * int((lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                    400) / x) + 5
-          if(x >= 1.0e0_knd) maxn = 2 * int(lnum + ca / 5 + 0.5e0_knd * maxm+ &
+          if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) maxn = 2 * int(lnum + ca / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                    400) + 5
           end if
-        maxn = maxn + maxm
+        maxn = max(maxn + maxm, maxj)
 10      maxp = max(maxn, maxp, maxpdr)
         maxq = lnum + 3 * ndec + int(ca) + maxm + maxm + 4
-        if(knd == kindd .and. aimag(c) < 10.0e0_knd .and. real(c) <= &
-           60.0e0_knd .and. real(c) >= 10.0e0_knd .and. mmin <= 40 &
-            .and. x <= 0.99e0_knd .and. x > 0.1e0_knd) &
+        if(knd == kindd .and. aimag(c) < SW_LITERAL(10.0e0_knd,"10.0e0") .and. SW_CONVERT_REAL(c) <= &
+           SW_LITERAL(60.0e0_knd,"60.0e0") .and. SW_CONVERT_REAL(c) >= SW_LITERAL(10.0e0_knd,"10.0e0") .and. &
+      & mmin <= 40 &
+            .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. x > SW_LITERAL(0.1e0_knd,"0.1e0")) &
                maxq = max(maxq, 250 - int(50 * x) + 4 + maxm + maxm)
         maxdr = maxpdr / 2 + 1
         maxd = maxn / 2 + 1
         maxmp = maxm + maxm + 5
         maxt = 1
         jnebmax = 30
+        if(ioprad == 0) jnebmax = 1
         jnenmax = 10
-        if(x < 0.05e0_knd) jnenmax = 1
+        if(x < SW_LITERAL(0.05e0_knd,"0.05e0")) jnenmax = 1
+        if(ioprad /= 2) jnenmax = 1
         if(iopang /= 0) maxt = narg
 !
+#ifdef SWF_PRECISION_MPFR
+    ! Reject oversized work before main allocates its automatic arrays.
+    if (.not.mpfr_workspace_ok(jnebmax,jnenmax,lnum,maxd,maxdr,maxe,maxe2,maxint,maxj,maxlp,maxmp, &
+        maxn,maxp,maxpdr,maxq,maxt,narg,neta,ngau)) return
+#endif
         call main (mmin, minc, mnum, lnum, c, ioprad, iopang, iopnorm, minacc, &
                    x, ngau, step1, nstep1, step2, nstep2, step3, nstep3, narg, &
                    arg, maxd, maxdr, maxe, maxe2, maxint, maxj, maxlp, maxm, &
@@ -831,110 +992,138 @@ end if
 !                        narg estimated accuracy values for the first derivatives
 !                        of the angular functions for each of the lnum values of l
 !
-        use complex_oblate_parameters
+    integer :: i, i2, ibflag1, ibflag2, icflag1, icoefn, icounter, idc01, idfe, idir
+    integer :: idmfe, idmlfe, idmlmfe, idmlms1e, idmlmse, idmse, idneg, iegch, ieigflage, ieigflago
+    integer :: ienre, ienro, ieta, ietacount, ifac1, ifac1d, ifac2, ifac2d, ifactor, iflag
+    integer :: iflage, iflagep, iflageta, iflageta1, iflagint, iflagl1, iflagneu, iflago, iflagp, ifsub
+    integer :: igau, iii, ijmax, im, imin, incnee, incnee1, incnflag, int5, int6
+    integer :: intlim, iopang, iopbes, iopbesa, iopd, iopeige, iopeigo, iopeta, iopeta1, iopint
+    integer :: iopleg, iopleg1, iopmatch, iopmatchp, iopnee, iopneu0, iopnorm, ioppsum, iopqnsum, ioprad
+    integer :: ipcoefe, ipcoefe1, ipcoefet, ipcoefet1, ipcoefn, ipcoefo, ipcoefo1, ipdcoefe, ipdcoefe1, ipdcoefet
+    integer :: ipdcoefet1, ipdcoefo, ipdcoefo1, ipint, iplflag, iqdm1, iqlegflag, iqm1, ir11e, ir1d1e
+    integer :: ir1dee, ir1dein, ir1dem, ir1ee, ir1ein, ir1em, ir1ep, ir2dee, ir2die, ir2dl1e
+    integer :: ir2dle, ir2dne, ir2ee, ir2ie, ir2l1e, ir2le, ir2ne, irtest, istarteta, istartint
+    integer :: istartleg, istartneu0, isteta1, isub, isubd, iterm, itermpq, itest, itestm, itestme
+    integer :: itestmo, ix, j, jacc, jang, jarg, jbes, jbes1, je, jelim
+    integer :: jelim1, jeta, jeta1, jetaflag, jetam, jflageta1, jflagl, jflagleg, jint, jj
+    integer :: jjflagl, jl, jleg, jleg1, jlegp, jlow1e, jlow1o, jlowe, jlowo, jn
+    integer :: jnebmax, jnen, jnen1, jnencur, jnencur1, jnenlim, jnenlim1, jnenmax, jnet, jneu0
+    integer :: jneu0max, jneu0s, jneu0x, jneu1, jneu1max, jneu1s, jnorm, jp, jsave, jsub
+    integer :: jsub0, jsubf, jsubmf, jsubms, jsubtest, jtest, jtest0, jtest1, k, kflag
+    integer :: kflagl, kindd, kindq, l, legflag, legstart, legstinc, leta, li, lim1max
+    integer :: limax, limbesf, limcsav, limd, limdang, limdle, limdleg, limdlo, limdr, limdrad
+    integer :: lime, lime2, limeig, limeta, limi, limint, limj, limjlim, limleg, limleg1
+    integer :: limn, limneu0, limnlim, limnorm, limp, limpd, limpleg, limplim, limps1, limq
+    integer :: limr1, lims1, lipl, liplopt, liplp, lips, listart, lneu0, lnum, m
+    integer :: m2, mat, matest, matlim, max1e, max1o, maxd, maxdr, maxe, maxe2
+    integer :: maxint, maxj, maxlp, maxm, maxmp, maxn, maxp, maxpdr, maxq, maxt
+    integer :: mi, min1e, min1o, minacc, minc, mmin, mnum, naccc, nacccor, naccd
+    integer :: nacceta, naccetab, naccetabp, naccetamax, naccetas, naccetasc, naccflag, naccint, naccintp, naccintw
+    integer :: naccleg, naccleg1, naccleg1p, nacclegp, nacclegs, naccneu0, naccneu0p, naccneu0p2, naccneu0w, naccneu1
+    integer :: naccnmax, naccr, naccr1, naccr1c, naccr1p, naccre, naccrep, naccrp, naccrpl, naccrplp
+    integer :: naccrps, naccrs, naccrsav, naccrsavp, naccrt, naccrtp, nacetr1, nacetr1c, nacintsa, narg
+    integer :: nbp, ndec, ndec1, nee, nee1, nee1count, nee1m, nee1st, neelow, neemax
+    integer :: neta, netainp, netatry, nex, nfac, nflag, ngau, ngqs, nm1, nmatch
+    integer :: norme, nsdneg, nsdrho, nsdrhor1, nstep1, nstep2, nstep3, nsub, nsub1, nsub1m
+    integer :: nsub1mt, nsub1p, nsubd, nsubd1, nsubd1m, nsubd1p, nsubt
 !
 !  real(knd) and complex(knd) scalars
-        real(knd) aj1, aj2, apcoef, apcoefn, api, c, coefn, coefme, coefmo, dec, &
+        SW_REAL aj1, aj2, apcoef, apcoefn, api, c, coefn, coefme, coefmo, dec, &
                   em, etaval, factor, factor1, pcoefn, pi, qdm0, qdm1, qm0, qm1, &
                   rm, rm2, step1, step2, step3, ten, termpq, teste, testeo, t1, &
                   t2, t3, t4, t5, t6, t7, wm, x, xb, xbninp, xl, xhigh, xlow, xneu
-        real(knd) ang, apcoef1, etaval1, pcoefe, pcoefet, pcoefo, pdcoefe, &
+        SW_REAL ang, apcoef1, etaval1, pcoefe, pcoefet, pcoefo, pdcoefe, &
                   pdcoefo, pdcoefet, pcoefe1, pcoefet1, pcoefo1, pdcoefe1, &
                   pdcoefo1, pdcoefet1
-        real(knd1) t11, t21, t31, t41, t51, t61, t71
+        SW_REAL1 t11, t21, t31, t41, t51, t61, t71
 !
-        complex(knd) cc, c2, c4, dfnorm, dmlf, dmfnorm, dmlmf, dmsnorm, dmlms, &
+        SW_COMPLEX cc, c2, c4, dfnorm, dmlf, dmfnorm, dmlmf, dmsnorm, dmlms, &
                      dmlms1, dneg, dc01, eigest, eigmat, eign, eigp, eigval, &
                      fac1, fac1d, fac2, fac2d, parg, r1cin, r1cm, r1dcin, r11c, &
                      r1dcm, r1d1c, r1ec, r1dec, r2ic, r2dic, r2lc, r2dlc, &
                      r2l1c, r2dl1c, r2nc, r2dnc, r2ec, r2dec, wronc, wronca, &
                      wroncb, wront
-        complex(knd1) c21, c41
+        SW_COMPLEX1 c21, c41
 !
 !  integer arrays with dimension lnum
         integer   ir1e(lnum), ir1de(lnum), ir2e(lnum), ir2de(lnum), &
-                  match(lnum), nar(lnum), iqdl(lnum), iql(lnum), ieigt(lnum), &
+                  match(lnum + 1), nar(lnum), iqdl(lnum), iql(lnum), ieigt(lnum), &
                   is1(lnum, narg), is1d(lnum, narg), nas(lnum, narg), nads(lnum, narg)
 !
 !  real(knd) arrays with dimension lnum
-        real(knd) qdl(lnum), ql(lnum)
+        SW_REAL qdl(lnum), ql(lnum)
 !
 !  complex(knd) arrays with dimension lnum
-        complex(knd) eig(lnum), r1c(lnum), r1dc(lnum), r2c(lnum), &
+        SW_COMPLEX eig(lnum), r1c(lnum), r1dc(lnum), r2c(lnum), &
                      r2dc(lnum), s1(lnum, narg), s1d(lnum, narg)
 !
 !  integer and complex(knd) arrays with dimension lnum+1
         integer ifajo(lnum + 1)
-        complex(knd) fajo(lnum + 1)
+        SW_COMPLEX fajo(lnum + 1)
 !
 !  complex(knd) arrays with dimension maxd
-        complex(knd) bliste(maxd), blisto(maxd), gliste(maxd), &
+        SW_COMPLEX bliste(maxd), blisto(maxd), gliste(maxd), &
                      glisto(maxd), enr(maxd)
-        complex(knd1) bliste1(maxd), blisto1(maxd), gliste1(maxd), &
+        SW_COMPLEX1 bliste1(maxd), blisto1(maxd), gliste1(maxd), &
                       glisto1(maxd)
 !
 !  complex(knd) arrays with dimension maxdr
-        complex(knd) drhor(maxdr)
+        SW_COMPLEX drhor(maxdr)
 !
 !  complex(knd) arrays with dimension maxint
-        complex(knd) pint1(maxint), pint2(maxint), pint3(maxint), &
+        SW_COMPLEX pint1(maxint), pint2(maxint), pint3(maxint), &
                      pint4(maxint), rpint1(maxint), rpint2(maxint)
 !
 !  complex(knd) array with dimension maxj
-        complex(knd) sbesf(maxj), sbesdf(maxj), sbesfe(maxj), &
-                     sbesdfe(maxj), sbesfsv(jnebmax, maxj), &
-                     sbesdfsv(jnebmax, maxj)
+        SW_COMPLEX sbesf(maxj), sbesdf(maxj), sbesfe(maxj), sbesdfe(maxj)
+        SW_COMPLEX, allocatable :: sbesfsv(:,:), sbesdfsv(:,:)
 !
 !  integer and real(knd) arrays with dimension maxlp
-        integer ibese(maxlp), ipnormint(maxlp), ibesee(maxlp), &
-                ibesesv(jnebmax, maxlp)
-        real(knd) pnormint(maxlp)
+        integer ibese(maxlp), ipnormint(maxlp), ibesee(maxlp)
+        integer, allocatable :: ibesesv(:,:)
+        SW_REAL pnormint(maxlp)
 !
 !  complex(knd) arrays with dimension maxlp
-        complex(knd) sbesdr(maxlp), sbesn(maxlp), sneudr2(maxlp), &
-                     sneudre(maxlp), sneudrsv(jnenmax, maxlp), &
-                     sbesne(maxlp), sbesdre(maxlp), &
-                     sbesnsv(jnebmax, maxlp), sbesdrsv(jnebmax, maxlp)
+        SW_COMPLEX sbesdr(maxlp), sbesn(maxlp), sneudr2(maxlp), sneudre(maxlp), sbesne(maxlp), &
+          sbesdre(maxlp)
+        SW_COMPLEX, allocatable :: sneudrsv(:,:), sbesnsv(:,:), sbesdrsv(:,:)
 !
 !  real(knd) array with dimension maxmp
-        real(knd) qdqr(maxmp)
+        SW_REAL qdqr(maxmp)
 !
 !  complex(knc) array with dimension maxmp
-        complex(knd) enrneg(maxmp)
+        SW_COMPLEX enrneg(maxmp)
 !
 !  real(knd) arrays with dimension maxn
-        real(knd) prat1(maxn)
+        SW_REAL prat1(maxn)
 !
 !  integer arrays with dimension maxn
-        integer ineue2(maxn), ineuee(maxn), ineuesv(jnenmax, maxn)
+        integer ineue2(maxn), ineuee(maxn)
+        integer, allocatable :: ineuesv(:,:)
 !
 !  complex(knd) arrays with dimension maxn
-        complex(knd) sneufe(maxn), sneudfe(maxn), sneufsv(jnenmax, maxn), &
-                     sneudfsv(jnenmax, maxn), sneuf2(maxn), sneudf2(maxn), &
-                     sneun2(maxn), sneune(maxn), sneunsv(jnenmax, maxn)
+        SW_COMPLEX sneufe(maxn), sneudfe(maxn), sneuf2(maxn), sneudf2(maxn), sneun2(maxn), sneune(maxn)
+        SW_COMPLEX, allocatable :: sneufsv(:,:), sneudfsv(:,:), sneunsv(:,:)
 !
 !  real(knd) arrays with dimension given by maxp
-        real(knd) alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), &
-                  coefc(maxp), coefd(maxp), coefe(maxp), gamma(maxp), &
-                  pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), &
-                  pr(maxt, maxp), prat(maxt, maxp), pratb(maxp), &
-                  pratbsv(jnenmax, maxp), prattsv(jnenmax, maxp), &
-                  pdrattsv(jnenmax, maxp), pratt(maxp)
+        SW_REAL alpha(maxp), beta(maxp), coefa(maxp), coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp), &
+          gamma(maxp), pdr(maxt, maxp), pdrat(maxt, maxp), pdratt(maxp), pr(maxt, maxp), prat(maxt, maxp), &
+          pratb(maxp), pratt(maxp)
+        SW_REAL, allocatable :: pratbsv(:,:), prattsv(:,:), pdrattsv(:,:)
 !
 !  real(knd) arrays with dimension given by maxp
-        real(knd) pratb1(maxp), pratt1(maxp), pdratt1(maxp), &
-                  pratbsv1(jnebmax, maxp), prattsv1(jnebmax, maxp), &
-                  pdrattsv1(jnebmax, maxp)
+        SW_REAL pratb1(maxp), pratt1(maxp), pdratt1(maxp)
+        SW_REAL, allocatable :: pratbsv1(:,:), prattsv1(:,:), pdrattsv1(:,:)
 !
 !  real(knd) arrays with dimension maxpdr
-        real(knd) prx(maxpdr), pdrx(maxpdr)
+        SW_REAL prx(maxpdr), pdrx(maxpdr)
 !
 !  real(knd) arrays with dimension maxq
-        real(knd) qrat(maxq), qdrat(maxq)
-        real(knd) qrat1(maxq), qdrat1(maxq)
+        SW_REAL qrat(maxq), qdrat(maxq)
+        SW_REAL qrat1(maxq), qdrat1(maxq)
 !
 !  real(knd) and integer arrays with dimension maxt
-        real(knd) barg(maxt), etainp(maxt), pdnorm(maxt), pdnorma(maxt), &
+        SW_REAL barg(maxt), etainp(maxt), pdnorm(maxt), pdnorma(maxt), &
                   pnorm(maxt), pnorma(maxt), pdtempe(maxt), pdtempo(maxt), &
                   ptempe(maxt), ptempo(maxt), xin(maxt), xlninp(maxt)
         integer ipdnorm(maxt), ipdnorma(maxt), ipnorm(maxt), &
@@ -943,20 +1132,20 @@ end if
                 naccs(maxt), naccds(maxt)
 !
 !  complex(knd) arrays with dimension maxt
-        complex(knd) s1c(maxt), s1dc(maxt)
+        SW_COMPLEX s1c(maxt), s1dc(maxt)
 !
 !  real(knd) arrays with dimension ngau
-        real(knd) wr(ngau), xr(ngau)
+        SW_REAL wr(ngau), xr(ngau)
 !
 !  complex(knd) arrays with dimension maxe2
-        complex(knd) eigt(maxe2)
+        SW_COMPLEX eigt(maxe2)
 !
 !  complex(knd) arrays with dimension maxe
-        complex(knd) f(maxe), g(maxe)
-        complex(knd) d(maxe), e(maxe)
+        SW_COMPLEX f(maxe), g(maxe)
+        SW_COMPLEX d(maxe), e(maxe)
 !
 !  real(knd) arrays with dimension neta
-        real(knd) eta(neta), xbn(neta), xln(neta), wmeta2(neta)
+        SW_REAL eta(neta), xbn(neta), xln(neta), wmeta2(neta)
 !
 !  miscellaneous integer arrays
         integer neeb(jnenmax), neeb1(jnebmax), limpsv(jnenmax), &
@@ -972,18 +1161,18 @@ end if
         end if
 !
         c = abs(cc)
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         dec = ten ** (-ndec - 1)
         factor = ten ** (nex - 20)
-        factor1 = 1.0e0_knd / factor
+        factor1 = SW_LITERAL(1.0e0_knd,"1.0e0") / factor
         ifactor = nex - 20
         jtest = ndec - minacc - 2
-        pi = acos(-1.0e0_knd)
-        api = pi / 180.0e0_knd
+        pi = acos(-SW_LITERAL(1.0e0_knd,"1.0e0"))
+        api = pi / SW_LITERAL(180.0e0_knd,"180.0e0")
         c2 = cc * cc
         c4 = c2 * c2
         c21 = c2
@@ -1003,29 +1192,57 @@ end if
             nsub1mt = 10
             end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
           if(knd == kindd .and. ioprad /= 0) write(40, 20) x, cc
+#endif
+#ifndef SWF_PRECISION_MPFR
 20        format(1x,'x = ',e23.14,/,1x,'c = ',e23.14, e23.14)
+#endif
+#ifndef SWF_PRECISION_MPFR
           if(knd == kindq .and. ioprad /= 0) write(40, 25) x, cc
+#endif
+#ifndef SWF_PRECISION_MPFR
 25        format(1x,'x = ',e39.30,/,1x,'c = ',e39.30, e39.30)
+#endif
 end if
-          wront = 1.0e0_knd / (cc * (x * x + 1.0e0_knd))
+          wront = SW_LITERAL(1.0e0_knd,"1.0e0") / (cc * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")))
             do 1540 mi = 1, mnum
             m = mmin + minc * (mi - 1)
             em = m
             m2 = m + m
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindd .and. iopang /= 0) write(50, 30) cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 30          format(1x,'c = ',e23.14, e23.14,'; m = ',i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindq .and. iopang /= 0) write(50, 35) cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 35          format(1x,'c = ',e39.30, e39.30,'; m = ',i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
             if(ioprad /= 0) write(40, 40) m
+#endif
+#ifndef SWF_PRECISION_MPFR
 40          format(1x,'m = ',i5)
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindd .and. iopang /= 0) write(30, 50) cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 50          format(1x,'c = ',e23.14, e23.14,'; m = ',i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindq .and. iopang /= 0) write(30, 55) cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 55          format(1x,'c = ',e39.30, e39.30,'; m = ',i5)
+#endif
 end if
             rm = m
             rm2 = m + m
@@ -1042,29 +1259,29 @@ end if
             iopeta = 0
             if(ioprad /= 2) go to 60
               if(knd == kindd) then
-              if(x <= 0.99e0_knd .and. c <= 20.0e0_knd) iopleg = 1
-              if(x > 0.99e0_knd .and. c <= 20.0e0_knd) iopneu0 = 1
+              if(x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. c <= SW_LITERAL(20.0e0_knd,"20.0e0")) iopleg = 1
+              if(x > SW_LITERAL(0.99e0_knd,"0.99e0") .and. c <= SW_LITERAL(20.0e0_knd,"20.0e0")) iopneu0 = 1
               end if
               if(knd == kindq) then
-              if(x <= 0.99e0_knd .and. c <= 60.0e0_knd) iopleg = 1
-              if(x > 0.99e0_knd .and. c <= 40.0e0_knd) iopneu0 = 1
+              if(x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. c <= SW_LITERAL(60.0e0_knd,"60.0e0")) iopleg = 1
+              if(x > SW_LITERAL(0.99e0_knd,"0.99e0") .and. c <= SW_LITERAL(40.0e0_knd,"40.0e0")) iopneu0 = 1
               end if
 60          continue
             jneu1max = 0
             jnen = 0
             incnee = 1
-            if(x > 0.4e0_knd) incnee = 2
+            if(x > SW_LITERAL(0.4e0_knd,"0.4e0")) incnee = 2
             iplflag = 0
             neelow = 28
-            if(x > 0.1e0_knd) neelow = 26
-            if(x > 0.2e0_knd) neelow = 24
-            if(x > 0.3e0_knd) neelow = 22
-            if(x > 0.4e0_knd) neelow = 20
-            if(x > 0.5e0_knd) neelow = 18
-            if(x > 0.6e0_knd) neelow = 14
-            if(x > 0.7e0_knd) neelow = 12
-            if(x > 0.8e0_knd) neelow = 8
-            if(x > 0.9e0_knd) neelow = 2
+            if(x > SW_LITERAL(0.1e0_knd,"0.1e0")) neelow = 26
+            if(x > SW_LITERAL(0.2e0_knd,"0.2e0")) neelow = 24
+            if(x > SW_LITERAL(0.3e0_knd,"0.3e0")) neelow = 22
+            if(x > SW_LITERAL(0.4e0_knd,"0.4e0")) neelow = 20
+            if(x > SW_LITERAL(0.5e0_knd,"0.5e0")) neelow = 18
+            if(x > SW_LITERAL(0.6e0_knd,"0.6e0")) neelow = 14
+            if(x > SW_LITERAL(0.7e0_knd,"0.7e0")) neelow = 12
+            if(x > SW_LITERAL(0.8e0_knd,"0.8e0")) neelow = 8
+            if(x > SW_LITERAL(0.9e0_knd,"0.9e0")) neelow = 2
             nee = neelow
             jnen1 = 0
             incnee1 = 1
@@ -1083,10 +1300,10 @@ end if
                       beta, gamma, coefa, coefb, coefc, coefd, coefe)
             limcsav = limps1
 70          limj = lnum + 3 * ndec + int(c) + maxm
-            if (x /= 0.0e0_knd) go to 170
+            if (x /= SW_LITERAL(0.0e0_knd,"0.0e0")) go to 170
 !
 !  calculation of factors for radial functions when x = 0
-            fac1 = cmplx(1.0e0_knd, 0.0e0_knd)
+            fac1 = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"), SW_LITERAL(0.0e0_knd,"0.0e0"))
             ifac1 = 0
             if(m == 0) go to 100
               do 90 k = 1, m
@@ -1105,11 +1322,11 @@ end if
             fac1d = fac1 * cc / (m + m + 3)
             ifac1d = ifac1
             if(ioprad == 1) go to 170
-            fac2 = (m + m - 1) * pi / (2.0e0_knd * cc)
+            fac2 = (m + m - 1) * pi / (SW_LITERAL(2.0e0_knd,"2.0e0") * cc)
             ifac2 = 0
             if(m == 0) go to 130
               do 120 k = 1, m
-              fac2 = fac2 * cc / (k * 2.0e0_knd)
+              fac2 = fac2 * cc / (k * SW_LITERAL(2.0e0_knd,"2.0e0"))
               if(abs(fac2) < factor) go to 110
               fac2 = fac2 / factor
               ifac2 = ifac2 + ifactor
@@ -1121,11 +1338,11 @@ end if
 130         iterm = int(log10(abs(fac2)))
             fac2 = fac2 * (ten ** (-iterm))
             ifac2 = ifac2 + iterm
-            fac2d = (m + m - 1) * (m + m - 3) * (m + m + 1) * pi / (cc * cc * 2.0e0_knd)
+            fac2d = (m + m - 1) * (m + m - 3) * (m + m + 1) * pi / (cc * cc * SW_LITERAL(2.0e0_knd,"2.0e0"))
             ifac2d = 0
             if(m == 0) go to 160
               do 150 k = 1, m
-              fac2d = fac2d * cc / (k * 2.0e0_knd)
+              fac2d = fac2d * cc / (k * SW_LITERAL(2.0e0_knd,"2.0e0"))
               if(abs(fac2d) < factor) go to 140
               fac2d = fac2d / factor
               ifac2d = ifac2d + ifactor
@@ -1137,17 +1354,17 @@ end if
 160         iterm = int(log10(abs(fac2d)))
             fac2d = fac2d * (ten ** (-iterm))
             ifac2d = ifac2d + iterm
-170         xb = sqrt(x * x + 1.0e0_knd)
-            if(ioprad == 0 .or. x == 0.0e0_knd) go to 180
-            prat1(1) = 1.0e0_knd
-            prat1(2) = rm2 + 1.0e0_knd
+170         xb = sqrt(x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))
+            if(ioprad == 0 .or. x == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 180
+            prat1(1) = SW_LITERAL(1.0e0_knd,"1.0e0")
+            prat1(2) = rm2 + SW_LITERAL(1.0e0_knd,"1.0e0")
               do jp = 3, limj
               aj1 = jp - 1
               aj2 = jp - 2
               prat1(jp) = (rm2 + aj1) * (rm2 + aj2) / (aj1 * aj2)
               end do
-            pcoefn = (x * x + 1.0e0_knd) / (x * x)
-            apcoefn = (rm / 2.0e0_knd) * log10(pcoefn)
+            pcoefn = (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) / (x * x)
+            apcoefn = (rm / SW_LITERAL(2.0e0_knd,"2.0e0")) * log10(pcoefn)
             ipcoefn = int(apcoefn)
             pcoefn = ten ** (apcoefn - ipcoefn)
             if(mi /= 1) go to 180
@@ -1156,24 +1373,29 @@ end if
 180         continue
 !
 !  obtain starting eigenvalues eigt(i) for the Bouwkamp procedure
-            nbp = int(2 * (real(cc) + aimag(cc)) / 3.1416)
+            nbp = int(2 * (SW_CONVERT_REAL(cc) + aimag(cc)) / SW_LITERAL(3.1416,"3.1416"))
             limeig = max(67, (4 * nbp) / 3)
             lime = max(50, nbp + 30)
             lime2 = lime + lime
               do 190 i = 1, lime
               xl = m + i + i - 2
-              d(i) = xl * (xl + 1.0e0_knd) / c2 - (2.0e0_knd * xl * (xl + 1.0e0_knd)- &
-                   2.0e0_knd * em * em - 1.0e0_knd) / ((2.0e0_knd * xl- &
-                   1.0e0_knd) * (2.0e0_knd * xl + 3.0e0_knd))
+              d(i) = xl * (xl + SW_LITERAL(1.0e0_knd,"1.0e0")) / c2 - (SW_LITERAL(2.0e0_knd,"2.0e0") * xl * (xl &
+      & + SW_LITERAL(1.0e0_knd,"1.0e0"))- &
+                   SW_LITERAL(2.0e0_knd,"2.0e0") * em * em - SW_LITERAL(1.0e0_knd,"1.0e0")) / &
+      & ((SW_LITERAL(2.0e0_knd,"2.0e0") * xl- &
+                   SW_LITERAL(1.0e0_knd,"1.0e0")) * (SW_LITERAL(2.0e0_knd,"2.0e0") * xl + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")))
 190           continue
             nm1 = lime - 1
               do 200 i = 1, nm1
               xl = m + i + i - 2
-              e(i) = (-1.0e0_knd / (2.0e0_knd * xl + 3.0e0_knd))* &
-                   sqrt(((xl + 2.0e0_knd + em) * (xl + 1.0e0_knd + em)* &
-                   (xl + 2.0e0_knd - em) * (xl + (1.0e0_knd) - em))/ &
-                   ((2.0e0_knd * xl + 5.0e0_knd) * (2.0e0_knd * xl+ &
-                   1.0e0_knd)))
+              e(i) = (-SW_LITERAL(1.0e0_knd,"1.0e0") / (SW_LITERAL(2.0e0_knd,"2.0e0") * xl + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")))* &
+                   sqrt(((xl + SW_LITERAL(2.0e0_knd,"2.0e0") + em) * (xl + SW_LITERAL(1.0e0_knd,"1.0e0") + em)* &
+                   (xl + SW_LITERAL(2.0e0_knd,"2.0e0") - em) * (xl + (SW_LITERAL(1.0e0_knd,"1.0e0")) - em))/ &
+                   ((SW_LITERAL(2.0e0_knd,"2.0e0") * xl + SW_LITERAL(5.0e0_knd,"5.0e0")) * &
+      & (SW_LITERAL(2.0e0_knd,"2.0e0") * xl+ &
+                   SW_LITERAL(1.0e0_knd,"1.0e0"))))
 200           continue
             call cmtql1(lime, maxe, d, e, ndec)
               do 210 i = 1, lime
@@ -1181,18 +1403,23 @@ end if
 210           continue
               do 220 i = 1, lime
               xl = m + i + i - 1
-              d(i) = xl * (xl + 1.0e0_knd) / c2 - (2.0e0_knd * xl * (xl + 1.0e0_knd)- &
-                   2.0e0_knd * em * em - 1.0e0_knd) / ((2.0e0_knd * xl- &
-                   1.0e0_knd) * (2.0e0_knd * xl + 3.0e0_knd))
+              d(i) = xl * (xl + SW_LITERAL(1.0e0_knd,"1.0e0")) / c2 - (SW_LITERAL(2.0e0_knd,"2.0e0") * xl * (xl &
+      & + SW_LITERAL(1.0e0_knd,"1.0e0"))- &
+                   SW_LITERAL(2.0e0_knd,"2.0e0") * em * em - SW_LITERAL(1.0e0_knd,"1.0e0")) / &
+      & ((SW_LITERAL(2.0e0_knd,"2.0e0") * xl- &
+                   SW_LITERAL(1.0e0_knd,"1.0e0")) * (SW_LITERAL(2.0e0_knd,"2.0e0") * xl + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")))
 220           continue
             nm1 = lime - 1
               do 230 i = 1, nm1
               xl = m + i + i - 1
-              e(i) = (-1.0e0_knd / (2.0e0_knd * xl + 3.0e0_knd))* &
-                   sqrt(((xl + 2.0e0_knd + em) * (xl + 1.0e0_knd + em)* &
-                   (xl + 2.0e0_knd - em) * (xl + (1.0e0_knd) - em))/ &
-                   ((2.0e0_knd * xl + 5.0e0_knd) * (2.0e0_knd * xl+ &
-                   1.0e0_knd)))
+              e(i) = (-SW_LITERAL(1.0e0_knd,"1.0e0") / (SW_LITERAL(2.0e0_knd,"2.0e0") * xl + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")))* &
+                   sqrt(((xl + SW_LITERAL(2.0e0_knd,"2.0e0") + em) * (xl + SW_LITERAL(1.0e0_knd,"1.0e0") + em)* &
+                   (xl + SW_LITERAL(2.0e0_knd,"2.0e0") - em) * (xl + (SW_LITERAL(1.0e0_knd,"1.0e0")) - em))/ &
+                   ((SW_LITERAL(2.0e0_knd,"2.0e0") * xl + SW_LITERAL(5.0e0_knd,"5.0e0")) * &
+      & (SW_LITERAL(2.0e0_knd,"2.0e0") * xl+ &
+                   SW_LITERAL(1.0e0_knd,"1.0e0"))))
 230           continue
             call cmtql1(lime, maxe, d, e, ndec)
               do 240 i = 1, lime
@@ -1208,7 +1435,8 @@ end if
             matlim = max(matlim, lipl + 1)
             if(matlim > lnum) matlim = lnum
             limi = 0
-            match(2) = 0
+            ! Pair lookahead needs a zero sentinel beyond the requested degrees.
+            match = 0
               do i = 2, matlim, 2
               match(i) = -int(log10(abs((eigt(i) - eigt(i - 1)) / eigt(i) &
                         +ten * dec)))
@@ -1222,7 +1450,7 @@ end if
               iopneu0 = 0
               end if
 255         continue
-              if(knd == kindd .and. c > 100.0e0_knd) then
+              if(knd == kindd .and. c > SW_LITERAL(100.0e0_knd,"100.0e0")) then
                do i = 2, limi, 2
                   if(match(i) < 11) then
                   match(i) = 11
@@ -1238,13 +1466,13 @@ end if
             ipint = 0
             intlim = maxint - 3
             istartint = 0
-            xlow = 0.0005e0_knd
-            if(aimag(cc) > 2.0e0_knd) xlow = 0.0000001e0_knd
+            xlow = SW_LITERAL(0.0005e0_knd,"0.0005e0")
+            if(aimag(cc) > SW_LITERAL(2.0e0_knd,"2.0e0")) xlow = SW_LITERAL(0.0000001e0_knd,"0.0000001e0")
             if(x < xlow) istartint = 2
-            xhigh = 0.2e0_knd
+            xhigh = SW_LITERAL(0.2e0_knd,"0.2e0")
             if(x > xhigh) istartint = 2
             if(istartint == 2) iopint = 0
-            if(ioprad == 2 .and. iopint == 0 .and. x <= 0.99e0_knd) iopleg = 1
+            if(ioprad == 2 .and. iopint == 0 .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0")) iopleg = 1
             nflag = 0
             iflageta = 0
             ieta = 0
@@ -1301,40 +1529,62 @@ end if
             max1o = 0
             kflag = 0
               if(knd1 /= knd) then
-              if(real(cc) <= 10.0e0_knd) kflag = 2
-              if(real(cc) > 10.0e0_knd .and. real(cc) <= 25.0e0_knd &
-                  .and. aimag(cc) <= 15.0e0_knd) kflag = 2
-              if(real(cc) > 25.0e0_knd .and. real(cc) <= 50.0e0_knd &
-                  .and. aimag(cc) <= 10.0e0_knd) kflag = 2
-              if(real(cc) > 50.0e0_knd .and. real(cc) <= 100.0e0_knd &
-                  .and. aimag(cc) <= 9.0e0_knd) kflag = 2
-              if(real(cc) > 100.0e0_knd .and. real(cc) <= 1000.0e0_knd &
-                  .and. aimag(cc) <= 7.0e0_knd) kflag = 2
-              if(real(cc) > 1000.0e0_knd .and. real(cc) <= 10000.0e0_knd &
-                  .and. aimag(cc) <= 6.0e0_knd) kflag = 2
+              if(SW_CONVERT_REAL(cc) <= SW_LITERAL(10.0e0_knd,"10.0e0")) kflag = 2
+              if(SW_CONVERT_REAL(cc) > SW_LITERAL(10.0e0_knd,"10.0e0") .and. SW_CONVERT_REAL(cc) <= &
+      & SW_LITERAL(25.0e0_knd,"25.0e0") &
+                  .and. aimag(cc) <= SW_LITERAL(15.0e0_knd,"15.0e0")) kflag = 2
+              if(SW_CONVERT_REAL(cc) > SW_LITERAL(25.0e0_knd,"25.0e0") .and. SW_CONVERT_REAL(cc) <= &
+      & SW_LITERAL(50.0e0_knd,"50.0e0") &
+                  .and. aimag(cc) <= SW_LITERAL(10.0e0_knd,"10.0e0")) kflag = 2
+              if(SW_CONVERT_REAL(cc) > SW_LITERAL(50.0e0_knd,"50.0e0") .and. SW_CONVERT_REAL(cc) <= &
+      & SW_LITERAL(100.0e0_knd,"100.0e0") &
+                  .and. aimag(cc) <= SW_LITERAL(9.0e0_knd,"9.0e0")) kflag = 2
+              if(SW_CONVERT_REAL(cc) > SW_LITERAL(100.0e0_knd,"100.0e0") .and. SW_CONVERT_REAL(cc) <= &
+      & SW_LITERAL(1000.0e0_knd,"1000.0e0") &
+                  .and. aimag(cc) <= SW_LITERAL(7.0e0_knd,"7.0e0")) kflag = 2
+              if(SW_CONVERT_REAL(cc) > SW_LITERAL(1000.0e0_knd,"1000.0e0") .and. SW_CONVERT_REAL(cc) <= &
+      & SW_LITERAL(10000.0e0_knd,"10000.0e0") &
+                  .and. aimag(cc) <= SW_LITERAL(6.0e0_knd,"6.0e0")) kflag = 2
               else
               kflag = 2
               end if
-            if(knd == kindd .and. aimag(cc) < 10.0e0_knd .and. real(cc) <= &
-               60.0e0_knd .and. real(cc) >= 10.0e0_knd .and. m <= 40 &
-                .and. x <= 0.99e0_knd .and. x > 0.1e0_knd) iflagl1 = 1
+            if(knd == kindd .and. aimag(cc) < SW_LITERAL(10.0e0_knd,"10.0e0") .and. SW_CONVERT_REAL(cc) <= &
+               SW_LITERAL(60.0e0_knd,"60.0e0") .and. SW_CONVERT_REAL(cc) >= SW_LITERAL(10.0e0_knd,"10.0e0") &
+      & .and. m <= 40 &
+                .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. x > SW_LITERAL(0.1e0_knd,"0.1e0")) iflagl1 = 1
 if (output) then
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindd .and. ioprad /= 0) write(20, 260) x, cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 260         format(1x, e23.14, e23.14, e23.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
             if(knd == kindq .and. ioprad /= 0) write(20, 265) x, cc, m
+#endif
+#ifndef SWF_PRECISION_MPFR
 265         format(1x, e39.30, e39.30, e39.30, i5)
+#endif
 end if
               do 1510 li = 1, lnum
               l = m + (li - 1)
               nacccor = 0
               iopbesa = 0
 if (output) then
+#ifndef SWF_PRECISION_MPFR
               if(iopang /= 0) write(30, 270) l
+#endif
+#ifndef SWF_PRECISION_MPFR
 270           format(1x, i6)
+#endif
 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(iopang /= 0) write(50, 280) l
+#endif
+#ifndef SWF_PRECISION_MPFR
 280           format(1x,'l = ',i6)
+#endif
 end if
               ix = l - m - 2 * ((l - m) / 2)
               if(ix == 0) naccflag = 0
@@ -1369,7 +1619,7 @@ end if
                 iopbes = 1
                 iopeta1 = 0
                 end if
-              if(x < 0.05e0_knd) istarteta = 0
+              if(x < SW_LITERAL(0.05e0_knd,"0.05e0")) istarteta = 0
               if(ioprad == 2 .and. li == listart .and. iopneu0 == 0 .and. &
                  x >= xneu) iopneu0 = 1
               if(istartneu0 == 0) iopneu0 = 0
@@ -1393,53 +1643,65 @@ end if
               if(iopleg == 2) limdleg = jleg + jleg + 20 + int(sqrt(c))
               if(iopleg /= 0 .and. li >= listart) limd = max(limd, limdleg)
                 if(knd == kindd) then
-                if(x >= 0.01e0_knd) lneu0 = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) lneu0 = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
                                           10000)
-                if(x >= 0.1e0_knd) lneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                         200) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) lneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) lneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                         200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) lneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                          200) / x)
-                if(x >= 1.0e0_knd) lneu0 = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) lneu0 = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                           200)
                 end if
                 if(knd == kindq) then
-                if(x >= 0.01e0_knd) lneu0 = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) lneu0 = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
                                           14000)
-                if(x >= 0.1e0_knd) lneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                         350) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) lneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) lneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                         350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) lneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                          300) / x)
-                if(x >= 1.0e0_knd) lneu0 = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) lneu0 = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                           300)
                 end if
               if(iopneu0 == 3 .and. jtest0 > minacc .and. li /= listart + 1) &
                      lneu0 = jneu0max + jneu0max + 40 + int(sqrt(c)* &
-                           (2 / min(1.0e0_knd, x)) + 100 / x)
+                           (2 / min(SW_LITERAL(1.0e0_knd,"1.0e0"), x)) + 100 / x)
               if((iopneu0 /= 0 .and. li >= listart) .or. (x >= xneu &
                       .and. li == listart)) limd = max(limd, lneu0)
                 if(knd == kindd) then
-                if(x >= 0.05e0_knd) leta = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) leta = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
                                          10000)
-                if(x >= 0.1e0_knd) leta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                         200) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) leta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) leta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                         200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) leta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                         300) / x)
-                if(x >= 1.0e0_knd) leta = 2 * int(l - m + c / 5 + 0.5e0_knd * m + 300)
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) leta = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m + 300)
                 end if
                 if(knd == kindq) then
-                if(x >= 0.05e0_knd) leta = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) leta = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
                                          14000)
-                if(x >= 0.1e0_knd) leta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) leta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                          350)* &
-                                        1.4e0_knd / x)
-                if(x >= 0.5e0_knd) leta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                                        SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) leta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                         400) / x)
-                if(x >= 1.0e0_knd) leta = 2 * int(l - m + c / 5 + 0.5e0_knd * m + 400)
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) leta = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m + 400)
                 end if
               if(iopeta == 3 .and. nacceta > minacc) &
                   leta = jeta + jeta + 40+ &
-                       int(sqrt(c) * (2 / min(1.0e0_knd, x)) + 5 / x)
-              if((iopeta /= 0 .and. li >= listart) .or. (x >= 0.05e0_knd &
+                       int(sqrt(c) * (2 / min(SW_LITERAL(1.0e0_knd,"1.0e0"), x)) + 5 / x)
+              if((iopeta /= 0 .and. li >= listart) .or. (x >= SW_LITERAL(0.05e0_knd,"0.05e0") &
                       .and. li == listart)) limd = max(limd, leta)
 290           continue
               if(ix == 0) limd = max(limd, max1e)
@@ -1447,11 +1709,11 @@ end if
               if(limd > maxn) limd = maxn - 4
               if(2 * (limd / 2) /= limd) limd = limd - 1
               if(li <= limeig) eigmat = eigt(li)
-              if(li > limeig) eigmat = 4.0e0_knd * eig(li - 1) - 6.0e0_knd* &
-                            eig(li - 2) + 4.0e0_knd * eig(li - 3) - eig(li - 4)
-              if(li <= 8) eigest = (0.0e0_knd, 0.0e0_knd)
-              if(li > 8) eigest = 4.0e0_knd * eig(li - 2) - 6.0e0_knd* &
-                            eig(li - 4) + 4.0e0_knd * eig(li - 6) - eig(li - 8)
+              if(li > limeig) eigmat = SW_LITERAL(4.0e0_knd,"4.0e0") * eig(li - 1) - SW_LITERAL(6.0e0_knd,"6.0e0")* &
+                            eig(li - 2) + SW_LITERAL(4.0e0_knd,"4.0e0") * eig(li - 3) - eig(li - 4)
+              if(li <= 8) eigest = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+              if(li > 8) eigest = SW_LITERAL(4.0e0_knd,"4.0e0") * eig(li - 2) - SW_LITERAL(6.0e0_knd,"6.0e0")* &
+                            eig(li - 4) + SW_LITERAL(4.0e0_knd,"4.0e0") * eig(li - 6) - eig(li - 8)
 !
 !  use Bouwkamp procedure to obtain accurate eigenvalue
               ndec1 = precision(bliste1(1))
@@ -1509,7 +1771,7 @@ end if
                 t3 = m2 * m2 - 1
                 t4 = m2 + i2 - 3
                 t5 = m2 + i2 + 1
-                gliste(j) = t1 * t2 - (0.5e0_knd) * c2 * ((1.0e0_knd) - t3/ &
+                gliste(j) = t1 * t2 - (SW_LITERAL(0.5e0_knd,"0.5e0")) * c2 * ((SW_LITERAL(1.0e0_knd,"1.0e0")) - t3/ &
                           (t4 * t5))
                 j = j + 1
                 end do
@@ -1545,7 +1807,7 @@ end if
                 t3 = m2 * m2 - 1
                 t4 = m2 + i2 - 3
                 t5 = m2 + i2 + 1
-                glisto(j) = t1 * t2 - (0.5e0_knd) * c2 * ((1.0e0_knd) - t3/ &
+                glisto(j) = t1 * t2 - (SW_LITERAL(0.5e0_knd,"0.5e0")) * c2 * ((SW_LITERAL(1.0e0_knd,"1.0e0")) - t3/ &
                           (t4 * t5))
                 j = j + 1
                 end do
@@ -1589,7 +1851,8 @@ end if
                   t31 = m2 * m2 - 1
                   t41 = m2 + i2 - 3
                   t51 = m2 + i2 + 1
-                  gliste1(j) = t11 * t21 - (0.5e0_knd1) * c21 * ((1.0e0_knd1) - t31/ &
+                  gliste1(j) = t11 * t21 - (SW_LITERAL(0.5e0_knd1,"0.5e0")) * c21 * &
+      & ((SW_LITERAL(1.0e0_knd1,"1.0e0")) - t31/ &
                              (t41 * t51))
                   else
                   gliste1(j) = gliste(j)
@@ -1636,7 +1899,8 @@ end if
                   t31 = m2 * m2 - 1
                   t41 = m2 + i2 - 3
                   t51 = m2 + i2 + 1
-                  glisto1(j) = t11 * t21 - (0.5e0_knd1) * c21 * ((1.0e0_knd1) - t31/ &
+                  glisto1(j) = t11 * t21 - (SW_LITERAL(0.5e0_knd1,"0.5e0")) * c21 * &
+      & ((SW_LITERAL(1.0e0_knd1,"1.0e0")) - t31/ &
                           (t41 * t51))
                   else
                   glisto1(j) = glisto(j)
@@ -1648,8 +1912,8 @@ end if
 350           continue
               itestm = ndec
               matest = 0
-              eigp = (0.0e0_knd, 0.0e0_knd)
-              eign = (0.0e0_knd, 0.0e0_knd)
+              eigp = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+              eign = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               if(li > 2 .and. li <= lipl) eigp = eig(li - 2)
               if(li > 2 .and. li > lipl .and. li <= limeig) eigp = eig(li - 2)
                 if(lips - 2 > 0 .and. li - 2 >= lips .and. li - 2 < liplp) then
@@ -1709,9 +1973,9 @@ end if
               if(li < listart) go to 385
               if(ioprad /= 2) go to 385
               if(li == listart .and. jsub <= ndec - naccrsav .and. x <= &
-                  0.99e0_knd .and. iopleg == 0 .and. iopleg1 == 0 .and. &
+                  SW_LITERAL(0.99e0_knd,"0.99e0") .and. iopleg == 0 .and. iopleg1 == 0 .and. &
                   iopint == 1) iopleg = 1
-              if(ndec - jsub > naccrsav - 2 .and. x <= 0.99e0_knd .and. &
+              if(ndec - jsub > naccrsav - 2 .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. &
               iopleg == 0 .and. iopleg1 == 0 .and. l >= legstart) iopleg = 1
                 if(li == listart .and. x >= xneu) then
                   if(jsubf <= ndec - minacc) then
@@ -1732,7 +1996,7 @@ end if
               if(li == listart .and. iopneu0 == 1 .and. iopint == 1) &
                   iopint = 0
 385           continue
-              if(x /= 0.0e0_knd) go to 550
+              if(x /= SW_LITERAL(0.0e0_knd,"0.0e0")) go to 550
 !
 !  determine oblate radial functions of both kinds when x = 0
               ioppsum = 0
@@ -1742,14 +2006,14 @@ end if
                        limdr, maxdr, maxmp, ioppsum, eigval, enrneg, drhor, &
                        dneg, idneg, nsdneg, nsdrhor1, nsdrho)
               ifsub = max(jsub, nsdneg)
-              if(m == 0) dneg = (1.0e0_knd, 0.0e0_knd)
+              if(m == 0) dneg = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               if(m == 0) idneg = 0
               naccr = min(ndec - ifsub - 1, naccre - 1, itestm - 1, ndec - 2)
               if(naccr < 0) naccr = 0
               naccr1 = min(ndec - jsubmf - 1, naccre - 1, itestm - 1, ndec - 2)
               if(ix == 1) go to 420
-              if(li /= 1) fac1 = -real(l - m, knd) * (l - m - 1) * fac1/ &
-                                (real(l + m, knd) * (l + m - 1))
+              if(li /= 1) fac1 = -SW_CONVERT_REAL(l - m, knd) * (l - m - 1) * fac1/ &
+                                (SW_CONVERT_REAL(l + m, knd) * (l + m - 1))
               iterm = int(log10(abs(fac1)))
               fac1 = fac1 * (ten ** (-iterm))
               ifac1 = ifac1 + iterm
@@ -1757,33 +2021,33 @@ end if
               ir1e(li) = int(log10(abs(r1c(li))))
               r1c(li) = r1c(li) * (ten ** (-ir1e(li)))
               ir1e(li) = ir1e(li) + ifac1 + idc01 - idmfe
-              if(abs(r1c(li)) >= 1.0e0_knd) go to 390
+              if(abs(r1c(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 390
               r1c(li) = r1c(li) * ten
               ir1e(li) = ir1e(li) - 1
-390           r1dc(li) = (0.0e0_knd, 0.0e0_knd)
+390           r1dc(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               ir1de(li) = 0
               if(ioprad == 1) go to 450
-              r2dc(li) = 1.0e0_knd / (cc * r1c(li))
+              r2dc(li) = SW_LITERAL(1.0e0_knd,"1.0e0") / (cc * r1c(li))
               ir2de(li) = int(log10(abs(r2dc(li))))
               r2dc(li) = r2dc(li) * (ten ** (-ir2de(li)))
               ir2de(li) = ir2de(li) - ir1e(li)
-              if(abs(r2dc(li)) >= 1.0e0_knd) go to 400
+              if(abs(r2dc(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 400
               r2dc(li) = r2dc(li) * ten
               ir2de(li) = ir2de(li) - 1
-400      if(naccr == 0) r2c(li) = (0.0e0_knd, 0.0e0_knd)
+400      if(naccr == 0) r2c(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               if(naccr == 0) ir2e(li) = 0
-              if(li /= 1) fac2 = -real(l + m - 1, knd) * (l - m - 1) * fac2/ &
-                               (real(l - m, knd) * (l + m))
+              if(li /= 1) fac2 = -SW_CONVERT_REAL(l + m - 1, knd) * (l - m - 1) * fac2/ &
+                               (SW_CONVERT_REAL(l - m, knd) * (l + m))
               if(naccr == 0) go to 450
               r2c(li) = fac2 * dfnorm * dfnorm / (dneg * dc01 * dmfnorm)
               ir2e(li) = int(log10(abs(r2c(li))))
               r2c(li) = r2c(li) * (ten ** (-ir2e(li)))
               ir2e(li) = ir2e(li) + ifac2 - idneg - idc01 + idfe + idfe - idmfe
-              if(abs(r2c(li)) >= 1.0e0_knd) go to 450
+              if(abs(r2c(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 450
               r2c(li) = r2c(li) * ten
               ir2e(li) = ir2e(li) - 1
 410           go to 450
-420           r1c(li) = (0.0e0_knd, 0.0e0_knd)
+420           r1c(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               ir1e(li) = 0
               if(li /= 2) fac1d = -(l - m) * (l - m - 1) * fac1d / ((l + m) * (l + m - 1))
               iterm = int(log10(abs(fac1d)))
@@ -1793,66 +2057,98 @@ end if
               ir1de(li) = int(log10(abs(r1dc(li))))
               r1dc(li) = r1dc(li) * (ten ** (-ir1de(li)))
               ir1de(li) = ir1de(li) + ifac1d + idc01 - idmfe
-              if(abs(r1dc(li)) >= 1.0e0_knd) go to 430
+              if(abs(r1dc(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 430
               r1dc(li) = r1dc(li) * ten
               ir1de(li) = ir1de(li) - 1
 430      if(ioprad == 1) go to 450
 !  The origin Wronskian contains the complex parameter, not its modulus.
-              r2c(li) = -1.0e0_knd / (cc * r1dc(li))
+              r2c(li) = -SW_LITERAL(1.0e0_knd,"1.0e0") / (cc * r1dc(li))
               ir2e(li) = int(log10(abs(r2c(li))))
               r2c(li) = r2c(li) * (ten ** (-ir2e(li)))
               ir2e(li) = ir2e(li) - ir1de(li)
-              if(abs(r2c(li)) >= 1.0e0_knd) go to 440
+              if(abs(r2c(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 440
               r2c(li) = r2c(li) * ten
               ir2e(li) = ir2e(li) - 1
-440      if(naccr == 0) r2dc(li) = (0.0e0_knd, 0.0e0_knd)
+440      if(naccr == 0) r2dc(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               if(naccr == 0) ir2de(li) = 0
-              if(li /= 2) fac2d = -real(l - m, knd) * (l + m) * fac2d/ &
-                                (real(l + m - 1, knd) * (l - m - 1))
+              if(li /= 2) fac2d = -SW_CONVERT_REAL(l - m, knd) * (l + m) * fac2d/ &
+                                (SW_CONVERT_REAL(l + m - 1, knd) * (l - m - 1))
               if(naccr == 0) go to 450
               r2dc(li) = fac2d * dfnorm * dfnorm / (dneg * dc01 * dmfnorm)
               ir2de(li) = int(log10(abs(r2dc(li))))
               r2dc(li) = r2dc(li) * (ten ** (-ir2de(li)))
               ir2de(li) = ir2de(li) + ifac2d - idneg - idc01 + idfe + idfe - idmfe
-              if(abs(r2dc(li)) >= 1.0e0_knd) go to 450
+              if(abs(r2dc(li)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 450
               r2dc(li) = r2dc(li) * ten
               ir2de(li) = ir2de(li) - 1
 450           continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               write(40, 460)
+#endif
+#ifndef SWF_PRECISION_MPFR
 460           format(5x,'calculated accurate values for r1 and r1d ', &
                      'using nonzero term in traditional Bessel ', &
                      'function expansion')
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 570) r1c(li), ir1e(li), r1dc(li), &
                                          ir1de(li)
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 575) r1c(li), ir1e(li), r1dc(li), &
                                          ir1de(li)
+#endif
 end if
               if(ioprad == 1) go to 1330
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(ix == 0) write(40, 500)
+#endif
+#ifndef SWF_PRECISION_MPFR
 500           format(5x,'calculated r2 using nonzero term in Legendre', &
                     ' function expansion and r2d from Wronskian and r1')
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(ix == 1) write(40, 510)
+#endif
+#ifndef SWF_PRECISION_MPFR
 510           format(5x,'calculated r2d using nonzero term in ', &
                      'Legendre function expansion and r2 from ', &
                      'Wronskian and r1d')
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 520) r2c(li), ir2e(li), r2dc(li), &
                                          ir2de(li)
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 525) r2c(li), ir2e(li), r2dc(li), &
                                           ir2de(li)
+#endif
+#ifndef SWF_PRECISION_MPFR
 520           format(10x,'r2 = ',f17.14, f17.14, i5, 5x,'r2d = ', &
                       f17.14, f17.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 525           format(10x,'r2 = ',f33.30, f33.30, i5,/,12x,'r2d = ', &
                       f33.30, f33.30, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(ix == 0) write(40, 530) naccr, naccr1
+#endif
+#ifndef SWF_PRECISION_MPFR
 530           format(12x,'r2 is accurate to ',I2,' decimal digits; r1,' &
                      ' r1d, and r2d are accurate to ',i2,' decimal' &
                      '  digits.')
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(ix == 1) write(40, 540) naccr, naccr1
+#endif
+#ifndef SWF_PRECISION_MPFR
 540           format(12x,'r2d is accurate to ',I2,' decimal digits. r1,' &
                      ' r1d, and r2 are accurate to ',i2,' decimal' &
                      '  digits.')
+#endif
 end if
               go to 1330
 550           continue
@@ -1860,8 +2156,12 @@ end if
 !  determine oblate radial functions of the first kind
 !    r1 calculation using traditional Bessel functions series (eta=1)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               write(40, 560)
+#endif
+#ifndef SWF_PRECISION_MPFR
 560           format(4x,'r1 and r1d calculation')
+#endif
 end if
               iopbesa = 0
               naccr1 = 0
@@ -1879,12 +2179,20 @@ end if
               jbes = jbes1
               iopbes = 2
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 570) r11c, ir11e, r1d1c, ir1d1e
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 575) r11c, ir11e, r1d1c, ir1d1e
+#endif
+#ifndef SWF_PRECISION_MPFR
 570           format(10x,'r1 = ',f17.14, f17.14, i5, 5x,'r1d = ', &
                       f17.14, f17.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 575           format(10x,'r1 = ',f33.30, f33.30, i5,/,10x,'r1d = ', &
                       f33.30, f33.30, i5)
+#endif
 end if
               r1c(li) = r11c
               ir1e(li) = ir11e
@@ -1938,6 +2246,11 @@ end if
 !
 !    r1 calculation using the variable eta expansion
               if(iopeta1 == 0) go to 760
+              if(.not.allocated(sbesfsv)) then
+                allocate( sbesfsv(jnebmax, maxj), sbesdfsv(jnebmax, maxj), ibesesv(jnebmax, maxlp), &
+                  sbesnsv(jnebmax, maxlp), sbesdrsv(jnebmax, maxlp), pratbsv1(jnebmax, maxp), &
+                  prattsv1(jnebmax, maxp), pdrattsv1(jnebmax, maxp))
+              end if
               liplopt = 0
               nee1st = nee1
               nee1count = 1
@@ -1953,10 +2266,10 @@ end if
                 end if
                 if(ieta == 0) then
                   do jnet = 1, neta
-                  ang = jnet * pi * 0.5e0_knd / (neta + 1)
+                  ang = jnet * pi * SW_LITERAL(0.5e0_knd,"0.5e0") / (neta + 1)
                   eta(jnet) = cos(ang)
-                  wmeta2(jnet) = 2.0e0_knd * (1.0e0_knd + eta(jnet))* &
-                               (sin(0.5e0_knd * ang) ** 2)
+                  wmeta2(jnet) = SW_LITERAL(2.0e0_knd,"2.0e0") * (SW_LITERAL(1.0e0_knd,"1.0e0") + eta(jnet))* &
+                               (sin(SW_LITERAL(0.5e0_knd,"0.5e0") * ang) ** 2)
                   xbn(jnet) = sqrt(x * x + wmeta2(jnet))
                   xln(jnet) = eta(jnet) * x / xbn(jnet)
                   end do
@@ -2043,20 +2356,20 @@ end if
                 pratb1(je) = prat(1, je)
                 pratbsv1(jnencur1, je) = pratb1(je)
                 end do
-              pratb1(limpd + 1) = 0.0e0_knd
-              pratb1(limpd + 2) = 0.0e0_knd
-              pratbsv1(jnencur1, limpd + 1) = 0.0e0_knd
-              pratbsv1(jnencur1, limpd + 2) = 0.0e0_knd
+              pratb1(limpd + 1) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratb1(limpd + 2) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratbsv1(jnencur1, limpd + 1) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratbsv1(jnencur1, limpd + 2) = SW_LITERAL(0.0e0_knd,"0.0e0")
 680           continue
-              pcoefe1 = (x * x + 1.0e0_knd) / (xbn(nee1) * xbn(nee1))
-              apcoef1 = (rm / 2.0e0_knd) * log10(pcoefe1)
+              pcoefe1 = (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) / (xbn(nee1) * xbn(nee1))
+              apcoef1 = (rm / SW_LITERAL(2.0e0_knd,"2.0e0")) * log10(pcoefe1)
               ipcoefe1 = int(apcoef1)
               pcoefe1 = ten ** (apcoef1 - ipcoefe1)
               pcoefo1 = pcoefe1 * pratt1(2) / pratb1(2)
               ipcoefo1 = ipcoefe1
               pdcoefe1 = pcoefe1
               if(m /= 0) pdcoefe1 = -pcoefe1 * rm * xln(nee1) * xbn(nee1)* &
-                          xbn(nee1) / ((x * x + 1.0e0_knd) * wmeta2(nee1))
+                          xbn(nee1) / ((x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) * wmeta2(nee1))
               ipdcoefe1 = ipcoefe1
               pdcoefo1 = pdcoefe1 * pdratt1(2) / pratb1(2)
               ipdcoefo1 = ipdcoefe1
@@ -2125,14 +2438,22 @@ end if
               if(iopbes /= 0) jbes = max(jbes, jeta1)
 720           continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 730) etaval1, nee1, r1ec, ir1ee, &
                                              r1dec, ir1dee
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 735) etaval1, nee1, r1ec, ir1ee, &
                                            r1dec, ir1dee
+#endif
+#ifndef SWF_PRECISION_MPFR
 730           format(15x,'eta = ',f17.14,'; nee = ',i4,/,10x,'r1 = ', &
                       f17.14, f17.14, i5, 5x,'r1d = ',f17.14, f17.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 735           format(15x,'eta = ',f17.14,'; nee = ',i4,/,10x,'r1 = ', &
                       f33.30, f33.30, i5,/,5x,'r1d = ',f33.30, f33.30, i5)
+#endif
 end if
                 if(nsub1 <= nsubt .or. nsubd1 <= nsubt) then
                 if(idir == 0) idir = -1
@@ -2318,26 +2639,30 @@ end if
 !  determine oblate radial functions of the second kind
 !
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               write(40, 770)
+#endif
+#ifndef SWF_PRECISION_MPFR
 770           format(4x,'r2 and r2d calculation')
+#endif
 end if
 !
 !  decide whether to use values of r1 and r1d for r2 and r2d
               naccrpl = ir1e(li) + ir1de(li) + int(log10(abs(r1c(li)* &
-                      r1dc(li)) * c * (x * x + 1.0e0_knd)))
+                      r1dc(li)) * c * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))))
               if(naccrpl < 0) naccrpl = 0
               if(naccrpl > ndec) naccrpl = ndec
               if(min(naccrpl, naccr1) > 0) then
                 naccr = min(naccrpl, naccr1)
-                r2c(li) = cmplx(-aimag(r1c(li)), real(r1c(li)), knd)
+                r2c(li) = SW_CONVERT_COMPLEX(-aimag(r1c(li)), SW_CONVERT_REAL(r1c(li)), knd)
                 ir2e(li) = ir1e(li)
-                r2dc(li) = cmplx(-aimag(r1dc(li)), real(r1dc(li)), knd)
+                r2dc(li) = SW_CONVERT_COMPLEX(-aimag(r1dc(li)), SW_CONVERT_REAL(r1dc(li)), knd)
                 ir2de(li) = ir1de(li)
                 end if
               naccrt = 0
               iopmatch = 1
               nmatch = 0
-              iii = -int(log10(x) - 0.699e0_knd)
+              iii = -int(log10(x) - SW_LITERAL(0.699e0_knd,"0.699e0"))
               if(iii < 0) iii = 0
                 if(li <= lipl .and. match(2) /= 0) then
                   if(ix == 0) then
@@ -2365,12 +2690,16 @@ end if
                     iopeta = 0
                     naccr = min(naccrpl, naccr1)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                     write(40, 775) l, naccr
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                     write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), &
                                    ir1de(li), r2c(li), ir2e(li), r2dc(li), &
                                    ir2de(li), naccr, chr_e
+#endif
 end if
                     go to 1400
                     end if
@@ -2381,10 +2710,14 @@ end if
                       naccr = min(naccrpl, naccr1)
                       iopmatch = 0
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                       if(naccr > 0) write(40, 775) l, naccr
+#endif
+#ifndef SWF_PRECISION_MPFR
 775                   format(8x,'values for r2 and r2dc for l = ',i6, &
                              ' accurate to ',i2,' digits are given by' &
                              ' ir1 and ir1d')
+#endif
 end if
                       end if
                     end if
@@ -2408,7 +2741,9 @@ end if
                       naccr = min(naccrpl, naccr1)
                       iopmatch = 0
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                       write(40, 775) l, naccr
+#endif
 end if
                       end if
                     end if
@@ -2423,14 +2758,14 @@ end if
                     end if
                   go to 1390
                   end if
-                if(x <= 0.99e0_knd .and. iopleg == 0 .and. l >= legstart &
+                if(x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. iopleg == 0 .and. l >= legstart &
                     .and. ndec - jsub >= naccr) iopleg = 1
-                if(x < 0.01e0_knd .and. iopleg == 0 .and. l >= legstart &
+                if(x < SW_LITERAL(0.01e0_knd,"0.01e0") .and. iopleg == 0 .and. l >= legstart &
                     .and. ndec - jsub >= match(li + 1 - ix) - iii) iopleg = 1
-                if(x >= 0.05e0_knd .and. x <= 0.9e0_knd .and. jsub > &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0") .and. x <= SW_LITERAL(0.9e0_knd,"0.9e0") .and. jsub > &
                    ndec - minacc .and. iopleg == 0 .and. iopeta == 0) iopeta = 4
                 if(li == listart .and. iopeta == 4) iopeta = 1
-                if(x > 0.99e0_knd .and. iopneu0 == 0 .and. jsubf < &
+                if(x > SW_LITERAL(0.99e0_knd,"0.99e0") .and. iopneu0 == 0 .and. jsubf < &
                    ndec - naccr) iopneu0 = 4
                 if(li == listart .and. iopneu0 == 4) iopneu0 = 1
                 if(x <= xhigh .and. x >= xlow .and. iopint == 0 .and. &
@@ -2442,13 +2777,17 @@ end if
                 naccr = min(naccrpl, naccr1)
                 iopmatch = 0
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                 if(naccr > 0) write(40, 775) l, naccr
+#endif
 end if
                   if(naccr >= minacc) then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), &
                                  ir1de(li), r2c(li), ir2e(li), r2dc(li), &
                                  ir2de(li), naccr, chr_e
+#endif
 end if
                   iopint = 0
                   iopleg = 0
@@ -2459,12 +2798,12 @@ end if
                   end if
                 end if
                 if(li > lipl .or. match(2) == 0) then
-                if(x <= 0.99e0_knd .and. iopleg == 0 .and. l >= legstart &
+                if(x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. iopleg == 0 .and. l >= legstart &
                     .and. ndec - jsub > min(minacc, naccrsav - 2)) iopleg = 1
-                if(x > 0.99e0_knd .and. ndec - jsubf >= naccrsav .and. &
+                if(x > SW_LITERAL(0.99e0_knd,"0.99e0") .and. ndec - jsubf >= naccrsav .and. &
                    iopneu0 == 0 .and. istartneu0 == 1) iopneu0 = 4
                 if(iopeta /= 0 .and. iopneu0 == 4) iopneu0 = 1
-                if(x >= 0.05e0_knd .and. iopint == 0 .and. iopleg == 0 .and. &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0") .and. iopint == 0 .and. iopleg == 0 .and. &
                     iopeta == 0 .and. iopneu0 == 0) iopeta = 4
                 if(x <= xhigh .and. x >= xlow .and. iopint == 0) iopint = 1
                 if(nacclegp > minacc) iopint = 0
@@ -2490,8 +2829,8 @@ end if
 790      if(iopint == 1 .and. ipint == 1) iopint = 2
               if(ipint == 1) go to 800
               ngqs = nstep1 + nstep2 + nstep3
-              parg = cc * sqrt(x * x + 1.0e0_knd)
-              lim1max = 4 * int(abs(real(parg)) + abs(aimag(parg))) + 25
+              parg = cc * sqrt(x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))
+              lim1max = 4 * int(abs(SW_CONVERT_REAL(parg)) + abs(aimag(parg))) + 25
               call pint(cc, m, lnum, x, limint, maxint, maxlp, maxmp, lim1max, &
                         ndec, nex, ngqs, ngau, wr, xr, step1, nstep1, step2, &
                         nstep2, step3, nstep3, intlim, rpint1, rpint2, pint1, &
@@ -2514,17 +2853,17 @@ end if
               wroncb = r2ic * r1dc(li) * ten ** (ir2ie + ir1de(li))
               wronc = wronca - wroncb
               naccint = -int(log10(abs((wronc - wront) / wront) + dec)- &
-                         0.5e0_knd)
+                         SW_LITERAL(0.5e0_knd,"0.5e0"))
               if(naccint < 0) naccint = 0
               if(naccint > ndec - 1) naccint = ndec - 1
               nacccor = -int(log10(abs((wronca - wroncb) / wronca) + dec))
               if(nacccor < 0) nacccor = 0
               if(nacccor > naccrpl) nacccor = naccrpl
               if(nacccor > 0) naccint = min(naccint + nacccor, naccr1)
-              if(x > 0.1e0_knd) go to 805
+              if(x > SW_LITERAL(0.1e0_knd,"0.1e0")) go to 805
               naccintw = naccint
               jacc = 0
-              if((wronca * wroncb) /= 0.0e0_knd) &
+              if((wronca * wroncb) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
                     jacc = int(log10(abs(wronca / wroncb)))
               if(jacc > 0) naccint = min(naccint, ndec - isub - 1)
               if(jacc < 0) naccint = min(naccint, ndec - isubd - 1)
@@ -2532,14 +2871,16 @@ end if
               naccc = 0
                 if(jacc > 0 .and. (ir2ie - ir1e(li)) < nex - 10) then
                 naccc = int(log10(abs(r2ic / (r1c(li)* &
-                       (10.0e0_knd ** (ir1e(li) - ir2ie))+ &
-                       (0.0e0_knd, 1.0e0_knd) * r2ic))) - 0.5e0_knd)
+                       (SW_LITERAL(10.0e0_knd,"10.0e0") ** (ir1e(li) - ir2ie))+ &
+                       SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * &
+      & r2ic))) - SW_LITERAL(0.5e0_knd,"0.5e0"))
                 if(naccc > 0) naccc = 0
                 end if
                 if(jacc < 0 .and. (ir2die - ir1de(li)) < nex - 10) then
                 naccc = int(log10(abs(r2dic / (r1dc(li)* &
-                       (10.0e0_knd ** (ir1de(li) - ir2die))+ &
-                       (0.0e0_knd, 1.0e0_knd) * r2dic))) - 0.5e0_knd)
+                       (SW_LITERAL(10.0e0_knd,"10.0e0") ** (ir1de(li) - ir2die))+ &
+                       SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * &
+      & r2dic))) - SW_LITERAL(0.5e0_knd,"0.5e0"))
                 if(naccc > 0) naccc = 0
                 end if
               naccint = min(naccintw, naccint - naccc)
@@ -2547,7 +2888,7 @@ end if
               if(naccint < 0) naccint = 0
 805           continue
                 if(naccint > naccr .or. (naccint == naccr .and. naccr &
-                    == naccrt .and. x < 0.1e0_knd)) then
+                    == naccrt .and. x < SW_LITERAL(0.1e0_knd,"0.1e0"))) then
                 naccr = naccint
                 jflagl = 0
                 r2c(li) = r2ic
@@ -2565,7 +2906,7 @@ end if
                 iopeta = 0
                 end if
                 if(naccint <= minacc) then
-                if(x <= 0.99e0_knd .and. ndec - jsub > min(naccint, &
+                if(x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. ndec - jsub > min(naccint, &
                    naccrs, naccrsav - 2) .and. l >= legstart .and. iopleg == 0) &
                    iopleg = 1
                 if(x >= xneu) iflagneu = 1
@@ -2575,21 +2916,29 @@ end if
                 if(iopneu0 == 4 .and. (l == listart .or. iopeta /= 0)) &
                      iopneu0 = 1
                 if(iflagneu == 1 .and. iopneu0 == 0 .and. iopeta == 0 &
-                    .and. iflageta == 0 .and. x >= 0.05e0_knd) iopeta = 4
+                    .and. iflageta == 0 .and. x >= SW_LITERAL(0.05e0_knd,"0.05e0")) iopeta = 4
                 if(iopeta == 4 .and. l == listart) iopeta = 1
                 end if
               naccintp = naccint
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 820) naccint, r2ic, ir2ie, r2dic, &
                                              ir2die
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 825) naccint, r2ic, ir2ie, r2dic, &
                                              ir2die
+#endif
+#ifndef SWF_PRECISION_MPFR
 820           format(15x,'accuracy in decimal digits = ',i2,/,10x, &
                      'r2 = ',f17.14, f17.14, i5, 5x,'r2d = ', &
                      f17.14, f17.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 825           format(15x,'accuracy in decimal digits = ',i2,/,10x, &
                      'r2 = ',f33.30, f33.30, i5,/10x,'r2d = ',f33.30, &
                      f33.30, i5)
+#endif
 end if
                 if(istartint == 1) then
                 istartint = 0
@@ -2605,7 +2954,7 @@ end if
                    iopleg = 0
                 if(iopleg == 0 .or. (naccr >= minacc .and. naccr == naccint) &
                     .or. (naccr == naccrt .and. nmatch - 2 >= minacc .and. &
-                   x >= 0.01e0_knd)) then
+                   x >= SW_LITERAL(0.01e0_knd,"0.01e0"))) then
                 if(iopleg == 2) iopleg = 1
                 go to 940
                 end if
@@ -2628,45 +2977,46 @@ end if
                 end do
 840       if(iqlegflag == 0) then
                 limq = lnum + 3 * ndec + int(c) + 2
-                if(knd == kindd .and. aimag(cc) < 10.0e0_knd .and. &
-                   real(cc) <= 60.0e0_knd .and. real(cc) >= 10.0e0_knd &
-                    .and. m <= 40 .and. x <= 0.99e0_knd .and. x > 0.1e0_knd) &
+                if(knd == kindd .and. aimag(cc) < SW_LITERAL(10.0e0_knd,"10.0e0") .and. &
+                   SW_CONVERT_REAL(cc) <= SW_LITERAL(60.0e0_knd,"60.0e0") .and. SW_CONVERT_REAL(cc) >= &
+      & SW_LITERAL(10.0e0_knd,"10.0e0") &
+                    .and. m <= 40 .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. x > SW_LITERAL(0.1e0_knd,"0.1e0")) &
                   limq = max(limq, 250 - int(50 * x) + 2)
                          call qleg(m, lnum, limq, maxmp, maxq, x, ndec, nex, iflagl1, &
-                                 qdrat, qdqr, qdm1, iqdm1, qdl, iqdl, qrat, qm1, iqm1, ql, &
-                                 iql, termpq, itermpq, qrat1, qdrat1, qm0, qdm0)
+                     qdrat, qdqr, qdm1, iqdm1, qdl, iqdl, qrat, qm1, iqm1, ql, &
+                     iql, termpq, itermpq, qrat1, qdrat1, qm0, qdm0)
                 iqlegflag = 1
                 end if
-              fajo(1) = cc / (rm2 - 1.0e0_knd)
+              fajo(1) = cc / (rm2 - SW_LITERAL(1.0e0_knd,"1.0e0"))
               ifajo(1) = 0
               if(m == 0) go to 870
                 do im = 1, m
                 fajo(1) = fajo(1) * (im + im) / cc
-                if(abs(fajo(1)) < 1.0e+10_knd) go to 850
-                fajo(1) = fajo(1) * (1.0e-10_knd)
+                if(abs(fajo(1)) < SW_LITERAL(1.0e+10_knd,"1.0e+10")) go to 850
+                fajo(1) = fajo(1) * (SW_LITERAL(1.0e-10_knd,"1.0e-10"))
                 ifajo(1) = ifajo(1) + 10
 850             continue
-                if(abs(fajo(1)) > 1.0e-10_knd) go to 860
-                fajo(1) = fajo(1) * (1.0e+10_knd)
+                if(abs(fajo(1)) > SW_LITERAL(1.0e-10_knd,"1.0e-10")) go to 860
+                fajo(1) = fajo(1) * (SW_LITERAL(1.0e+10_knd,"1.0e+10"))
                 ifajo(1) = ifajo(1) - 10
 860             continue
                 end do
 870           continue
               if(lnum == 1) go to 900
-              fajo(2) = -cc * fajo(1) / (rm2 - 3.0e0_knd)
+              fajo(2) = -cc * fajo(1) / (rm2 - SW_LITERAL(3.0e0_knd,"3.0e0"))
               ifajo(2) = ifajo(1)
               if(lnum == 2) go to 900
                 do jl = 3, lnum - 1, 2
                 fajo(jl) = fajo(jl - 2) * (jl + m + m - 1) / (jl - 2)
                 ifajo(jl) = ifajo(jl - 2)
-                  if(abs(fajo(jl)) > 1.0e10_knd) then
-                  fajo(jl) = fajo(jl) * 1.0e-10_knd
+                  if(abs(fajo(jl)) > SW_LITERAL(1.0e10_knd,"1.0e10")) then
+                  fajo(jl) = fajo(jl) * SW_LITERAL(1.0e-10_knd,"1.0e-10")
                   ifajo(jl) = ifajo(jl) + 10
                   end if
                 fajo(jl + 1) = fajo(jl - 1) * (jl + m + m - 1) / (jl)
                 ifajo(jl + 1) = ifajo(jl - 1)
-                  if(abs(fajo(jl + 1)) > 1.0e10_knd) then
-                  fajo(jl + 1) = fajo(jl + 1) * 1.0e-10_knd
+                  if(abs(fajo(jl + 1)) > SW_LITERAL(1.0e10_knd,"1.0e10")) then
+                  fajo(jl + 1) = fajo(jl + 1) * SW_LITERAL(1.0e-10_knd,"1.0e-10")
                   ifajo(jl + 1) = ifajo(jl + 1) + 10
                   end if
                 end do
@@ -2701,7 +3051,7 @@ end if
                          nacccor)
               iopleg = 2
                 if(naccleg > naccr .or. (naccleg == naccr .and. x &
-                    < 0.1e0_knd)) then
+                    < SW_LITERAL(0.1e0_knd,"0.1e0"))) then
                 naccr = naccleg
                 r2c(li) = r2lc
                 ir2e(li) = ir2le
@@ -2718,9 +3068,10 @@ end if
                 iopint = 0
                 end if
                 if(naccleg < minacc) then
-                if(knd == kindd .and. aimag(cc) < 10.0e0_knd .and. &
-                   real(cc) <= 60.0e0_knd .and. real(cc) >= 10.0e0_knd &
-                    .and. m <= 40 .and. x <= 0.99e0_knd .and. x > 0.1e0_knd &
+                if(knd == kindd .and. aimag(cc) < SW_LITERAL(10.0e0_knd,"10.0e0") .and. &
+                   SW_CONVERT_REAL(cc) <= SW_LITERAL(60.0e0_knd,"60.0e0") .and. SW_CONVERT_REAL(cc) >= &
+      & SW_LITERAL(10.0e0_knd,"10.0e0") &
+                    .and. m <= 40 .and. x <= SW_LITERAL(0.99e0_knd,"0.99e0") .and. x > SW_LITERAL(0.1e0_knd,"0.1e0") &
                     .and. li < nbp .and. naccr < minacc) iopleg1 = 1
                 if(iopleg1 == 0 .and. x >= xneu .and. iopneu0 == 0 .and. &
                    istartneu0 == 1 .and. iopeta == 0 .and. ndec - jsubf > &
@@ -2739,7 +3090,7 @@ end if
                      max(naccleg, nacclegp)
                   if(legstinc < 4) legstinc = 1
                   legstart = l + legstinc
-                  if(abs(aimag(cc)) >= 5.0e0_knd .and. ((ir1e(li)+ &
+                  if(abs(aimag(cc)) >= SW_LITERAL(5.0e0_knd,"5.0e0") .and. ((ir1e(li)+ &
                      ir1de(li)) > 2 .or. li < nbp)) legstart = l + 1
                   if(legstart < l + 1) legstart = l + 1
                   if(legstart == l + 1 .and. iopleg == 0) iopleg = 1
@@ -2762,14 +3113,20 @@ end if
                   if(iopneu0 /= 0 .and. istartneu0 == 1) &
                      then
                   iopneu0 = 4
-                  if(x >= 0.05e0_knd) iopeta = 4
+                  if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) iopeta = 4
                   end if
                 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
 920      if(knd == kindd) write(40, 820) naccleg, r2lc, ir2le, r2dlc, &
                                              ir2dle
+#else
+920 continue
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 825) naccleg, r2lc, ir2le, r2dlc, &
                                              ir2dle
+#endif
 end if
               nacclegp = naccleg
               if(naccleg <= 0) iopleg = 0
@@ -2820,10 +3177,14 @@ end if
                 iopmatch = 0
                 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 820) naccleg1, r2l1c, ir2l1e, &
                                              r2dl1c, ir2dl1e
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 825) naccleg1, r2l1c, ir2l1e, &
                                              r2dl1c, ir2dl1e
+#endif
 end if
 960           continue
 !
@@ -2831,32 +3192,34 @@ end if
 !     equal to 0
               if(iopneu0 == 0 .or. istartneu0 == 0 .or. ndec - jsubf <= naccr &
                   .or. (naccr >= minacc .and. naccr /= naccrt .and. x < &
-                 0.1e0_knd)) go to 1080
+                 SW_LITERAL(0.1e0_knd,"0.1e0"))) go to 1080
               if(iopneu0 > 1) go to 1050
               if(ibflag2 == 0) go to 1040
                 if(knd == kindd) then
-                if(x >= 0.01e0_knd) limn = 2 * int(25 / (x * x) + 300 / x+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) limn = 2 * int(25 / (x * x) + 300 / x+ &
                                          3 * c + 10000) + 2
-                if(x >= 0.1e0_knd) limn = 2 * int((lnum + c / 5 + 0.5e0_knd* &
-                                         maxm + 200) * 1.4e0_knd / x) + 2
-                if(x >= 0.5e0_knd) limn = 2 * int((lnum + c / 5 + 0.5e0_knd* &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limn = 2 * int((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0")* &
+                                         maxm + 200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 2
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limn = 2 * int((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0")* &
                                          maxm + 200) / x) + 2
-                if(x >= 1.0e0_knd) limn = 2 * int(lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limn = 2 * int(lnum + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                         200) + 2
                 end if
                 if(knd == kindq) then
-                if(x >= 0.01e0_knd) limn = 2 * int(25 / (x * x) + 400 / x+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) limn = 2 * int(25 / (x * x) + 400 / x+ &
                                          3 * c + 14000) + 2
-                if(x >= 0.1e0_knd) limn = 2 * int((lnum + c / 5 + 0.5e0_knd* &
-                                         maxm + 350) * 1.4e0_knd / x) + 2
-                if(x >= 0.5e0_knd) limn = 2 * int((lnum + c / 5 + 0.5e0_knd* &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limn = 2 * int((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0")* &
+                                         maxm + 350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 2
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limn = 2 * int((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0")* &
                                          maxm + 300) / x) + 2
-                if(x >= 1.0e0_knd) limn = 2 * int(lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limn = 2 * int(lnum + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * maxm+ &
                                         300) + 2
                 end if
               limn = limn + maxm
               if(limn > maxn) limn = maxn - 2
-              limbesf = 4 * int(real(cc * xb) + abs(aimag(cc * xb))) + 25
+              limbesf = 4 * int(SW_CONVERT_REAL(cc * xb) + abs(aimag(cc * xb))) + 25
               call sphneu(cc, xb, limn, maxn, maxlp, limbesf, ndec, nex, &
                           sneuf2, sneun2, ineue2, sneudf2, sneudr2)
               ibflag2 = 0
@@ -2865,28 +3228,34 @@ end if
 1050          continue
               if(iopneu0 == 4) go to 1080
                 if(knd == kindd) then
-                if(x >= 0.01e0_knd) limneu0 = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) limneu0 = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
                                            10000)
-                if(x >= 0.1e0_knd) limneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                           200) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) limneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                           200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            200) / x)
-                if(x >= 1.0e0_knd) limneu0 = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limneu0 = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            200)
                 end if
                 if(knd == kindq) then
-                if(x >= 0.01e0_knd) limneu0 = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.01e0_knd,"0.01e0")) limneu0 = 2 * int(25 / (x * x) + 400 / x + 3 * c+ &
                                             14000)
-                if(x >= 0.1e0_knd) limneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                           350) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) limneu0 = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                           350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limneu0 = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            300) / x)
-                if(x >= 1.0e0_knd) limneu0 = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limneu0 = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            300)
                 end if
               if(iopneu0 == 3 .and. jtest0 >= minacc) &
                   limneu0 = jneu0max + jneu0max + 40+ &
-                          int(sqrt(c) * (2 / min(1.0e0_knd, x)) + 100 / x)
+                          int(sqrt(c) * (2 / min(SW_LITERAL(1.0e0_knd,"1.0e0"), x)) + 100 / x)
               if(limneu0 > limd - 2) limneu0 = limd - 2
               limneu0 = min(limneu0, limn - m - 2)
               iopneu0 = 3
@@ -2914,12 +3283,12 @@ end if
               if(iopeta /= 0 .and. naccneu0 >= naccetas) iopeta = 0
                 if(naccneu0 >= minacc .and. naccneu0p >= minacc .and. &
                    naccneu0p2 >= minacc) then
-                if(l > max(liplp, nbp) .and. x > 0.1e0_knd) iopint = 0
+                if(l > max(liplp, nbp) .and. x > SW_LITERAL(0.1e0_knd,"0.1e0")) iopint = 0
                 iopleg = 0
                 iopleg1 = 0
                 iopeta = 0
                 end if
-              if(naccneu0 < minacc .and. iopeta == 0 .and. x >= 0.05e0_knd) &
+              if(naccneu0 < minacc .and. iopeta == 0 .and. x >= SW_LITERAL(0.05e0_knd,"0.05e0")) &
                     iopeta = 1
                 if(naccneu0 > naccr .or. (naccneu0 == naccr .and. naccleg &
                     == naccr .and. jflagl == 1)) then
@@ -2932,15 +3301,19 @@ end if
                 iopmatch = 0
                 end if
                 if(naccneu0 > minacc + 1 .and. naccneu0p > minacc + 1 .and. &
-                   li > liplp + 10 .and. x >= 0.1e0_knd) then
+                   li > liplp + 10 .and. x >= SW_LITERAL(0.1e0_knd,"0.1e0")) then
                  istartint = 2
                  iopint = 0
                  end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindd) write(40, 820) naccneu0, r2nc, ir2ne, r2dnc, &
                                              ir2dne
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 825) naccneu0, r2nc, ir2ne, r2dnc, &
                                              ir2dne
+#endif
 end if
               naccneu0p2 = naccneu0p
               if(naccneu0 == 0) iopneu0 = 0
@@ -2948,11 +3321,16 @@ end if
 !
 !      r2 calculation using the variable eta expansion
               if(iopneu0 /= 0 .and. iopneu0 /= 4 .and. iopeta == 0 .and. x >= &
-                 0.05e0_knd .and. naccr < minacc .and. istarteta /= 0) &
+                 SW_LITERAL(0.05e0_knd,"0.05e0") .and. naccr < minacc .and. istarteta /= 0) &
                   iopeta = 1
               if(iopneu0 == 4) iopneu0 = 1
               if(iopeta == 0 .or. naccr >= minacc .or. istarteta == 0) &
                    go to 1310
+              if(.not.allocated(sneudrsv)) then
+                allocate( sneudrsv(jnenmax, maxlp), ineuesv(jnenmax, maxn), sneufsv(jnenmax, maxn), &
+                  sneudfsv(jnenmax, maxn), sneunsv(jnenmax, maxn), pratbsv(jnenmax, maxp), &
+                  prattsv(jnenmax, maxp), pdrattsv(jnenmax, maxp))
+              end if
               naccetab = 0
               iopnee = 0
               if(nee < neelow) nee = neelow
@@ -2964,10 +3342,10 @@ end if
               jetam = 0
                 if(ieta == 0) then
                   do jnet = 1, neta
-                  ang = jnet * pi * 0.5e0_knd / (neta + 1)
+                  ang = jnet * pi * SW_LITERAL(0.5e0_knd,"0.5e0") / (neta + 1)
                   eta(jnet) = cos(ang)
-                  wmeta2(jnet) = 2.0e0_knd * (1.0e0_knd + eta(jnet))* &
-                               (sin(0.5e0_knd * ang) ** 2)
+                  wmeta2(jnet) = SW_LITERAL(2.0e0_knd,"2.0e0") * (SW_LITERAL(1.0e0_knd,"1.0e0") + eta(jnet))* &
+                               (sin(SW_LITERAL(0.5e0_knd,"0.5e0") * ang) ** 2)
                   xbn(jnet) = sqrt(x * x + wmeta2(jnet))
                   xln(jnet) = eta(jnet) * x / xbn(jnet)
                   end do
@@ -2982,23 +3360,29 @@ end if
               etainp(1) = eta(nee)
               xlninp(1) = xln(nee)
                 if(knd == kindd) then
-                if(x >= 0.05e0_knd) limn = 2 * int(25 / (x * x) + 300 / x+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) limn = 2 * int(25 / (x * x) + 300 / x+ &
                                          3 * c + 10000) + 2
-                if(x >= 0.1e0_knd) limn = 2 * ((lnum + c / 5 + 0.5e0_knd * maxm+ &
-                                        200) * 1.4e0_knd / x) + 2
-                if(x >= 0.5e0_knd) limn = 2 * ((lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limn = 2 * ((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
+                                        200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 2
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limn = 2 * ((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
                                         300) / x) + 2
-                if(x >= 1.0e0_knd) limn = 2 * (lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limn = 2 * (lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
                                         300) + 2
                 end if
                 if(knd == kindq) then
-                if(x >= 0.05e0_knd) limn = 2 * int(25 / (x * x) + 400 / x+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) limn = 2 * int(25 / (x * x) + 400 / x+ &
                                          3 * c + 14000) + 2
-                if(x >= 0.1e0_knd) limn = 2 * ((lnum + c / 5 + 0.5e0_knd * maxm+ &
-                                        350) * 1.4e0_knd / x) + 2
-                if(x >= 0.5e0_knd) limn = 2 * ((lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limn = 2 * ((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
+                                        350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x) + 2
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limn = 2 * ((lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
                                         400) / x) + 2
-                if(x >= 1.0e0_knd) limn = 2 * (lnum + c / 5 + 0.5e0_knd * maxm+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limn = 2 * (lnum + c / 5 + SW_LITERAL(0.5e0_knd,"0.5e0") &
+      & * maxm+ &
                                         400) + 2
                 end if
               limn = limn + m
@@ -3034,9 +3418,13 @@ end if
                   ineuee(je) = ineuesv(jn, je)
 1130              continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                 write(40, 1140) etaval
+#endif
+#ifndef SWF_PRECISION_MPFR
 1140            format(8x,'r2eta: reused expansion functions for eta =' &
                        ,f13.9,'.')
+#endif
 end if
                 go to 1180
 1150           continue
@@ -3044,7 +3432,7 @@ end if
               jnen = jnen + 1
               jnencur = jnen - (jnenmax * int((jnen - 1) / jnenmax))
               neeb(jnencur) = nee
-              limbesf = 4 * int(real(cc * xbninp) + abs(aimag(cc * xbninp))) + 25
+              limbesf = 4 * int(SW_CONVERT_REAL(cc * xbninp) + abs(aimag(cc * xbninp))) + 25
               call sphneu(cc, xbninp, limn, maxn, maxlp, limbesf, ndec, nex, &
                           sneufe, sneune, ineuee, sneudfe, sneudre)
                 do je = 1, limn
@@ -3082,20 +3470,20 @@ end if
                 pratb(je) = prat(1, je)
                 pratbsv(jnencur, je) = pratb(je)
                 end do
-              pratb(limpd + 1) = 0.0e0_knd
-              pratb(limpd + 2) = 0.0e0_knd
-              pratbsv(jnencur, limpd + 1) = 0.0e0_knd
-              pratbsv(jnencur, limpd + 2) = 0.0e0_knd
+              pratb(limpd + 1) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratb(limpd + 2) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratbsv(jnencur, limpd + 1) = SW_LITERAL(0.0e0_knd,"0.0e0")
+              pratbsv(jnencur, limpd + 2) = SW_LITERAL(0.0e0_knd,"0.0e0")
 1180          continue
-              pcoefe = (x * x + 1.0e0_knd) / (xbn(nee) * xbn(nee))
-              apcoef = (rm / 2.0e0_knd) * log10(pcoefe)
+              pcoefe = (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) / (xbn(nee) * xbn(nee))
+              apcoef = (rm / SW_LITERAL(2.0e0_knd,"2.0e0")) * log10(pcoefe)
               ipcoefe = int(apcoef)
               pcoefe = ten ** (apcoef - ipcoefe)
               pcoefo = pcoefe * pratt(2) / pratb(2)
               ipcoefo = ipcoefe
               pdcoefe = pcoefe
               if(m /= 0) pdcoefe = -pcoefe * rm * xln(nee) * xbn(nee)* &
-                          xbn(nee) / ((x * x + 1.0e0_knd) * wmeta2(nee))
+                          xbn(nee) / ((x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) * wmeta2(nee))
               ipdcoefe = ipcoefe
               pdcoefo = pdcoefe * pdratt(2) / pratb(2)
               ipdcoefo = ipdcoefe
@@ -3150,28 +3538,34 @@ end if
               ipdcoefe = ipdcoefe + iterm
 1210          continue
                 if(knd == kindd) then
-                if(x >= 0.05e0_knd) limeta = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) limeta = 2 * int(25 / (x * x) + 300 / x + 3 * c+ &
                                            1250 * knd)
-                if(x >= 0.1e0_knd) limeta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                          200) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) limeta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limeta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                          200) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limeta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                           300) / x)
-                if(x >= 1.0e0_knd) limeta = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limeta = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            300)
                 end if
                 if(knd == kindq) then
-                if(x >= 0.05e0_knd) limeta = 2 * int(25 / (x * x) + 400 / x+ &
+                if(x >= SW_LITERAL(0.05e0_knd,"0.05e0")) limeta = 2 * int(25 / (x * x) + 400 / x+ &
                                            3 * c + 1250 * knd)
-                if(x >= 0.1e0_knd) limeta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
-                                          350) * 1.4e0_knd / x)
-                if(x >= 0.5e0_knd) limeta = 2 * int((l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) limeta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
+                                          350) * SW_LITERAL(1.4e0_knd,"1.4e0") / x)
+                if(x >= SW_LITERAL(0.5e0_knd,"0.5e0")) limeta = 2 * int((l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                           400) / x)
-                if(x >= 1.0e0_knd) limeta = 2 * int(l - m + c / 5 + 0.5e0_knd * m+ &
+                if(x >= SW_LITERAL(1.0e0_knd,"1.0e0")) limeta = 2 * int(l - m + c / 5 + &
+      & SW_LITERAL(0.5e0_knd,"0.5e0") * m+ &
                                            400)
                 end if
               if(iopeta == 3 .and. naccrsav > minacc) &
                    limeta = jeta + jeta + 40+ &
-                          int(sqrt(c) * (2 / min(1.0e0_knd, x)) + 5 / x)
+                          int(sqrt(c) * (2 / min(SW_LITERAL(1.0e0_knd,"1.0e0"), x)) + 5 / x)
               if(iopeta == 3 .and. naccrsav <= minacc) &
                               limeta = jeta + jeta + 500 + c
               if(iopeta == 2) limeta = max(limeta, jeta + jeta + 500 + int(c))
@@ -3207,16 +3601,26 @@ end if
                 jetam = jeta
                 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
 1270     if(knd == kindd) write(40, 1280) naccetasc, etaval, nee, r2ec, &
                                           ir2ee, r2dec, ir2dee
+#else
+1270 continue
+#endif
+#ifndef SWF_PRECISION_MPFR
               if(knd == kindq) write(40, 1285) naccetasc, etaval, nee, r2ec, &
                                           ir2ee, r2dec, ir2dee
+#endif
+#ifndef SWF_PRECISION_MPFR
 1280          format(15x,'r2eta accuracy = ',i2,' decimal digits; eta', &
                      ' = ',f17.14,'; nee = ',i4,/,10x,'r2 = ', f17.14, &
                      f17.14, i5, 5x,'r2d = ',f17.14, f17.14, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1285          format(15x,'r2eta accuracy = ',i2,' decimal digits; eta', &
                      ' = ',f17.14,'; nee = ',i4,/,10x,'r2 = ', f33.30, &
                      f33.30, i5,/10x,'r2d = ',f33.30, f33.30, i5)
+#endif
 end if
               iopeta = 3
                 if(naccetas < naccetamax - 2 .or. nee == 30) then
@@ -3265,7 +3669,7 @@ end if
                 end if
 1320          continue
                 if(iopint /= 0 .and. naccint < naccr - 5 .and. naccint < &
-                naccrsav - 5 .and. x > 0.1e0_knd) then
+                naccrsav - 5 .and. x > SW_LITERAL(0.1e0_knd,"0.1e0")) then
                 iopint = 0
                 if(li > max(nbp, liplp)) istartint = 2
                 end if
@@ -3281,25 +3685,33 @@ end if
               if(naccr == ndec) naccr = ndec - 1
               if(naccr > 0) go to 1330
               naccr = 0
-              r2c(li) = (0.0e0_knd, 0.0e0_knd)
+              r2c(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               ir2e(li) = 0
-              r2dc(li) = (0.0e0_knd, 0.0e0_knd)
+              r2dc(li) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
               ir2de(li) = 0
 1330          continue
                 if(ioprad == 1) then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                 write(20, 1340) l, r1c(li), ir1e(li), &
                      r1dc(li), ir1de(li), naccr1, ' '
+#endif
+#ifndef SWF_PRECISION_MPFR
 1340            format(1x, i5, 2x, 2(f17.14, 1x, f17.14, i6, 2x), i2, a)
+#endif
 end if
                 go to 1400
                 end if
-                if(x == 0.0e0_knd) then
+                if(x == SW_LITERAL(0.0e0_knd,"0.0e0")) then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                 write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                          r2c(li), ir2e(li), r2dc(li), ir2de(li), naccr, chr_e
+#endif
+#ifndef SWF_PRECISION_MPFR
 1350            format(1x, i5, 2x, 2(f17.14, 1x, f17.14, i6, 2x),/,8x, &
                          2(f17.14, 1x, f17.14, i6, 2x), i2, a)
+#endif
 end if
                 go to 1400
                 end if
@@ -3312,7 +3724,9 @@ end if
                        naccr) jjflagl = 1
                   if(iopmatch == 1) then
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1360) li + m - 1, li + m
+#endif
 end if
                   end if
                 naccrsav = naccr
@@ -3341,8 +3755,12 @@ end if
                   ir2de(li - 1) = ir1de(li)
                   jjflagl = 0
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1360) li + m - 2, li + m - 1
+#endif
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1395) naccrp, l - 1
+#endif
 end if
                   end if
                 if(iopmatchp == 0 .and. naccrps >= naccrp) &
@@ -3350,15 +3768,19 @@ end if
                   if(jjflagl == 1 .or. naccrp == min(naccrplp, naccr1p)) &
                       then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1350) l - 1, r1c(li - 1), ir1e(li - 1), &
                       r1dc(li - 1), ir1de(li - 1), r2c(li - 1), ir2e(li - 1), &
                       r2dc(li - 1), ir2de(li - 1), naccrp, chr_e
+#endif
 end if
                   else
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1380) l - 1, r1c(li - 1), ir1e(li - 1), &
                       r1dc(li - 1), ir1de(li - 1), r2c(li - 1), ir2e(li - 1), &
                       r2dc(li - 1), ir2de(li - 1), naccrp, chr_w
+#endif
 end if
                   end if
                   if(iopmatch == 1) then
@@ -3367,8 +3789,12 @@ end if
                   r2dc(li) = -r1dc(li - 1)
                   ir2de(li) = ir1de(li - 1)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1370) li + m - 1, li + m - 2
+#endif
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1395) naccr, l
+#endif
 end if
                   end if
                 jjflagl = 0
@@ -3377,39 +3803,53 @@ end if
                   if(jjflagl == 1 .or. naccr == min(naccrpl, naccr1)) &
                       then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                                r2c(li), ir2e(li), r2dc(li), ir2de(li), &
                                naccr, chr_e
+#endif
 end if
                   else
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1380) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                                r2c(li), ir2e(li), r2dc(li), ir2de(li), &
                                naccr, chr_w
+#endif
 end if
                   end if
                 naccrsav = naccr
                 go to 1400
                 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
 1360          format(8x,'Values for r2 and r2d for ','l = ',i5, &
                      ' are given by r1 and r1d for l = ',i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1370          format(8x,'Values for r2 and r2d for ','l = ',i5, &
                      ' are given by -r1 and -r1d for l = ',i5)
+#endif
 end if
                 if((jflagl == 1 .and. naccr == naccleg .and. &
                     naccr /= naccint) .or. naccr == min(naccrpl, naccr1)) &
                      then
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                 write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                          r2c(li), ir2e(li), r2dc(li), ir2de(li), naccr, chr_e
+#endif
 end if
                 else
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                 write(20, 1380) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                          r2c(li), ir2e(li), r2dc(li), ir2de(li), naccr, chr_w
+#endif
+#ifndef SWF_PRECISION_MPFR
 1380            format(1x, i5, 2x, 2(f17.14, 1x, f17.14, i6, 2x),/,8x, &
                           2(f17.14, 1x, f17.14, i6, 2x), i2, a)
+#endif
 end if
                 end if
               go to 1400
@@ -3418,12 +3858,16 @@ end if
                   if(min(naccrplp, naccr1p) >= nmatch - iii) then
                   naccrp = min(naccrplp, naccr1p)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 775) l - 1, naccrp
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1350) l - 1, r1c(li - 1), ir1e(li - 1), r1dc(li - 1), &
                            ir1de(li - 1), r2c(li - 1), ir2e(li - 1), r2dc(li - 1), &
                            ir2de(li - 1), naccrp, chr_e
+#endif
 end if
                   else
                   r2c(li - 1) = r1c(li)
@@ -3444,22 +3888,30 @@ end if
                   if(naccrp > ndec - 1) naccrp = ndec - 1
                   naccrp = min(naccrp, naccr1p, nmatch)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1395) naccrp, l - 1
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1380) l - 1, r1c(li - 1), ir1e(li - 1), r1dc(li - 1), &
                            ir1de(li - 1), r2c(li - 1), ir2e(li - 1), r2dc(li - 1), &
                            ir2de(li - 1), naccrp, chr_w
+#endif
 end if
                   end if
                   if(min(naccrpl, naccr1) >= nmatch - iii) then
                   naccr = min(naccrpl, naccr1)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 775) l, naccr
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1350) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                                  r2c(li), ir2e(li), r2dc(li), ir2de(li), naccr, chr_e
+#endif
 end if
                   else
                   r2c(li) = -r1c(li - 1)
@@ -3480,17 +3932,23 @@ end if
                   if(naccr > ndec - 1) naccr = ndec - 1
                   naccr = min(naccr, naccr1, nmatch)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                   write(40, 1395) naccr, l
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                   write(20, 1380) l, r1c(li), ir1e(li), r1dc(li), ir1de(li), &
                                  r2c(li), ir2e(li), r2dc(li), ir2de(li), &
                                  naccr, chr_w
+#endif
 end if
                   end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
 1395            format(10x,'Accuracy using eigenvalue match is ',i3, &
                        ' digits for l = ',i5)
+#endif
 end if
                 end if
 1400          continue
@@ -3509,29 +3967,37 @@ end if
                 if(ioprad == 2 .and. li <= lipl .and. &
                      match(2) /= 0) then
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
                 if(ix == 1 .and. naccrp < 6) write(60,*) &
                    ' est. acc. = ',naccrp, ' digits for m = ',m, &
                    ' l = ',l - 1,' x = ',x,' c = ',cc
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(ix == 1 .and. naccr < 6) write(60,*) &
                   ' est. acc. = ',naccr, ' digits for m = ', &
                    m,' l = ',l,' x = ',x,' c = ',cc
+#endif
 end if
                 end if
                 if(ioprad == 2 .and. (li > lipl .or. match(2) == 0) .and. naccr < 6) then
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
                 write(60,*) ' est. acc. = ',naccr,' digits for m = ',m, &
                  ' l = ', l,' x = ',x,' c = ',cc
+#endif
 end if
                 end if
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
               if(ioprad == 1 .and. naccr1 < 6) write(60,*) &
                  'est. r1 acc. = ',naccr1,' digits for m = ',m,' l = ', &
                  l,' x = ',x,' c = ',cc
+#endif
 end if
               naccetamax = 0
-              if(ioprad == 2 .and. li <= lipl .and. match(2) /= 0.0e0_knd .and. ix == 1) nar(li - 1) = naccrp
-              if(ioprad == 2 .and. li <= lipl .and. match(2) /= 0.0e0_knd .and. ix == 1) nar(li) = naccr
-              if(ioprad == 2 .and. (li > lipl .or. match(2) == 0)) nar(li) = naccr
+              if(ioprad == 2 .and. li <= lipl .and. match(2) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. ix == 1) &
+      & nar(li - 1) = naccrp
+              if(ioprad == 2) nar(li) = naccr
               if(ioprad == 1) nar(li) = naccr1
               naccrp = naccr
               if(ioprad == 2) naccrplp = naccrpl
@@ -3539,8 +4005,10 @@ end if
               naccrep = naccre
 1410      if(ndec - jsubms - 1 < 6) then
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
                 write(60,*) ' est. MS norm acc. = ',ndec - jsubms - 1, &
                   ' digits for m = ',m,' l = ', l,' c = ',cc
+#endif
 end if
                 end if
               if(iopang == 0) go to 1510
@@ -3564,27 +4032,59 @@ end if
                 nads(li, jarg) = 0
                 if(iopang == 2) nads(li, jarg) = naccds(jarg)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                 if(iopang == 1) write(50, 1430) barg(jarg), naccs(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(iopang == 2) write(50, 1435) barg(jarg), naccs(jarg), naccds(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1430            format(1x,'eta = ',f17.14,'   accuracy = ',i2, ' digits.')
+#endif
+#ifndef SWF_PRECISION_MPFR
 1435            format(1x,'eta = ',f17.14,'   s1 and s1d accuracy = ',i2,' and ',i2,' digits.')
+#endif
 end if
 if (output) then
+#ifndef SWF_PRECISION_MPFR
                 if(iopang == 1) write(30, 1440) barg(jarg), s1c(jarg), is1e(jarg), naccs(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(iopang == 2) write(30, 1450) barg(jarg), s1c(jarg), is1e(jarg), s1dc(jarg), &
                         is1de(jarg), naccs(jarg), naccds(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1440            format(1x, f19.14, 2x, f17.14, 1x, f17.14, 2x, i5, 2x, i2)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1450            format(1x, f19.14, 2x, f17.14, 1x, f17.14, 2x, i5, 2x, f17.14, 1x, f17.14, 2x, i5, 2x, i2,', ',i2)
+#endif
 end if
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
                 if(knd == kindd .and. iopang == 1) write(50, 1460) s1c(jarg), is1e(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(knd == kindd .and. iopang == 2) write(50, 1470) s1c(jarg), is1e(jarg), s1dc(jarg), is1de(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(knd == kindq .and. iopang == 1) write(50, 1480) s1c(jarg), is1e(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
                 if(knd == kindq .and. iopang == 2) write(50, 1490) s1c(jarg), is1e(jarg), s1dc(jarg), is1de(jarg)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1460            format(12x,'s1 = ',f17.14, f17.14, 2x, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1470            format(12x,'s1 = ',f17.14, 1x, f17.14, 2x, i5, 5x,'s1d = ',f17.14, 1x, f17.14, 2x, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1480            format(12x,'s1 = ',f33.30, f33.30, 2x, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 1490            format(12x,'s1 = ',f33.30, 1x, f33.30, 2x, i5,/12x,'s1d = ',f33.30, 1x, f33.30, 2x, i5)
+#endif
 end if
 1500            continue
 1510          continue
@@ -3595,7 +4095,9 @@ end if
               iegch = -int(log10(abs((eig(i) - eig(j)) / eig(i)) + dec))
                 if(iegch >= min(8, ieigt(i) - 1, ieigt(j) - 1)) then
 if (warn) then
+#ifndef SWF_PRECISION_MPFR
                 write(60,*) m, cc, i + m - 1, j + m - 1,' duplicated eigenvalue'
+#endif
 end if
                 end if
               end do
@@ -3728,18 +4230,21 @@ end if
 !                         norm
 !               idmlms1e: exponent associated with dmlms1
 !
-        use complex_oblate_parameters
+    integer :: iacc, idmlms1e, idmlmse, ifactor, iopang, iopnorm, is1, is1d, iterm, itestm
+    integer :: ix, ixx, ixx2, j, ja, jang, jj, jlow, jsubms, k
+    integer :: kflag, kindd, kindq, l, lflag, lim, lims1, lm2, m, maxd
+    integer :: maxp, maxt, naccre, narg, ndec, nex, nfac
 !
 !  real(knd) scalars and arrays
-        real(knd) adec, aj, dcon, dec, factor, fterm, rm2, rm2m1, rm2m3, &
+        SW_REAL adec, aj, dcon, dec, factor, fterm, rm2, rm2m1, rm2m3, &
                   rm2p1, ten, teste, testeo
-        real(knd) barg(maxt), pdr(maxt, maxp), pdnorm(maxt), &
+        SW_REAL barg(maxt), pdr(maxt, maxp), pdnorm(maxt), &
                   pnorm(maxt), pr(maxt, maxp), pdtemp(maxt), ptemp(maxt), &
                   pdtempe(maxt), ptempe(maxt), pdtempo(maxt), ptempo(maxt)
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, dnew, dnewd, dmlms, dmlms1, dold, doldd, s1, s1d
-        complex(knd) enr(maxd), s1c(maxt), s1dc(maxt)
+        SW_COMPLEX cc, dnew, dnewd, dmlms, dmlms1, dold, doldd, s1, s1d
+        SW_COMPLEX enr(maxd), s1c(maxt), s1dc(maxt)
 !
 !  integer arrays
         integer ipdnorm(maxt), ipnorm(maxt), ipdtemp(maxt), iptemp(maxt), &
@@ -3747,14 +4252,17 @@ end if
                 iptempo(maxt), is1de(maxt), is1e(maxt), naccs(maxt), &
                 naccds(maxt)
 !
-        ten = 10.0e0_knd
+        s1dc = 0
+        is1de = 0
+        naccds = 0
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec - 1)
         dcon = dec
-        adec = 1000.0e0_knd * dec
+        adec = SW_LITERAL(1000.0e0_knd,"1000.0e0") * dec
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** nfac
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         kflag = 0
         rm2 = m + m
         rm2m1 = m + m - 1
@@ -3762,7 +4270,7 @@ end if
         rm2m3 = m + m - 3
         if(l > (m + 1)) go to 30
           do 20 k = 1, narg
-          if(pnorm(k) == 0.0e0_knd) go to 20
+          if(pnorm(k) == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 20
           if(l == (m + 1)) go to 10
           ptempe(k) = pr(k, 1)
           iptempe(k) = 0
@@ -3789,19 +4297,19 @@ end if
         ixx2 = ixx + 2
         if(l < (m + 2)) go to 110
           do 100 k = 1, narg
-          if(pnorm(k) == 0.0e0_knd) go to 100
+          if(pnorm(k) == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 100
           if(ix /= 0) go to 60
           ptempe(k) = ptempe(k) * pr(k, l - m + 1)
-            if(abs(ptempe(k)) > 1.0e+10_knd) then
-            ptempe(k) = ptempe(k) * (1.0e-10_knd)
+            if(abs(ptempe(k)) > SW_LITERAL(1.0e+10_knd,"1.0e+10")) then
+            ptempe(k) = ptempe(k) * (SW_LITERAL(1.0e-10_knd,"1.0e-10"))
             iptempe(k) = iptempe(k) + 10
             end if
           ptemp(k) = ptempe(k)
           iptemp(k) = iptempe(k)
           if(abs(barg(k)) < adec) go to 100
           pdtempe(k) = pdtempe(k) * pdr(k, l - m + 1)
-            if(abs(pdtempe(k)) > 1.0e+10_knd) then
-            pdtempe(k) = pdtempe(k) * (1.0e-10_knd)
+            if(abs(pdtempe(k)) > SW_LITERAL(1.0e+10_knd,"1.0e+10")) then
+            pdtempe(k) = pdtempe(k) * (SW_LITERAL(1.0e-10_knd,"1.0e-10"))
             ipdtempe(k) = ipdtempe(k) + 10
             end if
           pdtemp(k) = pdtempe(k)
@@ -3809,15 +4317,15 @@ end if
           go to 100
 60    if(abs(barg(k)) < adec) go to 80
           ptempo(k) = ptempo(k) * pr(k, l - m + 1)
-            if(abs(ptempo(k)) > 1.0e+10_knd) then
-            ptempo(k) = ptempo(k) * (1.0e-10_knd)
+            if(abs(ptempo(k)) > SW_LITERAL(1.0e+10_knd,"1.0e+10")) then
+            ptempo(k) = ptempo(k) * (SW_LITERAL(1.0e-10_knd,"1.0e-10"))
             iptempo(k) = iptempo(k) + 10
             end if
           ptemp(k) = ptempo(k)
           iptemp(k) = iptempo(k)
 80        pdtempo(k) = pdtempo(k) * pdr(k, l - m + 1)
-            if(abs(pdtempo(k)) > 1.0e+10_knd) then
-            pdtempo(k) = pdtempo(k) * (1.0e-10_knd)
+            if(abs(pdtempo(k)) > SW_LITERAL(1.0e+10_knd,"1.0e+10")) then
+            pdtempo(k) = pdtempo(k) * (SW_LITERAL(1.0e-10_knd,"1.0e-10"))
             ipdtempo(k) = ipdtempo(k) + 10
             end if
           pdtemp(k) = pdtempo(k)
@@ -3829,13 +4337,13 @@ end if
         jang = 0
 !
 !  compute the associated Legendre function normalization factor
-        factor = 1.0e0_knd
+        factor = SW_LITERAL(1.0e0_knd,"1.0e0")
         ifactor = 0
         if(iopnorm == 0) go to 210
         if(m == 0) go to 170
           do 160 j = 1, m
           aj = j
-          factor = factor * (aj + aj) * (aj + aj - 1.0e0_knd)
+          factor = factor * (aj + aj) * (aj + aj - SW_LITERAL(1.0e0_knd,"1.0e0"))
             if(factor > teste) then
             factor = factor * testeo
             ifactor = ifactor + nfac
@@ -3851,7 +4359,7 @@ end if
             end if
 180       continue
 190     continue
-        factor = factor * 2.0e0_knd / (l + l + 1.0e0_knd)
+        factor = factor * SW_LITERAL(2.0e0_knd,"2.0e0") / (l + l + SW_LITERAL(1.0e0_knd,"1.0e0"))
           if(2 * (ifactor / 2) /= ifactor) then
           factor = factor * ten
           ifactor = ifactor - 1
@@ -3864,25 +4372,33 @@ end if
         dmlms1 = dmlms / factor
         idmlms1e = idmlmse - ifactor
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindd) write(50, 200) factor, ifactor
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindq) write(50, 205) factor, ifactor
+#endif
+#ifndef SWF_PRECISION_MPFR
 200     format(1x,'square root of Legendre norm = ',e23.14, 2x, i5)
+#endif
+#ifndef SWF_PRECISION_MPFR
 205     format(1x,'square root of Legendre norm = ',e39.30, 2x, i5)
+#endif
 end if
 210     continue
 !
 !  compute the angular function s1
           do 380 k = 1, narg
-          if(pnorm(k) == 0.0e0_knd) go to 220
+          if(pnorm(k) == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 220
           if((ix == 1) .and. (abs(barg(k)) < adec)) go to 220
-          if(((abs(abs(barg(k)) - 1.0e0_knd)) < adec) &
+          if(((abs(abs(barg(k)) - SW_LITERAL(1.0e0_knd,"1.0e0"))) < adec) &
                 .and. (m /= 0)) go to 220
           go to 230
-220       s1c(k) = (0.0e0_knd, 0.0e0_knd)
+220       s1c(k) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           is1e(k) = 0
           naccs(k) = ndec
           go to 300
-230       dold = (1.0e0_knd, 0.0e0_knd)
+230       dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           s1 = dold
           is1 = 0
           fterm = s1
@@ -3903,12 +4419,16 @@ end if
 240         continue
 250    if(j > jang) jang = j
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
           write(50, 260) barg(k), j
+#endif
+#ifndef SWF_PRECISION_MPFR
 260       format(8x,'s1 calculation for eta = ',f17.14,' converged in ', &
                  i6,' terms.')
+#endif
 end if
           if(lm2 < 1 .or. kflag == 1) go to 280
-          dold = (1.0e0_knd, 0.0e0_knd)
+          dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           j = lm2
             do 270 jj = 1, lm2
             dnew = dold / (pr(k, j + j + ixx2) * enr(j))
@@ -3919,16 +4439,16 @@ end if
             j = j - 1
 270         continue
 280       s1c(k) = s1 * dmlms * ptemp(k) * pnorm(k) / factor
-          if(abs(s1c(k)) /= 0.0e0_knd) iterm = int(log10(abs(s1c(k))))
-          if(abs(s1c(k)) == 0.0e0_knd) iterm = 0
+          if(abs(s1c(k)) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(s1c(k))))
+          if(abs(s1c(k)) == SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = 0
           s1c(k) = s1c(k) * (ten ** (-iterm))
           is1e(k) = is1 + iptemp(k) + ipnorm(k) + iterm - ifactor + idmlmse
-          if(abs(s1c(k)) >= 1.0e0_knd) go to 290
+          if(abs(s1c(k)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 290
           s1c(k) = s1c(k) * ten
           is1e(k) = is1e(k) - 1
 290       continue
-          if(abs(s1) == 0.0e0_knd) naccs(k) = 0
-            if(abs(s1) /= 0.0e0_knd) then
+          if(abs(s1) == SW_LITERAL(0.0e0_knd,"0.0e0")) naccs(k) = 0
+            if(abs(s1) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
             iacc = int(log10(abs((fterm) / (s1))))
             if(iacc < 0) iacc = 0
             if(iacc > ndec) iacc = ndec
@@ -3939,28 +4459,28 @@ end if
           if(naccs(k) > 0) go to 300
           naccs(k) = 0
           naccds(k) = 0
-          s1c(k) = (0.0e0_knd, 0.0e0_knd)
+          s1c(k) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           is1e(k) = 0
-          s1dc(k) = (0.0e0_knd, 0.0e0_knd)
+          s1dc(k) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           is1de(k) = 0
           go to 380
 !
 !       compute the first derivative of the angular function when
 !       iopang equals 2
 300    if(iopang /= 2) go to 380
-          if(pnorm(k) == 0.0e0_knd) go to 310
+          if(pnorm(k) == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 310
           if((ix == 0) .and. (abs(barg(k)) < adec)) go to 310
-          if(((abs(abs(barg(k)) - 1.0e0_knd)) < adec) .and. (m /= 0) &
+          if(((abs(abs(barg(k)) - SW_LITERAL(1.0e0_knd,"1.0e0"))) < adec) .and. (m /= 0) &
                .and. (m /= 2)) go to 310
           go to 320
-310       s1dc(k) = (0.0e0_knd, 0.0e0_knd)
+310       s1dc(k) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           is1de(k) = 0
           naccds(k) = ndec
           go to 370
-320       doldd = (1.0e0_knd, 0.0e0_knd)
+320       doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           s1d = doldd
           is1d = 0
-          if(l == 0) s1d = (0.0e0_knd, 0.0e0_knd)
+          if(l == 0) s1d = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           fterm = s1d
             do 330 j = jlow, lim
             dnewd = doldd * enr(j) * pdr(k, j + j + ixx2)
@@ -3979,7 +4499,7 @@ end if
 !  the full series. Retain that length when choosing the next degree's limit.
 340    jang = max(jang, j)
     if(lm2 < 1 .or. kflag == 1) go to 360
-          doldd = (1.0e0_knd, 0.0e0_knd)
+          doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           j = lm2
           ja = lm2
           if(m == 0 .and. ix == 0) ja = lm2 - 1
@@ -3993,12 +4513,12 @@ end if
             j = j - 1
 350         continue
 360       s1dc(k) = s1d * dmlms * pdtemp(k) * pdnorm(k) / factor
-          if(abs(s1dc(k)) /= 0.0e0_knd) iterm = int(log10(abs(s1dc(k))))
-          if(abs(s1dc(k)) == 0.0e0_knd) iterm = 0
+          if(abs(s1dc(k)) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(s1dc(k))))
+          if(abs(s1dc(k)) == SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = 0
           s1dc(k) = s1dc(k) * ten ** (-iterm)
           is1de(k) = is1d + ipdtemp(k) + ipdnorm(k) + iterm - ifactor + idmlmse
           naccds(k) = 0
-            if(abs(s1d) /= 0.0e0_knd) then
+            if(abs(s1d) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
             iacc = int(log10(abs((fterm) / (s1d))))
             if(iacc < 0) iacc = 0
             if(iacc > ndec) iacc = ndec
@@ -4006,11 +4526,12 @@ end if
                       ndec - 1 - jsubms) - iacc
             if(naccds(k) < 0) naccds(k) = 0
             end if
-          if(abs(s1dc(k)) >= 1.0e0_knd) go to 370
+          if(abs(s1dc(k)) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 370
           s1dc(k) = s1dc(k) * ten
           is1de(k) = is1de(k) - 1
 370       continue
-          if(naccds(k) == 0) s1dc(k) = (0.0e0_knd, 0.0e0_knd)
+          if(naccds(k) == 0) s1dc(k) = &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           if(naccds(k) == 0) is1de(k) = 0
 380       continue
         return
@@ -4088,24 +4609,28 @@ end if
 !               nsub   : subtraction error in calculating r1
 !               ndsub  : subtraction error in calculating r1d
 !
-        use complex_oblate_parameters
+    integer :: idmfe, iflag, ipcoefn, ir1de, ir1e, ir1ea, ir1ep, ir1tope, iterm, ix
+    integer :: j, jbes, jflag, jj, jterms, jtop, kflag, l, lim, limr1
+    integer :: lm2, m, maxd, maxj, maxlp, maxn, mml, n1i, n1r, ndec
+    integer :: ndsub, ndsub1i, ndsub1r, ndsubi, ndsubr, nex, nfac, nsub, nsuba, nsubai
+    integer :: nsubar, nsubi, nsubr
 !
 !  real(knd) scalars and arrays
-        real(knd) dec, em, pcoefn, r1dcoef, sposr, sposi, sposar, sposai, &
+        SW_REAL dec, em, pcoefn, r1dcoef, sposr, sposi, sposar, sposai, &
                   sdposr, sdposi, ten, teste, testeo, x, x2
-        real(knd) prat1(maxn)
+        SW_REAL prat1(maxn)
 !  complex(knd) scalars and arrays
-        complex(knd) cc, coef, dmfnorm, dnew, dnewd, dold, doldd, r1c, r1ca, &
+        SW_COMPLEX cc, coef, dmfnorm, dnew, dnewd, dold, doldd, r1c, r1ca, &
                      r1dc, r1temp, r1tempa, r1dtemp, r1dtempa, r1top, r1topa, &
                      r1dtop, term
-        complex(knd) enr(maxd), sbesdf(maxj), sbesdr(maxlp), sbesf(maxj), &
+        SW_COMPLEX enr(maxd), sbesdf(maxj), sbesdr(maxlp), sbesf(maxj), &
                      sbesn(maxlp)
 !
 !  integer array
         integer ibese(maxlp)
 !
 !  convergence ratio dec is set according to the requested accuracy
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec - 1)
         lm2 = (l - m) / 2
 !
@@ -4115,7 +4640,7 @@ end if
         nfac = nex / 2
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** nfac
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         ir1tope = 0
         mml = m + m - 1 + ix
         em = m
@@ -4123,38 +4648,42 @@ end if
         kflag = 0
         nsuba = 0
         x2 = x * x
-        term = (0.0e0_knd, 0.0e0_knd)
-        r1dcoef = -em / (x * (x * x + 1.0e0_knd))
+        term = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        r1dcoef = -em / (x * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")))
         coef = -(sbesn(m + 2) / (sbesn(m + 1) * sbesdr(m + 1)))* &
              ten ** (ibese(m + 2) - ibese(m + 1))
-        r1topa = (0.0e0_knd, 0.0e0_knd)
-        sposar = 0.0e0_knd
-        sposai = 0.0e0_knd
+        r1topa = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sposar = SW_LITERAL(0.0e0_knd,"0.0e0")
+        sposai = SW_LITERAL(0.0e0_knd,"0.0e0")
 !
 !  forward summation of numerator series for both r1 and r1d
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd = dold
-        sposr = 1.0e0_knd
-        sdposr = 1.0e0_knd
-        sposi = 0.0e0_knd
-        sdposi = 0.0e0_knd
+        sposr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sdposr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sposi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        sdposi = SW_LITERAL(0.0e0_knd,"0.0e0")
         r1top = dold
         r1dtop = doldd
           if(lm2 == 0 .and. ix == 0) then
           jflag = 1
           r1topa = -x2
-          sposar = 0.0e0_knd
-          sposai = 0.0e0_knd
+          sposar = SW_LITERAL(0.0e0_knd,"0.0e0")
+          sposai = SW_LITERAL(0.0e0_knd,"0.0e0")
           r1dtop = coef
-          sdposr = 0.0e0_knd
-          sdposi = 0.0e0_knd
-          if(real(coef) > 0.0e0_knd) sdposr = real(coef)
-          if(aimag(coef) > 0.0e0_knd) sdposi = aimag(coef)
+          sdposr = SW_LITERAL(0.0e0_knd,"0.0e0")
+          sdposi = SW_LITERAL(0.0e0_knd,"0.0e0")
+          if(SW_CONVERT_REAL(coef) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposr = SW_CONVERT_REAL(coef)
+          if(aimag(coef) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposi = aimag(coef)
           end if
           if(iflag == 1) then
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
           write(40, 10)
+#endif
+#ifndef SWF_PRECISION_MPFR
 10        format(8x,'r1bes: forward series not used.')
+#endif
 end if
           jtop = lm2
           go to 50
@@ -4167,13 +4696,13 @@ end if
           r1dtop = r1dtop + dnewd
             if(jflag == 1) then
             r1topa = r1topa + dnew
-            if(real(dnew) > 0.0e0_knd) sposar = sposar + real(dnew)
-            if(aimag(dnew) > 0.0e0_knd) sposai = sposai + aimag(dnew)
+            if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposar = sposar + SW_CONVERT_REAL(dnew)
+            if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposai = sposai + aimag(dnew)
             end if
-          if(real(dnew) > 0.0e0_knd) sposr = sposr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sposi = sposi + aimag(dnew)
-          if(real(dnewd) > 0.0e0_knd) sdposr = sdposr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sdposi = sdposi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposr = sposr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposi = sposi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposr = sdposr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposi = sdposi + aimag(dnewd)
           if((abs(dnew / r1top) + abs(dnewd / r1dtop)) < dec) go to 30
             if(abs(r1top) > teste) then
             r1top = r1top * testeo
@@ -4199,16 +4728,20 @@ end if
         jtop = min(j, lim)
         jterms = jtop - lm2
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 40) lim, jterms
+#endif
+#ifndef SWF_PRECISION_MPFR
 40      format(8x,'r1bes: ',i6,' total terms ', &
                'available; forward series converged in ',i6,' terms.')
+#endif
 end if
 50  continue
 !
 !  backward summation of numerator series for r1 and r1d
         if(lm2 < 1 .or. kflag == 1) go to 80
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 70 j = lm2, 1,-1
           jj = j + j + ix
           dnew = -dold / (sbesf(jj + m) * prat1(jj + 1) * enr(j))
@@ -4218,15 +4751,15 @@ end if
             term = -x2 * dnew
             r1topa = r1top + term
             dnewd = coef * dnewd
-            if(real(term) > 0.0e0_knd) sposar = sposar + real(term)
-            if(aimag(term) > 0.0e0_knd) sposai = sposai + aimag(term)
+            if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposar = sposar + SW_CONVERT_REAL(term)
+            if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposai = sposai + aimag(term)
             end if
           r1top = r1top + dnew
           r1dtop = r1dtop + dnewd
-          if(real(dnew) > 0.0e0_knd) sposr = sposr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sposi = sposi + aimag(dnew)
-          if(real(dnewd) > 0.0e0_knd) sdposr = sdposr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sdposi = sdposi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposr = sposr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposi = sposi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposr = sdposr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sdposi = sdposi + aimag(dnewd)
           if(j == 1) go to 80
           if((abs(dnew / r1top) + abs(dnewd / r1dtop)) < dec) go to 80
             if(abs(r1top) > teste) then
@@ -4240,12 +4773,12 @@ end if
             sdposr = sdposr * testeo
             sdposi = sdposi * testeo
             iflag = 1
-            if(sposr < abs(real(r1top) * dec)) &
-                 sposr = abs(real(r1top)) * dec
+            if(sposr < abs(SW_CONVERT_REAL(r1top) * dec)) &
+                 sposr = abs(SW_CONVERT_REAL(r1top)) * dec
             if(sposi < abs(aimag(r1top) * dec)) &
                  sposi = abs(aimag(r1top)) * dec
-            if(sdposr < abs(real(r1dtop) * dec)) &
-                 sdposr = abs(real(r1dtop)) * dec
+            if(sdposr < abs(SW_CONVERT_REAL(r1dtop) * dec)) &
+                 sdposr = abs(SW_CONVERT_REAL(r1dtop)) * dec
             if(sdposi < abs(aimag(r1dtop) * dec)) &
                  sdposi = abs(aimag(r1dtop)) * dec
             end if
@@ -4254,38 +4787,39 @@ end if
 70        continue
 80        continue
         nsubr = 0
-        if(sposr /= 0.0e0_knd .and. real(r1top) /= 0.0e0_knd) nsubr= &
-               int(log10(sposr / abs(real(r1top))))
+        if(sposr /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(r1top) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
+      & nsubr= &
+               int(log10(sposr / abs(SW_CONVERT_REAL(r1top))))
         if(nsubr < 0) nsubr = 0
         if(nsubr > ndec) nsubr = ndec
         nsubi = 0
-        if(sposi /= 0.0e0_knd .and. aimag(r1top) /= 0.0e0_knd) nsubi= &
+        if(sposi /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(r1top) /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsubi= &
                int(log10(sposi / abs(aimag(r1top))))
         if(nsubi < 0) nsubi = 0
         if(nsubi > ndec) nsubi = ndec
         nsubar = 0
         nsubai = 0
           if(jflag == 1) then
-          if(real(term) > 0.0e0_knd) sposar = sposar + real(term)
+          if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposar = sposar + SW_CONVERT_REAL(term)
           nsubar = 0
-          if(sposar /= 0.0e0_knd .and. real(r1topa) /= 0.0e0_knd) &
-             nsubar = int(log10(sposar / abs(real(r1topa))))
+          if(sposar /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(r1topa) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
+             nsubar = int(log10(sposar / abs(SW_CONVERT_REAL(r1topa))))
           if(nsubar < 0) nsubar = 0
           if(nsubar > ndec) nsubar = ndec
           nsubai = 0
-          if(aimag(term) > 0.0e0_knd) sposai = sposai + aimag(term)
-          if(sposai /= 0.0e0_knd .and. aimag(r1topa) /= 0.0e0_knd) &
+          if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sposai = sposai + aimag(term)
+          if(sposai /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(r1topa) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
              nsubai = int(log10(sposai / abs(aimag(r1topa))))
           if(nsubai < 0) nsubai = 0
           if(nsubai > ndec) nsubai = ndec
           end if
         ndsubr = 0
-        if(sdposr /= 0.0e0_knd .and. real(r1dtop) /= 0.0e0_knd) &
-              ndsubr = int(log10(sdposr / abs(real(r1dtop))))
+        if(sdposr /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(r1dtop) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
+              ndsubr = int(log10(sdposr / abs(SW_CONVERT_REAL(r1dtop))))
         if(ndsubr < 0) ndsubr = 0
         if(ndsubr > ndec) ndsubr = ndec
         ndsubi = 0
-        if(sdposi /= 0.0e0_knd .and. aimag(r1dtop) /= 0.0e0_knd) &
+        if(sdposi /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(r1dtop) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
               ndsubi = int(log10(sdposi / abs(aimag(r1dtop))))
         if(ndsubi < 0) ndsubi = 0
         if(ndsubi > ndec) ndsubi = ndec
@@ -4293,10 +4827,10 @@ end if
 !  compute r1 and r1d
         r1temp = r1top * sbesn(l + 1) * pcoefn / dmfnorm
         iterm = 0
-        if(abs(r1temp) /= 0.0e0_knd) iterm = int(log10(abs(r1temp)))
+        if(abs(r1temp) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r1temp)))
         ir1e = ir1tope + ibese(l + 1) + ipcoefn - idmfe + iterm
         r1c = r1temp * (ten ** (-iterm))
-        if(abs(r1c) >= 1.0e0_knd) go to 90
+        if(abs(r1c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 90
         r1c = r1c * ten
         ir1e = ir1e - 1
 90      continue
@@ -4306,7 +4840,7 @@ end if
           else
           r1tempa = r1topa * sbesn(l + 1) * pcoefn / dmfnorm
           iterm = 0
-          if(abs(r1tempa) /= 0.0e0_knd) iterm = int(log10(abs(r1tempa)))
+          if(abs(r1tempa) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r1tempa)))
           ir1ea = ir1tope + ibese(l + 1) + ipcoefn - idmfe + iterm
           r1ca = r1tempa * (ten ** (-iterm))
           end if
@@ -4317,18 +4851,20 @@ end if
                   ir1ea)
         r1dc = r1dtemp + r1dtempa
         ndsub1r = 0
-        if(real(r1dtemp) /= 0.0e0_knd .and. real(r1dc) /= 0.0e0_knd) &
-          ndsub1r = int(log10(abs(real(r1dtemp) / real(r1dc))))
+        if(SW_CONVERT_REAL(r1dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(r1dc) /= &
+      & SW_LITERAL(0.0e0_knd,"0.0e0")) &
+          ndsub1r = int(log10(abs(SW_CONVERT_REAL(r1dtemp) / SW_CONVERT_REAL(r1dc))))
         if(ndsub1r < 0) ndsub1r = 0
         if(ndsub1r > ndec) ndsub1r = ndec
         ndsub1i = 0
-        if(aimag(r1dtemp) /= 0.0e0_knd .and. aimag(r1dc) /= 0.0e0_knd) &
+        if(aimag(r1dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(r1dc) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
          ndsub1i = int(log10(abs(aimag(r1dtemp) / aimag(r1dc))))
         if(ndsub1i < 0) ndsub1i = 0
         if(ndsub1i > ndec) ndsub1i = ndec
         n1r = 0
-        if(real(r1dtemp) /= 0.0e0_knd .and. real(r1dtempa) /= 0.0e0_knd) &
-         n1r = int(log10(abs(real(r1dtemp) / real(r1dtempa))))
+        if(SW_CONVERT_REAL(r1dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(r1dtempa) /= &
+      & SW_LITERAL(0.0e0_knd,"0.0e0")) &
+         n1r = int(log10(abs(SW_CONVERT_REAL(r1dtemp) / SW_CONVERT_REAL(r1dtempa))))
         if(n1r > 0 .and. jflag == 1) ndsubr = max(nsubar, ndsubr - n1r)+ &
                 ndsub1r
         if(n1r <= 0 .and. jflag == 1) ndsubr = max(ndsubr, nsubar + n1r)+ &
@@ -4337,8 +4873,8 @@ end if
         if(n1r <= 0 .and. jflag == 0) ndsubr = max(ndsubr, nsubr + n1r) + ndsub1r
         if(ndsubr > ndec) ndsubr = ndec
         n1i = 0
-        if(aimag(r1dtemp) /= 0.0e0_knd .and. aimag(r1dtempa) /= &
-           0.0e0_knd) &
+        if(aimag(r1dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(r1dtempa) /= &
+           SW_LITERAL(0.0e0_knd,"0.0e0")) &
          n1i = int(log10(abs(aimag(r1dtemp) / aimag(r1dtempa))))
         if(n1i > 0 .and. jflag == 1) ndsubi = max(nsubai, ndsubi - n1i)+ &
                 ndsub1i
@@ -4348,20 +4884,28 @@ end if
         if(n1i <= 0 .and. jflag == 0) ndsubi = max(ndsubi, nsubi + n1i) + ndsub1i
         if(ndsubi > ndec) ndsubi = ndec
 100     iterm = 0
-        if(abs(r1dc) /= 0.0e0_knd) iterm = int(log10(abs(r1dc)))
+        if(abs(r1dc) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r1dc)))
         ir1de = ir1ea + iterm
     r1dc = r1dc * ten ** (-iterm)
-        if(abs(r1dc) >= 1.0e0_knd) go to 110
+        if(abs(r1dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 110
         r1dc = r1dc * ten
         ir1de = ir1de - 1
 110     continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(nsubr + ndsubr > 0) write(40, 120) nsubr, ndsubr
+#endif
+#ifndef SWF_PRECISION_MPFR
 120     format(15x,'sub. errors in the real parts of the num.', &
                ' of r1 and r1d are ',i2,' and ',i2,' digits.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(nsubi + ndsubi > 0) write(40, 125) nsubi, ndsubi
+#endif
+#ifndef SWF_PRECISION_MPFR
 125     format(15x,'sub. errors in the imag. parts of the num.', &
                ' of r1 and r1d are ',i2,' and ',i2,' digits.')
+#endif
 end if
         jbes = jtop
         nsub = max(nsubr, nsubi)
@@ -4467,29 +5011,38 @@ end if
 !               jeta    : maximum number of terms taken in the numerator
 !                         and denominator sums for r1 and r1d
 !
-        use complex_oblate_parameters
+    integer :: idenom, iflag, ipcoefn, ipdcoefn, ir1de, ir1e, ir1ep, ir1tempe, iterm, ix
+    integer :: j, jden, jeta, jj, jnum, l, lim, limeta, lm2, m
+    integer :: maxd, maxj, maxlp, maxp, minacc, naccns1i, naccns1r, naccns2i, naccns2r, naccs1
+    integer :: naccs2, ndec, ndens, ndensi, ndensr, nee, nex, nfac
+#ifdef SWF_PRECISION_MPFR
+    SW_REAL :: dnewdsum, dnewsum, doldd
+#else
+    ! Preserve the native default-real temporaries used by the original recurrence.
+    real(kind=kind(1.0)) :: dnewdsum, dnewsum, doldd
+#endif
 !
 !  real(knd) scalars and arrays
-        real(knd) dec, eta, etas, pcoefn, pdcoefn, r1dcoef1, rm, rm2, &
+        SW_REAL dec, eta, etas, pcoefn, pdcoefn, r1dcoef1, rm, rm2, &
                   sumdnpr, sumdnpi, sumdpr, sumdpi, sumnpr, sumnpi, ten, &
                   test, testd, teste, testeo, wm, xet, xets, x
-        real(knd) pratb(maxp), pratt(maxp), pdratt(maxp)
+        SW_REAL pratb(maxp), pratt(maxp), pdratt(maxp)
 !  complex(knd) scalars and arrays
-        complex(knd) cc, denom, dnew, dnewd, dnewd1, dnewd2, dold, doldd1, &
+        SW_COMPLEX cc, denom, dnew, dnewd, dnewd1, dnewd2, dold, doldd1, &
                      doldd2, reld12, r1c, r1dc, r1dcoef2, r1dtemp, &
                      r1temp
-        complex(knd) enr(maxd), sbesdr(maxlp), sbesn(maxlp), sbesf(maxj), &
+        SW_COMPLEX enr(maxd), sbesdr(maxlp), sbesn(maxlp), sbesf(maxj), &
                      sbesdf(maxj)
 !
 !  integer arrays
         integer ibese(maxlp)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec - 2)
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** nfac
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         ir1tempe = 0
         iflag = 1
         rm = m
@@ -4500,7 +5053,7 @@ end if
         r1dcoef2 = cc * x / xet
         reld12 = (r1dcoef2 / r1dcoef1) * sbesdr(l + 1) * (pcoefn/ &
                pdcoefn) * ten ** (ipcoefn - ipdcoefn)
-        rm2 = rm * 2.0e0_knd
+        rm2 = rm * SW_LITERAL(2.0e0_knd,"2.0e0")
         lm2 = (l - m) / 2
 !
 !  ix = 0 for l-m even; ix = 1 for l-m odd
@@ -4511,30 +5064,30 @@ end if
 !
 !  backward series for denominator
         idenom = 0
-        denom = (1.0e0_knd, 0.0e0_knd)
-        sumdpr = 1.0e0_knd
-        sumdpi = 0.0e0_knd
+        denom = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumdpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumdpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         if (lm2 == 0) go to 20
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 10 j = lm2, 1,-1
           jj = j + j + ix
           dnew = dold / (pratb(jj + 1) * enr(j))
           denom = denom + dnew
-          if(real(dnew) > 0.0e0_knd) sumdpr = sumdpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnew)
           if(abs(dnew / denom) < dec) go to 20
           dold = dnew
 10        continue
 20      continue
 !
 !  forward series for denominator
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 30 j = lm2 + 1, lim
           jj = j + j + ix
           dnew = dold * enr(j) * pratb(jj + 1)
           denom = denom + dnew
-          if(real(dnew) > 0.0e0_knd) sumdpr = sumdpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnew)
           if(abs(dnew / denom) < dec) go to 40
             if(abs(denom) > teste) then
             denom = denom * testeo
@@ -4548,38 +5101,41 @@ end if
 40      continue
         jden = j
         ndensr = 0
-        if(sumdpr / real(denom) /= 0.0e0_knd) ndensr= &
-                                    int(log10(abs(sumdpr / real(denom))))
+        if(sumdpr / SW_CONVERT_REAL(denom) /= SW_LITERAL(0.0e0_knd,"0.0e0")) ndensr= &
+                                    int(log10(abs(sumdpr / SW_CONVERT_REAL(denom))))
         if(ndensr < 0) ndensr = 0
         if(ndensr > ndec) ndensr = ndec
         ndensi = 0
-        if(sumdpi /= 0.0e0_knd) ndensi = int(log10(abs(sumdpi/ &
+        if(sumdpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) ndensi = int(log10(abs(sumdpi/ &
                  aimag(denom))))
         if(ndensi < 0) ndensi = 0
         if(ndensi > ndec) ndensi = ndec
         iterm = int(log10(abs(denom)))
         idenom = idenom + iterm
         denom = denom * ten ** (-iterm)
-          if(abs(real(denom)) > abs(aimag(denom))) then
+          if(abs(SW_CONVERT_REAL(denom)) > abs(aimag(denom))) then
           ndens = ndensr
           else
           ndens = ndensi
           end if
 !
 !  backward series for numerator
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd1 = dold
         doldd2 = reld12
         r1temp = dold
-        sumnpr = 1.0e0_knd
-        sumnpi = 0.0e0_knd
+        sumnpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumnpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         r1dtemp = doldd2
-        sumdnpr = 0.0e0_knd
-        sumdnpi = 0.0e0_knd
-        if(real(doldd2) > 0.0e0_knd) sumdnpr = real(doldd2)
-        if(aimag(doldd2) > 0.0e0_knd) sumdnpi = aimag(doldd2)
-        if(l /= 0) r1dtemp = r1dtemp + (1.0e0_knd, 0.0e0_knd)
-        if(l /= 0) sumdnpr = sumdnpr + (1.0e0_knd, 0.0e0_knd)
+        sumdnpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        sumdnpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(SW_CONVERT_REAL(doldd2) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = SW_CONVERT_REAL(doldd2)
+        if(aimag(doldd2) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = aimag(doldd2)
+        if(l /= 0) r1dtemp = r1dtemp + &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        if(l /= 0) sumdnpr = sumdnpr + &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        jj = 0
         if(lm2 == 0) go to 60
           do 50 j = lm2, 1,-1
           jj = j + j + ix
@@ -4587,12 +5143,12 @@ end if
           dnewd1 = -doldd1 / (sbesf(jj + m) * pdratt(jj + 1) * enr(j))
           dnewd2 = -doldd2 / (sbesdf(jj + m) * pratt(jj + 1) * enr(j))
           r1temp = r1temp + dnew
-          if(real(dnew) > 0.0e0_knd) sumnpr = sumnpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumnpi = sumnpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpr = sumnpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpi = sumnpi + aimag(dnew)
           dnewd = dnewd1 + dnewd2
           r1dtemp = r1dtemp + dnewd
-          if(real(dnewd) > 0.0e0_knd) sumdnpr = sumdnpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdnpi = sumdnpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = sumdnpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = sumdnpi + aimag(dnewd)
           if(abs(dnew / r1temp) + abs(dnewd / r1dtemp) < dec) go to 60
           if(abs(r1temp) < teste) go to 45
           r1temp = r1temp * testeo
@@ -4604,14 +5160,14 @@ end if
           sumnpr = sumnpr * testeo
           sumnpi = sumnpi * testeo
           iflag = 0
-          if(sumnpr < abs(real(r1temp) * dec)) &
-             sumnpr = abs(real(r1temp)) * dec
+          if(sumnpr < abs(SW_CONVERT_REAL(r1temp) * dec)) &
+             sumnpr = abs(SW_CONVERT_REAL(r1temp)) * dec
           if(sumnpi < abs(aimag(r1temp) * dec)) &
              sumnpi = abs(aimag(r1temp)) * dec
           sumdnpr = sumdnpr * testeo
           sumdnpi = sumdnpi * testeo
-          if(sumdnpr < abs(real(r1dtemp) * dec)) &
-             sumdnpr = abs(real(r1dtemp)) * dec
+          if(sumdnpr < abs(SW_CONVERT_REAL(r1dtemp) * dec)) &
+             sumdnpr = abs(SW_CONVERT_REAL(r1dtemp)) * dec
           if(sumdnpi < abs(aimag(r1dtemp) * dec)) &
              sumdnpi = abs(aimag(r1dtemp)) * dec
 45        dold = dnew
@@ -4626,27 +5182,29 @@ end if
           j = lm2
           go to 130
           end if
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd1 = dold
         doldd2 = reld12
-        dnewsum = (0.0e0_knd, 0.0e0_knd)
-        dnewdsum = (0.0e0_knd, 0.0e0_knd)
+        test = SW_LITERAL(1.0_knd,"1.0")
+        testd = SW_LITERAL(1.0_knd,"1.0")
+        dnewsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        dnewdsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd = reld12
-        if(l /= 0) doldd = reld12 + (1.0e0_knd, 0.0e0_knd)
+        if(l /= 0) doldd = reld12 + SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 110 j = lm2 + 1, lim - 1
           jj = j + j + ix
           dnew = -dold * enr(j) * sbesf(jj + m) * pratt(jj + 1)
           dnewd1 = -doldd1 * enr(j) * sbesf(jj + m) * pdratt(jj + 1)
           dnewd2 = -doldd2 * enr(j) * sbesdf(jj + m) * pratt(jj + 1)
           r1temp = r1temp + dnew
-          if(real(dnew) > 0.0e0_knd) sumnpr = sumnpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumnpi = sumnpi + aimag(dnew)
-          if(abs(dnew) /= 0.0e0_knd) test = abs(dnew / r1temp)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpr = sumnpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpi = sumnpi + aimag(dnew)
+          if(abs(dnew) /= SW_LITERAL(0.0e0_knd,"0.0e0")) test = abs(dnew / r1temp)
           dnewd = dnewd1 + dnewd2
           r1dtemp = r1dtemp + dnewd
-          if(real(dnewd) > 0.0e0_knd) sumdnpr = sumdnpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdnpi = sumdnpi + aimag(dnewd)
-          if(abs(dnewd) /= 0.0e0_knd) testd = abs(dnewd / r1dtemp)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = sumdnpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = sumdnpi + aimag(dnewd)
+          if(abs(dnewd) /= SW_LITERAL(0.0e0_knd,"0.0e0")) testd = abs(dnewd / r1dtemp)
           if(test < dec .and. testd < dec) go to 130
             if(abs(r1temp) > teste) then
             r1temp = r1temp * testeo
@@ -4666,22 +5224,22 @@ end if
 110       continue
 130     jnum = j
         naccns1r = 0
-        if(sumnpr /= 0.0e0_knd) naccns1r = int(log10(abs(sumnpr/ &
-                                         real(r1temp))))
+        if(sumnpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns1r = int(log10(abs(sumnpr/ &
+                                         SW_CONVERT_REAL(r1temp))))
         if(naccns1r < 0) naccns1r = 0
         if(naccns1r > ndec) naccns1r = ndec
         naccns1i = 0
-        if(sumnpi /= 0.0e0_knd) naccns1i = int(log10(abs(sumnpi/ &
+        if(sumnpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns1i = int(log10(abs(sumnpi/ &
                                          aimag(r1temp))))
         if(naccns1i < 0) naccns1i = 0
         if(naccns1i > ndec) naccns1i = ndec
         naccns2r = 0
-        if(sumdnpr /= 0.0e0_knd) naccns2r = int(log10(abs(sumdnpr/ &
-                                         real(r1dtemp))))
+        if(sumdnpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns2r = int(log10(abs(sumdnpr/ &
+                                         SW_CONVERT_REAL(r1dtemp))))
         if(naccns2r < 0) naccns2r = 0
         if(naccns2r > ndec) naccns2r = ndec
         naccns2i = 0
-        if(sumdnpi /= 0.0e0_knd) naccns2i = int(log10(abs(sumdnpi/ &
+        if(sumdnpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns2i = int(log10(abs(sumdnpi/ &
                                          aimag(r1dtemp))))
         if(naccns2i < 0) naccns2i = 0
         if(naccns2i > ndec) naccns2i = ndec
@@ -4689,47 +5247,63 @@ end if
 !  combining results to form the radial function characteristics
 !  r1c and r1dc and corresponding exponents ir1e and ir1de
         r1c = r1temp * sbesn(l + 1) * pcoefn / denom
-          if(abs(real(r1temp)) > abs(aimag(r1temp))) then
+          if(abs(SW_CONVERT_REAL(r1temp)) > abs(aimag(r1temp))) then
           naccs1 = max(naccns1r, ndens)
           else
           naccs1 = max(naccns1i, ndens)
           end if
         iterm = 0
-        if(abs(r1c) /= 0.0e0_knd) iterm = int(log10(abs(r1c)))
+        if(abs(r1c) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r1c)))
         ir1e = ir1tempe + ibese(l + 1) + ipcoefn - idenom + iterm
         r1c = r1c * ten ** (-iterm)
         r1dc = (r1dcoef1 * r1dtemp * sbesn(l + 1) * pdcoefn / denom)* &
              ten ** (ibese(l + 1) + ipdcoefn - idenom - ir1e + ir1tempe)
-          if(abs(real(r1dtemp)) > abs(aimag(r1dtemp))) then
+          if(abs(SW_CONVERT_REAL(r1dtemp)) > abs(aimag(r1dtemp))) then
           naccs2 = max(naccns2r, ndens)
           else
           naccs2 = max(naccns2i, ndens)
           end if
         iterm = 0
-        if(abs(r1dc) /= 0.0e0_knd) iterm = int(log10(abs(r1dc)))
+        if(abs(r1dc) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r1dc)))
         ir1de = ir1e + iterm
     r1dc = r1dc * ten ** (-iterm)
         ir1e = ir1e
         ir1de = ir1de
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 140) jnum, jden, lim
+#endif
+#ifndef SWF_PRECISION_MPFR
 140     format(8x,'r1eta: numerator, denominator converged in ', &
                i6,' ,',i6,' terms; ',i6,' terms available.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(naccns1r + naccns1i > 0) write(40, 150) naccns1r, naccns1i
+#endif
+#ifndef SWF_PRECISION_MPFR
 150     format(15x,'subt. errors in the real and imag. parts of', &
                ' r1 numer. are ',i2,' and ',i2,' digits.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(naccns2r + naccns2i > 0) write(40, 155) naccns2r, naccns2i
+#endif
+#ifndef SWF_PRECISION_MPFR
 155     format(15x,'subt. errors in the real and imag. parts of', &
                ' r1d numer. are ',i2,' and ',i2,' digits.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ndensr + ndensi > 0) write(40, 160) ndensr, ndensi
+#endif
+#ifndef SWF_PRECISION_MPFR
 160     format(15x,'subt. errors in the real and imag. parts of', &
                ' the denom. are ',i2,' and ',i2,' digits')
+#endif
 end if
-        if(abs(r1c) >= 1.0e0_knd) go to 170
+        if(abs(r1c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 170
         r1c = r1c * ten
         ir1e = ir1e - 1
 170     continue
-        if(abs(r1dc) >= 1.0e0_knd) go to 180
+        if(abs(r1dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 180
         r1dc = r1dc * ten
         ir1de = ir1de - 1
 180     continue
@@ -4832,28 +5406,31 @@ end if
 !               isubd  : larger of the subtraction error in the real
 !                        and imaginary parts of r2d
 !
-        use complex_oblate_parameters
+    integer :: i, icoefl, icoefn, idc01, iflag, intlim, ipint, ir2de, ir2e, isub
+    integer :: isubd, isubdi, isubdr, isubi, isubr, iterm, ix, ixx, ixx2, j
+    integer :: jint, jj, jlow, jsuba, jsubb, jterm, l, lim, limint, lm2
+    integer :: m, maxd, maxint, maxlp, maxmp, ndec, nex, nfac, norme
 !
 !  real(knd) scalars and arrays
-        real(knd)  coefa, coefn, coefme, coefmo, dec, dcon, ri, rm, rm2, &
+        SW_REAL  coefa, coefn, coefme, coefmo, dec, dcon, ri, rm, rm2, &
                    r2dposr, r2dposi, r2posr, r2posi, ten, teste, testeo, x
-        real(knd) pnorm(maxlp)
+        SW_REAL pnorm(maxlp)
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, coefl, dnew, dnewd, dold, doldd, dc01, r2c, r2dc, &
+        SW_COMPLEX cc, coefl, dnew, dnewd, dold, doldd, dc01, r2c, r2dc, &
                       r2dtemp, r2temp, rs
-        complex(knd) enr(maxd), pint1(maxint), pint2(maxint), &
+        SW_COMPLEX enr(maxd), pint1(maxint), pint2(maxint), &
                       pint3(maxint), pint4(maxint), rpint1(maxint), &
                       rpint2(maxint)
 !
 !  integer arrays
         integer ipnorm(maxlp)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         rm = m
         rm2 = rm + rm
         lm2 = (l - m) / 2
@@ -4866,7 +5443,7 @@ end if
 !  compute the leading coefficient
         if(ipint /= 0) go to 20
         icoefn = norme
-        coefn = 0.5e0_knd
+        coefn = SW_LITERAL(0.5e0_knd,"0.5e0")
         if(m == 0) go to 20
           do 10 i = 1, m
           ri = i
@@ -4880,8 +5457,8 @@ end if
           coefn = coefn * ten ** (-iterm)
           icoefn = icoefn + iterm
 20      continue
-        if(ix == 0) coefa = (rm2 + 1.0e0_knd) * coefn
-        if(ix == 1) coefa = (rm2 + 3.0e0_knd) * coefn
+        if(ix == 0) coefa = (rm2 + SW_LITERAL(1.0e0_knd,"1.0e0")) * coefn
+        if(ix == 1) coefa = (rm2 + SW_LITERAL(3.0e0_knd,"3.0e0")) * coefn
         if((ix == 0) .and. (2 * (lm2 / 2) /= lm2)) coefa = -coefa
         if((ix == 1) .and. (2 * ((l - m - 1) / 4) /= (l - m - 1) / 2)) coefa = -coefa
     coefl = coefa / dc01
@@ -4897,30 +5474,30 @@ end if
 !  forward summation of series for r2 and r2d
         iflag = 0
         jint = lim
-        r2temp = (0.0e0_knd, 0.0e0_knd)
-        r2dtemp = (0.0e0_knd, 0.0e0_knd)
-        r2posr = 0.0e0_knd
-        r2posi = 0.0e0_knd
-        r2dposr = 0.0e0_knd
-        r2dposi = 0.0e0_knd
+        r2temp = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        r2dtemp = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        r2posr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        r2posi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        r2dposr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        r2dposi = SW_LITERAL(0.0e0_knd,"0.0e0")
         if(jlow > lim) go to 40
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         r2dtemp = doldd
         r2temp = dold
-        r2posr = 1.0e0_knd
-        r2posi = 0.0e0_knd
-        r2dposr = 1.0e0_knd
-        r2dposi = 0.0e0_knd
+        r2posr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        r2posi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        r2dposr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        r2dposi = SW_LITERAL(0.0e0_knd,"0.0e0")
           do 30 j = jlow, lim
           dnew = dold * enr(j) * rpint1(j + j + ixx2)
           dnewd = doldd * enr(j) * rpint2(j + j + ixx2)
           r2temp = r2temp + dnew
           r2dtemp = r2dtemp + dnewd
-          if(real(dnew) > 0.0e0_knd) r2posr = r2posr + real(dnew)
-          if(real(dnewd) > 0.0e0_knd) r2dposr = r2dposr + real(dnewd)
-          if(aimag(dnew) > 0.0e0_knd) r2posi = r2posi + aimag(dnew)
-          if(aimag(dnewd) > 0.0e0_knd) r2dposi = r2dposi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2posr = r2posr + SW_CONVERT_REAL(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2dposr = r2dposr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2posi = r2posi + aimag(dnew)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2dposi = r2dposi + aimag(dnewd)
           if((abs(dnew / r2temp) + abs(dnewd / r2dtemp)) < dcon) go to 40
           dold = dnew
           doldd = dnewd
@@ -4930,8 +5507,8 @@ end if
 40      jint = min(j, lim)
         if(j == 0) jint = lim
         if(lm2 < 1 .or. iflag == 1) go to 70
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         j = lm2
           do 60 jj = 1, lm2
           dnew = dold / (rpint1(j + j + ixx2) * enr(j))
@@ -4939,10 +5516,10 @@ end if
           if(j > lim) go to 50
           r2temp = r2temp + dnew
           r2dtemp = r2dtemp + dnewd
-          if(real(dnew) > 0.0e0_knd) r2posr = r2posr + real(dnew)
-          if(real(dnewd) > 0.0e0_knd) r2dposr = r2dposr + real(dnewd)
-          if(aimag(dnew) > 0.0e0_knd) r2posi = r2posi + aimag(dnew)
-          if(aimag(dnewd) > 0.0e0_knd) r2dposi = r2dposi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2posr = r2posr + SW_CONVERT_REAL(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2dposr = r2dposr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2posi = r2posi + aimag(dnew)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) r2dposi = r2dposi + aimag(dnewd)
           if((abs(dnew / r2temp) + abs(dnewd / r2dtemp)) < dcon) go to 70
 50        dold = dnew
           doldd = dnewd
@@ -4950,34 +5527,34 @@ end if
 60        continue
 70      continue
         isubr = 0
-        if(r2posr /= 0.0e0_knd) isubr = int(log10(abs(r2posr/ &
-                                      real(r2temp)) + dec))
+        if(r2posr /= SW_LITERAL(0.0e0_knd,"0.0e0")) isubr = int(log10(abs(r2posr/ &
+                                      SW_CONVERT_REAL(r2temp)) + dec))
         if(isubr < 0) isubr = 0
         if(isubr > ndec) isubr = ndec
         isubdr = 0
-        if(r2dposr /= 0.0e0_knd) isubdr = int(log10(abs(r2dposr/ &
-                                        real(r2dtemp)) + dec))
+        if(r2dposr /= SW_LITERAL(0.0e0_knd,"0.0e0")) isubdr = int(log10(abs(r2dposr/ &
+                                        SW_CONVERT_REAL(r2dtemp)) + dec))
         if(isubdr < 0) isubdr = 0
         if(isubdr > ndec) isubdr = ndec
         isubi = 0
-        if(r2posi /= 0.0e0_knd) isubi = int(log10(abs(r2posi/ &
+        if(r2posi /= SW_LITERAL(0.0e0_knd,"0.0e0")) isubi = int(log10(abs(r2posi/ &
                                       aimag(r2temp)) + dec))
         if(isubi < 0) isubi = 0
         if(isubi > ndec) isubi = ndec
         isubdi = 0
-        if(r2dposi /= 0.0e0_knd) isubdi = int(log10(abs(r2dposi/ &
+        if(r2dposi /= SW_LITERAL(0.0e0_knd,"0.0e0")) isubdi = int(log10(abs(r2dposi/ &
                                         aimag(r2dtemp)) + dec))
         if(isubdi < 0) isubdi = 0
         if(isubdi > ndec) isubdi = ndec
         isub = isubr
-          if(aimag(r2temp) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(r2temp) / real(r2temp))))
+          if(aimag(r2temp) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(r2temp) / SW_CONVERT_REAL(r2temp))))
           if(iterm < 0) isub = max(isubr, isubi + iterm)
           if(iterm > 0) isub = max(isubi, isubr - iterm)
           end if
         isubd = isubdr
-          if(aimag(r2dtemp) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(r2dtemp) / real(r2dtemp))))
+          if(aimag(r2dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(r2dtemp) / SW_CONVERT_REAL(r2dtemp))))
           if(iterm < 0) isubd = max(isubdr, isubdi + iterm)
           if(iterm > 0) isubd = max(isubdi, isubdr - iterm)
           end if
@@ -4985,10 +5562,10 @@ end if
         if(ix == 0) r2temp = r2temp * pint1(l - m + 1)
         if(ix == 1) r2temp = x * r2temp * pint3(l - m + 1)
         iterm = 0
-        if(abs(r2temp) /= 0.0e0_knd) iterm = int(log10(abs(r2temp)))
+        if(abs(r2temp) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r2temp)))
         ir2e = iterm + ipnorm(l - m + 1) + icoefl
         r2c = r2temp * ten ** (-iterm)
-        if(abs(r2c) >= 1.0e0_knd) go to 80
+        if(abs(r2c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 80
         r2c = r2c * ten
         ir2e = ir2e - 1
 80  r2dtemp = -r2dtemp * coefl * pnorm(l - m + 1) * cc * x
@@ -5007,16 +5584,20 @@ end if
         if(m /= 0 .or. ix == 1) isubd = max(isub + jsuba, isubd + jsubb, 0)
         if(isubd > ndec) isubd = ndec
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 90) jint, lim, isub, isubd
+#endif
+#ifndef SWF_PRECISION_MPFR
 90      format(8x,'r2int: converged in ',i5,' terms; 'i5, &
                ' available; ',i2,' and ',i2,' digits of sub. error' &
                ' in r2 and r2d')
+#endif
 end if
         jterm = 0
-        if(abs(r2dtemp) /= 0.0e0_knd) jterm = int(log10(abs(r2dtemp)))
+        if(abs(r2dtemp) /= SW_LITERAL(0.0e0_knd,"0.0e0")) jterm = int(log10(abs(r2dtemp)))
         ir2de = jterm + ipnorm(l - m + 1) + icoefl
         r2dc = r2dtemp * ten ** (-jterm)
-        if(abs(r2dc) >= 1.0e0_knd) go to 100
+        if(abs(r2dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 100
         r2dc = r2dc * ten
         ir2de = ir2de - 1
 100     continue
@@ -5186,29 +5767,45 @@ end if
 !               nacccor : subtraction error in forming Wronskian
 !                         using r2 and r2d obtained in r2leg
 !
-        use complex_oblate_parameters
+    integer :: idc01, idfe, idmfe, idneg, idnegjf, iflag2, iflagp, ifsub, imxp, ioppsum
+    integer :: iopqnsum, ipdsum, ipsum, iqdm1, iqdsum, iqm1, iqndsum, iqnsum, iqsum, ir1de
+    integer :: ir1e, ir2de, ir2e, iterm, itermpq, itestm, ix, ixx, j, j2
+    integer :: jflag, jflagl, jj, jleg, jlegp, jlegpd, jlegpf, jlow, jnleg, jsub
+    integer :: kflagl, l, lim1, lim2, limdr, limleg, lm2, lnum, m, maxd
+    integer :: maxdr, maxmp, maxpdr, maxq, minacc, nacccor, naccd1, naccd2, naccleg, nacclega
+    integer :: nacclegb, nacclest, naccnum, naccr1, naccrpl, nacct1, nacct2, nacct3, nacct4, ndec
+    integer :: nex, nmterm, npds, nps, nqds, nqnds, nqns, nqs, nratio, nsdneg
+    integer :: nsdrho, nsdrhor1, nspdsum, nspdsumi, nspdsumr, nspsum, nspsumi, nspsumr, nsqdsum, nsqdsumi
+    integer :: nsqdsumr, nsqndsum, nsqndsumi, nsqndsumr, nsqnsum, nsqnsumi, nsqnsumr, nsqsum, nsqsumi, nsqsumr
+    integer :: nstest, nsubdleg, nsubleg, ntestdm, ntestm, numc1, numc2, numc3, numc4
+#ifdef SWF_PRECISION_MPFR
+    SW_REAL :: rm
+#else
+    ! Preserve the native default-real temporaries used by the original recurrence.
+    real(kind=kind(1.0)) :: rm
+#endif
 !
 !  real(knd) scalars and arrays
-        real(knd) dconp, dconq, dconqn, dec, pdsumpi, pdsumpr, psumpi, psumpr, &
+        SW_REAL dconp, dconq, dconqn, dec, pdsumpi, pdsumpr, psumpi, psumpr, &
                   qdm1, qm1, qndsumpi, qndsumpr, qnsumpi, qnsumpr, qsumpi, &
                   qsumpr, qdsumpi, qdsumpr, spdsumpi, spdsumpr, spsumpi, &
                   spsumpr, ten, termpq, test, testd, testm, testdm, testp, tm, x
-        real(knd) prx(maxpdr), pdrx(maxpdr), qdl(lnum), qdr(maxq), &
+        SW_REAL prx(maxpdr), pdrx(maxpdr), qdl(lnum), qdr(maxq), &
                   qdqr(maxmp), ql(lnum), qr(maxq)
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, dfnorm, dmfnorm, dneg, dnegjf, dnew, dnewd, dold, &
+        SW_COMPLEX cc, dfnorm, dmfnorm, dneg, dnegjf, dnew, dnewd, dold, &
                      doldd, dc01, psum, pdsum, qndsum, qdsum, qnsum, &
                      qsum, r1c, r1dc, r2c, r2dc, spsum, spdsum, wronc, &
                      wronca, wroncb, wront, xden, xcoef, xrhs
-        complex(knd) anumt1, anumt2, anumt3, anumt4, dent1, dent2
-        complex(knd) drhor(maxdr), enr(maxd), enrneg(maxmp), fajo(lnum + 1)
+        SW_COMPLEX anumt1, anumt2, anumt3, anumt4, dent1, dent2
+        SW_COMPLEX drhor(maxdr), enr(maxd), enrneg(maxmp), fajo(lnum + 1)
 
 !
 !  integer arrays
         integer ifajo(lnum + 1), iqdl(lnum), iql(lnum)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec - 1)
         dconp = dec
         testp = ten ** (nex - 10)
@@ -5218,7 +5815,7 @@ end if
         ixx = 1 - ix
         lim1 = limleg / 2 - ix
         lim2 = limdr - 1
-        wront = 1.0e0_knd / (cc * (x * x + 1.0e0_knd))
+        wront = SW_LITERAL(1.0e0_knd,"1.0e0") / (cc * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")))
         if(ioppsum == 0) lim2 = 0
         rm = m
         tm = rm + rm
@@ -5240,29 +5837,29 @@ end if
 !  calculate d*q sum over positive n using pyramid summation
 !
 !  backward summation
-        qsum = (1.0e0_knd, 0.0e0_knd)
-        qdsum = (1.0e0_knd, 0.0e0_knd)
-        qsumpr = 1.0e0_knd
-        qsumpi = 0.0e0_knd
-        qdsumpr = 1.0e0_knd
-        qdsumpi = 0.0e0_knd
+        qsum = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        qdsum = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        qsumpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        qsumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qdsumpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        qdsumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         if(lm2 == 0) go to 20
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         j = lm2
           do 10 jj = 1, lm2
           dnew = -dold / (qr(j + j + imxp) * qr(j + j + imxp - 1) * enr(j))
           qsum = qsum + dnew
-          if(real(dnew) > 0.0e0_knd) qsumpr = qsumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) qsumpi = qsumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qsumpr = qsumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qsumpi = qsumpi + aimag(dnew)
           dnewd = -doldd / (qdr(j + j + imxp) * qdr(j + j + imxp - 1) * enr(j))
           qdsum = qdsum + dnewd
-          if(real(dnewd) > 0.0e0_knd) qdsumpr = qdsumpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) qdsumpi = qdsumpi+ &
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qdsumpr = qdsumpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qdsumpi = qdsumpi+ &
                                                      aimag(dnewd)
             if(abs(qsum) > testp .or. abs(qdsum) > testp) then
-            r2c = (1.0e0_knd, 0.0e0_knd)
-            r2dc = (1.0e0_knd, 0.0e0_knd)
+            r2c = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+            r2dc = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
             ir2e = nex
             ir2de = nex
             nsubleg = ndec
@@ -5282,17 +5879,17 @@ end if
 !
 !  forward summation
         jlow = lm2 + 1
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 30 j = jlow, lim1
           dnew = -dold * enr(j) * qr(j + j + imxp) * qr(j + j + imxp - 1)
           qsum = qsum + dnew
-          if(real(dnew) > 0.0e0_knd) qsumpr = qsumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) qsumpi = qsumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qsumpr = qsumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qsumpi = qsumpi + aimag(dnew)
           dnewd = -doldd * enr(j) * qdr(j + j + imxp) * qdr(j + j + imxp - 1)
           qdsum = qdsum + dnewd
-          if(real(dnewd) > 0.0e0_knd) qdsumpr = qdsumpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) qdsumpi = qdsumpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qdsumpr = qdsumpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qdsumpi = qdsumpi + aimag(dnewd)
           if((abs(dnew / qsum) + abs(dnewd / qdsum)) < dconq) go to 40
           dold = dnew
           doldd = dnewd
@@ -5301,45 +5898,45 @@ end if
         jleg = j
         if(jleg > lim1) jleg = lim1
         nsqsumr = 0
-        if(real(qsum) * qsumpr /= 0.0e0_knd) nsqsumr = int(log10(abs(qsumpr &
-                                                  /real(qsum))))
+        if(SW_CONVERT_REAL(qsum) * qsumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqsumr = int(log10(abs(qsumpr &
+                                                  /SW_CONVERT_REAL(qsum))))
         if(nsqsumr > ndec) nsqsumr = ndec
         if(nsqsumr < 0) nsqsumr = 0
         nsqsumi = 0
-        if(aimag(qsum) * qsumpi /= 0.0e0_knd) nsqsumi= &
+        if(aimag(qsum) * qsumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqsumi= &
                                     int(log10(abs(qsumpi / aimag(qsum))))
         if(nsqsumi > ndec) nsqsumi = ndec
         if(nsqsumi < 0) nsqsumi = 0
         nsqsum = nsqsumr
-          if(aimag(qsum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(qsum) / real(qsum))))
+          if(aimag(qsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(qsum) / SW_CONVERT_REAL(qsum))))
           if(iterm < 0) nsqsum = max(nsqsumr, nsqsumi + iterm)
           if(iterm > 0) nsqsum = max(nsqsumi, nsqsumr - iterm)
           end if
         nsqdsumr = 0
-        if(real(qdsum) * qdsumpr /= 0.0e0_knd) nsqdsumr = int(log10(abs &
-                                                 (qdsumpr / real(qdsum))))
+        if(SW_CONVERT_REAL(qdsum) * qdsumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqdsumr = int(log10(abs &
+                                                 (qdsumpr / SW_CONVERT_REAL(qdsum))))
         if(nsqdsumr > ndec) nsqdsumr = ndec
         if(nsqdsumr < 0) nsqdsumr = 0
         nsqdsumi = 0
-        if(aimag(qdsum) * qdsumpi /= 0.0e0_knd) nsqdsumi = int(log10(abs &
+        if(aimag(qdsum) * qdsumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqdsumi = int(log10(abs &
                                                (qdsumpi / aimag(qdsum))))
         if(nsqdsumi > ndec) nsqdsumi = ndec
         if(nsqdsumi < 0) nsqdsumi = 0
         nsqdsum = nsqdsumr
-          if(aimag(qdsum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(qdsum) / real(qdsum))))
+          if(aimag(qdsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(qdsum) / SW_CONVERT_REAL(qdsum))))
           if(iterm < 0) nsqdsum = max(nsqdsumr, nsqdsumi + iterm)
           if(iterm > 0) nsqdsum = max(nsqdsumi, nsqdsumr - iterm)
           end if
         qsum = qsum * ql(l - m + 1) / (fajo(l - m + 1) * termpq)
         iterm = 0
-        if(abs(qsum) /= 0.0e0_knd) iterm = int(log10(abs(qsum)))
+        if(abs(qsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(qsum)))
         qsum = qsum * (ten ** (-iterm))
         iqsum = iql(l - m + 1) - ifajo(l - m + 1) - itermpq + iterm
         qdsum = qdsum * qdl(l - m + 1) / (fajo(l - m + 1) * termpq)
         iterm = 0
-        if(abs(qdsum) /= 0.0e0_knd) iterm = int(log10(abs(qdsum)))
+        if(abs(qdsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(qdsum)))
         qdsum = qdsum * (ten ** (-iterm))
         iqdsum = iqdl(l - m + 1) - ifajo(l - m + 1) - itermpq + iterm
           if(2 * (m / 2) == m) then
@@ -5353,12 +5950,12 @@ end if
 45      continue
 !
 !  calculate d*q sum over negative n
-        qnsum = (0.0e0_knd, 0.0e0_knd)
-        qndsum = (0.0e0_knd, 0.0e0_knd)
-        qnsumpr = 0.0e0_knd
-        qnsumpi = 0.0e0_knd
-        qndsumpr = 0.0e0_knd
-        qndsumpi = 0.0e0_knd
+        qnsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        qndsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        qnsumpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qnsumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qndsumpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qndsumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         iqnsum = 0
         iqndsum = 0
         j2 = 0
@@ -5374,10 +5971,10 @@ end if
         qnsum = qnsum * qr(m + m - 1)
         qndsum = qnsum * qdqr(m + m - 1)
 50      continue
-        if(real(qnsum) > 0.0e0_knd) qnsumpr = real(qnsum)
-        if(aimag(qnsum) > 0.0e0_knd) qnsumpi = aimag(qnsum)
-        if(real(qndsum) > 0.0e0_knd) qndsumpr = real(qndsum)
-        if(aimag(qndsum) > 0.0e0_knd) qndsumpi = aimag(qndsum)
+        if(SW_CONVERT_REAL(qnsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) qnsumpr = SW_CONVERT_REAL(qnsum)
+        if(aimag(qnsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) qnsumpi = aimag(qnsum)
+        if(SW_CONVERT_REAL(qndsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) qndsumpr = SW_CONVERT_REAL(qndsum)
+        if(aimag(qndsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) qndsumpi = aimag(qndsum)
           if(m == 1) then
           jnleg = 1
           go to 80
@@ -5386,47 +5983,47 @@ end if
           do 60 j = 2, m
           dnew = -dold * enrneg(m - j + 1) * qr(imxp - j - j + 1) * qr(imxp - j - j + 2)
           qnsum = qnsum + dnew
-          if(real(dnew) > 0.0e0_knd) qnsumpr = qnsumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) qnsumpi = qnsumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qnsumpr = qnsumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) qnsumpi = qnsumpi + aimag(dnew)
           dnewd = dnew * qdqr(imxp - j - j + 1)
           qndsum = qndsum + dnewd
-          if(real(dnewd) > 0.0e0_knd) qndsumpr = qndsumpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) qndsumpi = qndsumpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qndsumpr = qndsumpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) qndsumpi = qndsumpi + aimag(dnewd)
           if(abs(dnew / qnsum) + abs(dnewd / qndsum) < dec) go to 70
           dold = dnew
 60        continue
 70      jnleg = j
         if(jnleg > m) jnleg = m
 80      nsqnsumr = 0
-        if(real(qnsum) * qnsumpr /= 0.0e0_knd) nsqnsumr = int(log10(abs &
-                                              (qnsumpr / real(qnsum))))
+        if(SW_CONVERT_REAL(qnsum) * qnsumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqnsumr = int(log10(abs &
+                                              (qnsumpr / SW_CONVERT_REAL(qnsum))))
         if(nsqnsumr > ndec) nsqnsumr = ndec
         if(nsqnsumr < 0) nsqnsumr = 0
         nsqnsumi = 0
-        if(aimag(qnsum) * qnsumpi /= 0.0e0_knd) nsqnsumi = int(log10(abs &
+        if(aimag(qnsum) * qnsumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqnsumi = int(log10(abs &
                                               (qnsumpi / aimag(qnsum))))
         if(nsqnsumi > ndec) nsqnsumi = ndec
         if(nsqnsumi < 0) nsqnsumi = 0
         nsqnsum = nsqnsumr
-          if(aimag(qnsum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(qnsum) / real(qnsum))))
+          if(aimag(qnsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(qnsum) / SW_CONVERT_REAL(qnsum))))
           if(iterm < 0) nsqnsum = max(nsqnsumr, nsqnsumi + iterm)
           if(iterm > 0) nsqnsum = max(nsqnsumi, nsqnsumr - iterm)
           end if
         nsqnsum = max(nsqnsum, nsdneg)
         nsqndsumr = 0
-        if(real(qndsum) * qndsumpr /= 0.0e0_knd) nsqndsumr = int(log10(abs &
-                                               (qndsumpr / real(qndsum))))
+        if(SW_CONVERT_REAL(qndsum) * qndsumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqndsumr = int(log10(abs &
+                                               (qndsumpr / SW_CONVERT_REAL(qndsum))))
         if(nsqndsumr > ndec) nsqndsumr = ndec
         if(nsqndsumr < 0) nsqndsumr = 0
         nsqndsumi = 0
-        if(aimag(qndsum) * qndsumpi /= 0.0e0_knd) nsqndsumi = int(log10(abs &
+        if(aimag(qndsum) * qndsumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nsqndsumi = int(log10(abs &
                                               (qndsumpi / aimag(qndsum))))
         if(nsqndsumi > ndec) nsqndsumi = ndec
         if(nsqndsumi < 0) nsqndsumi = 0
         nsqndsum = nsqndsumr
-          if(aimag(qndsum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(qndsum) / real(qndsum))))
+          if(aimag(qndsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(qndsum) / SW_CONVERT_REAL(qndsum))))
           if(iterm < 0) nsqndsum = max(nsqndsumr, nsqndsumi + iterm)
           if(iterm > 0) nsqndsum = max(nsqndsumi, nsqndsumr - iterm)
           end if
@@ -5436,7 +6033,7 @@ end if
         qnsum = qnsum * (ten ** (-iterm))
         iqnsum = iqm1 + idc01 - ifajo(l - m + 1) - itermpq + iterm
           if(iqnsum - iqsum < -ndec) then
-          qnsum = (0.0e0_knd, 0.0e0_knd)
+          qnsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           else
           qnsum = qnsum * (ten ** (iqnsum - iqsum))
           end if
@@ -5445,7 +6042,7 @@ end if
         qndsum = qndsum * (ten ** (-iterm))
         iqndsum = iqm1 + idc01 - ifajo(l - m + 1) - itermpq + iterm
           if(iqndsum - iqdsum < -ndec) then
-          qndsum = (0.0e0_knd, 0.0e0_knd)
+          qndsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           else
           qndsum = qndsum * (ten ** (iqndsum - iqdsum))
           end if
@@ -5456,8 +6053,8 @@ end if
 90      continue
 !
 !       calculate d(rho|n)*p summation
-        psum = (0.0e0_knd, 0.0e0_knd)
-        pdsum = (0.0e0_knd, 0.0e0_knd)
+        psum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        pdsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         ipsum = 0
         ipdsum = 0
         jlegp = 0
@@ -5473,40 +6070,40 @@ end if
         dold = psum
         doldd = pdsum
         if(m /= 0 .or. ix /= 1) go to 100
-        pdsum = (0.0e0_knd, 0.0e0_knd)
+        pdsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd = drhor(1)
 100     continue
         spsum = psum
         spdsum = pdsum
-        psumpr = 0.0e0_knd
-        if(real(psum) > 0.0e0_knd) psumpr = real(psum)
-        psumpi = 0.0e0_knd
-        if(aimag(psum) > 0.0e0_knd) psumpi = aimag(psum)
-        pdsumpr = 0.0e0_knd
-        if(real(pdsum) > 0.0e0_knd) pdsumpr = real(pdsum)
-        pdsumpi = 0.0e0_knd
-        if(aimag(pdsum) > 0.0e0_knd) pdsumpi = aimag(pdsum)
+        psumpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(SW_CONVERT_REAL(psum) > SW_LITERAL(0.0e0_knd,"0.0e0")) psumpr = SW_CONVERT_REAL(psum)
+        psumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(aimag(psum) > SW_LITERAL(0.0e0_knd,"0.0e0")) psumpi = aimag(psum)
+        pdsumpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(SW_CONVERT_REAL(pdsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) pdsumpr = SW_CONVERT_REAL(pdsum)
+        pdsumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(aimag(pdsum) > SW_LITERAL(0.0e0_knd,"0.0e0")) pdsumpi = aimag(pdsum)
         spsumpr = psumpr
         spsumpi = psumpi
         spdsumpr = pdsumpr
         spdsumpi = pdsumpi
-        testm = 1.0e0_knd
-        testdm = 1.0e0_knd
+        testm = SW_LITERAL(1.0e0_knd,"1.0e0")
+        testdm = SW_LITERAL(1.0e0_knd,"1.0e0")
         iflagp = 0
         jlegpf = 1
         jlegpd = 1
           do 130 j = 2, lim2
           dnew = dold * drhor(j) * prx(j + j - ix)
           psum = psum + dnew
-          if(real(dnew) > 0.0e0_knd) psumpr = psumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) psumpi = psumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) psumpr = psumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) psumpi = psumpi + aimag(dnew)
           dnewd = doldd * drhor(j) * pdrx(j + j - ix)
           pdsum = pdsum + dnewd
-          if(real(dnewd) > 0.0e0_knd) pdsumpr = pdsumpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) pdsumpi = pdsumpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) pdsumpr = pdsumpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) pdsumpi = pdsumpi + aimag(dnewd)
             if(abs(psum) > testp .or. abs(pdsum) > testp) then
-            r2c = (1.0e0_knd, 0.0e0_knd)
-            r2dc = (1.0e0_knd, 0.0e0_knd)
+            r2c = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+            r2dc = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
             ir2e = nex
             ir2de = nex
             nsubleg = ndec
@@ -5518,13 +6115,13 @@ end if
             end if
           test = abs(dnew / psum)
           testd = abs(dnewd / pdsum)
-          if(test > testm .or. test == 0.0e0_knd) go to 110
+          if(test > testm .or. test == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 110
           testm = test
           spsum = psum
           spsumpr = psumpr
           spsumpi = psumpi
           jlegpf = j
-110    if(testd > testdm .or. testd == 0.0e0_knd) go to 120
+110    if(testd > testdm .or. testd == SW_LITERAL(0.0e0_knd,"0.0e0")) go to 120
           testdm = testd
           spdsum = pdsum
           spdsumpr = pdsumpr
@@ -5551,57 +6148,57 @@ end if
         if(ntestm > ndec) ntestm = ndec
         if(ntestdm > ndec) ntestdm = ndec
         nspsumr = 0
-        if(real(psum) * psumpr /= 0.0e0_knd) nspsumr = int(log10(abs(psumpr &
-                                                  /real(psum))))
+        if(SW_CONVERT_REAL(psum) * psumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nspsumr = int(log10(abs(psumpr &
+                                                  /SW_CONVERT_REAL(psum))))
         if(nspsumr > ndec) nspsumr = ndec
         if(nspsumr < 0) nspsumr = 0
         nspsumi = 0
-        if(aimag(psum) * psumpi /= 0.0e0_knd) nspsumi= &
+        if(aimag(psum) * psumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nspsumi= &
                                  int(log10(abs(psumpi / aimag(psum))))
         if(nspsumi > ndec) nspsumi = ndec
         if(nspsumi < 0) nspsumi = 0
         nspsum = nspsumr
-          if(aimag(psum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(psum) / real(psum))))
+          if(aimag(psum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(psum) / SW_CONVERT_REAL(psum))))
           if(iterm < 0) nspsum = max(nspsumr, nspsumi + iterm)
           if(iterm > 0) nspsum = max(nspsumi, nspsumr - iterm)
           end if
         nspsum = max(nspsum, nsdrhor1 - nsdrho, ndec - ntestm)
         nspdsumr = 0
-        if(real(pdsum) * pdsumpr /= 0.0e0_knd) nspdsumr = int(log10(abs &
-                                                 (pdsumpr / real(pdsum))))
+        if(SW_CONVERT_REAL(pdsum) * pdsumpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) nspdsumr = int(log10(abs &
+                                                 (pdsumpr / SW_CONVERT_REAL(pdsum))))
         if(nspdsumr > ndec) nspdsumr = ndec
         if(nspdsumr < 0) nspdsumr = 0
         nspdsumi = 0
-        if(aimag(pdsum) * pdsumpi /= 0.0e0_knd) nspdsumi = int(log10(abs &
+        if(aimag(pdsum) * pdsumpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) nspdsumi = int(log10(abs &
                                                (pdsumpi / aimag(pdsum))))
         if(nspdsumi > ndec) nspdsumi = ndec
         if(nspdsumi < 0) nspdsumi = 0
         nspdsum = nspdsumr
-          if(aimag(pdsum) /= 0.0e0_knd) then
-          iterm = int(log10(abs(aimag(pdsum) / real(pdsum))))
+          if(aimag(pdsum) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          iterm = int(log10(abs(aimag(pdsum) / SW_CONVERT_REAL(pdsum))))
           if(iterm < 0) nspdsum = max(nspdsumr, nspdsumi + iterm)
           if(iterm > 0) nspdsum = max(nspdsumi, nspdsumr - iterm)
           end if
         nspdsum = max(nspdsum, nsdrho - nsdrhor1, ndec - ntestdm)
         psum = -psum * dnegjf * termpq / fajo(l - m + 1)
         iterm = 0
-        if(psum /= 0.0e0_knd) iterm = int(log10(abs(psum)))
+        if(psum /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(psum)))
         psum = psum * (ten ** (-iterm))
         ipsum = idnegjf + itermpq - ifajo(l - m + 1) + iterm
           if(ipsum - iqsum < -ndec) then
-          psum = (0.0e0_knd, 0.0e0_knd)
+          psum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           else
           psum = psum * (ten ** (ipsum - iqsum))
           end if
         pdsum = pdsum * dnegjf * termpq / fajo(l - m + 1)
-        if(m /= 0) pdsum = -pdsum * rm * x / (x * x + 1.0e0_knd)
+        if(m /= 0) pdsum = -pdsum * rm * x / (x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))
         iterm = 0
-        if(pdsum /= 0.0e0_knd) iterm = int(log10(abs(pdsum)))
+        if(pdsum /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(pdsum)))
         pdsum = pdsum * (ten ** (-iterm))
         ipdsum = idnegjf + itermpq - ifajo(l - m + 1) + iterm
           if(ipdsum - iqdsum < -ndec) then
-          pdsum = (0.0e0_knd, 0.0e0_knd)
+          pdsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           else
           pdsum = pdsum * (ten ** (ipdsum - iqdsum))
           end if
@@ -5624,20 +6221,20 @@ end if
         nstest = max(nspsum, nspdsum)
         iflag2 = 0
         if(nsdrhor1 /= 0 .and. naccleg < minacc .and. nacclega > 1 &
-            .and. x <= 0.01e0_knd) iflag2 = 1
+            .and. x <= SW_LITERAL(0.01e0_knd,"0.01e0")) iflag2 = 1
           if(iflag2 == 1) then
           anumt1 = qdsum * r1c * ten ** (ir1e + iqdsum)
           anumt2 = qndsum * r1c * ten ** (ir1e + iqdsum)
           anumt3 = qsum * r1dc * ten ** (ir1de + iqsum)
           anumt4 = qnsum * r1dc * ten ** (ir1de + iqsum)
           numc1 = -ndec
-          if(abs(anumt1) /= 0.0e0_knd) numc1 = int(log10(abs(anumt1 / wront)))
+          if(abs(anumt1) /= SW_LITERAL(0.0e0_knd,"0.0e0")) numc1 = int(log10(abs(anumt1 / wront)))
           numc2 = -ndec
-          if(abs(anumt2) /= 0.0e0_knd) numc2 = int(log10(abs(anumt2 / wront)))
+          if(abs(anumt2) /= SW_LITERAL(0.0e0_knd,"0.0e0")) numc2 = int(log10(abs(anumt2 / wront)))
           numc3 = -ndec
-          if(abs(anumt3) /= 0.0e0_knd) numc3 = int(log10(abs(anumt3 / wront)))
+          if(abs(anumt3) /= SW_LITERAL(0.0e0_knd,"0.0e0")) numc3 = int(log10(abs(anumt3 / wront)))
           numc4 = -ndec
-          if(abs(anumt4) /= 0.0e0_knd) numc4 = int(log10(abs(anumt4 / wront)))
+          if(abs(anumt4) /= SW_LITERAL(0.0e0_knd,"0.0e0")) numc4 = int(log10(abs(anumt4 / wront)))
           nacct1 = ndec - (max(ifsub, nsqdsum) + numc1)
           if(nacct1 > ndec) nacct1 = ndec
           nacct2 = ndec - (max(ifsub, nsqndsum) + numc2)
@@ -5651,7 +6248,7 @@ end if
           dent1 = r1c * pdsum * ten ** (ir1e + iqdsum)
           dent2 = r1dc * psum * ten ** (ir1de + iqsum)
           nratio = 0
-          if(abs(dent1 * dent2) /= 0.0e0_knd) &
+          if(abs(dent1 * dent2) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
               nratio = int(log10(abs(dent1 / dent2)))
             if(nratio > 0) then
             naccd1 = ndec - nspdsum
@@ -5677,15 +6274,15 @@ end if
             end if
           end if
         nqs = 0
-        if(qsum / r2c == 0.0e0_knd) nqs = -ndec
-        if(qsum / r2c /= 0.0e0_knd) nqs = int(log10(abs(qsum / r2c)))
+        if(qsum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0")) nqs = -ndec
+        if(qsum / r2c /= SW_LITERAL(0.0e0_knd,"0.0e0")) nqs = int(log10(abs(qsum / r2c)))
         nqns = 0
-        if(qnsum / r2c == 0.0e0_knd) nqns = -ndec
-        if(m /= 0 .and. iopqnsum /= 0 .and. qnsum / r2c /= 0.0e0_knd) &
+        if(qnsum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0")) nqns = -ndec
+        if(m /= 0 .and. iopqnsum /= 0 .and. qnsum / r2c /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
                       nqns = int(log10(abs(qnsum / r2c)))
         nps = 0
-        if(psum / r2c == 0.0e0_knd) nps = -ndec
-        if(ioppsum /= 0 .and. psum / r2c /= 0.0e0_knd) &
+        if(psum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0")) nps = -ndec
+        if(ioppsum /= 0 .and. psum / r2c /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
                       nps = int(log10(abs(psum / r2c)))
         nsqsum = max(nsqsum, nsdneg) + nqs
         if(nsqsum < 0) nsqsum = 0
@@ -5700,19 +6297,19 @@ end if
         nsubleg = max(nsqsum, nsqnsum, nspsum, jsub)
         r2dc = qdsum + qndsum + pdsum
         nqds = 0
-        if(qdsum / r2dc == 0.0e0_knd) nqds = -ndec
-        if(qdsum / r2dc /= 0.0e0_knd) nqds = int(log10(abs(qdsum / r2dc)))
+        if(qdsum / r2dc == SW_LITERAL(0.0e0_knd,"0.0e0")) nqds = -ndec
+        if(qdsum / r2dc /= SW_LITERAL(0.0e0_knd,"0.0e0")) nqds = int(log10(abs(qdsum / r2dc)))
         nqnds = 0
-        if(qndsum / r2dc == 0.0e0_knd) nqnds = -ndec
-        if(m /= 0 .and. iopqnsum /= 0 .and. qndsum / r2dc /= 0.0e0_knd) &
+        if(qndsum / r2dc == SW_LITERAL(0.0e0_knd,"0.0e0")) nqnds = -ndec
+        if(m /= 0 .and. iopqnsum /= 0 .and. qndsum / r2dc /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
                       nqnds = int(log10(abs(qndsum / r2dc)))
-        if(qnsum / r2c == 0.0e0_knd .and. qndsum / r2dc == 0.0e0_knd) &
+        if(qnsum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0") .and. qndsum / r2dc == SW_LITERAL(0.0e0_knd,"0.0e0")) &
            iopqnsum = 0
         npds = 0
-        if(pdsum / r2c == 0.0e0_knd) npds = -ndec
-        if(ioppsum /= 0 .and. pdsum / r2dc /= 0.0e0_knd) &
+        if(pdsum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0")) npds = -ndec
+        if(ioppsum /= 0 .and. pdsum / r2dc /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
                       npds = int(log10(abs(pdsum / r2dc)))
-        if(psum / r2c == 0.0e0_knd .and. pdsum / r2dc == 0.0e0_knd) ioppsum = 0
+        if(psum / r2c == SW_LITERAL(0.0e0_knd,"0.0e0") .and. pdsum / r2dc == SW_LITERAL(0.0e0_knd,"0.0e0")) ioppsum = 0
         nsqdsum = max(nsqdsum, nsdneg) + nqds
         if(nsqdsum < 0) nsqdsum = 0
         if(nsqdsum > ndec) nsqdsum = ndec
@@ -5735,45 +6332,65 @@ end if
         iterm = int(log10(abs(r2c)))
         r2c = r2c * (ten ** (-iterm))
         ir2e = iqsum + iterm
-        if(abs(r2c) >= 1.0e0_knd) go to 170
+        if(abs(r2c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 170
         r2c = r2c * ten
         ir2e = ir2e - 1
 170     continue
         iterm = int(log10(abs(r2dc)))
         r2dc = r2dc * (ten ** (-iterm))
         ir2de = iqdsum + iterm
-        if(abs(r2dc) >= 1.0e0_knd) go to 180
+        if(abs(r2dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 180
         r2dc = r2dc * ten
         ir2de = ir2de - 1
 180     continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(ioppsum == 1 .and. iopqnsum == 1) write(40, 190) jleg, jlegp, &
                                   jnleg, lim1, lim2, m, nsubleg, nsubdleg
+#endif
+#ifndef SWF_PRECISION_MPFR
 190     format(8x,'r2leg: qsum, psum and qnsum series converged in ',i6, &
               ',' i6,' and ',i4,' terms; ',i6,',' i6,' and ' i4, &
               ' terms avail.',/,15x, i2,' and ',i2,' digits of sub.', &
               ' error in r2 and r2d.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioppsum == 1 .and. iopqnsum == 0) write(40, 200) jleg, jlegp, &
                                            lim1, lim2, nsubleg, nsubdleg
+#endif
+#ifndef SWF_PRECISION_MPFR
 200     format(8x,'r2leg: qsum and psum series converged in ',i6, &
               ' and ',i6,' terms; ',i6,' and ',i6,' terms avail.',/, &
               15x, i2,' and ',i2,' digits of sub. error in r2 and r2d;', &
               ' qnsum is negligible.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioppsum == 0 .and. iopqnsum == 1) write(40, 210) jleg, jnleg, &
                                            lim1, m, nsubleg, nsubdleg
+#endif
+#ifndef SWF_PRECISION_MPFR
 210     format(8x,'r2leg: qsum and qnsum series converged in ',i6, &
               ' and ',i4,' terms; ',i6,' and ',i4,' terms avail.',/, &
                15x, i2,' and ',i2,' digits of sub. error in r2 and r2d;' &
                ' psum is negligible.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioppsum == 0 .and. iopqnsum == 0) write(40, 220) jleg, lim1, &
                                                   nsubleg, nsubdleg
+#endif
+#ifndef SWF_PRECISION_MPFR
 220     format(8x,'r2leg: qsum series converged in ',i6,' terms with ', &
                i6,' terms avail.; 'i2,' and ',i2,' digits of',/,15x, &
                'sub. error in r2 and r2d; psum and qnsum are ', &
                'negligible.')
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(jflagl == 1) write(40, 230)
+#endif
+#ifndef SWF_PRECISION_MPFR
 230     format(15x,'Wronskian used to improve accuracy of the', &
                 ' the leading psum coefficient drhor(1).')
+#endif
 end if
         return
         end subroutine
@@ -5839,23 +6456,24 @@ end if
 !                         the oblate radial function of second kind
 !               jleg1   : number of terms taken in the series
 !
-        use complex_oblate_parameters
+    integer :: ir1e, ir2de, ir2e, j, jleg1, l, la, limq, m, m2
+    integer :: maxq, n, ndec
 !
 !  real(knd) scalars and arrays
-        real(knd) dec, em, qm0, qdm0, ten, term, x, xx, qr(maxq), qdr(maxq)
+        SW_REAL dec, em, qm0, qdm0, ten, term, x, xx, qr(maxq), qdr(maxq)
 !
 !  complex(knd) scalars
-        complex(knd) arg, cc, eigval, ea, e3, ra, r1c, r1, r2, r2c, r2d, r2dc, r3, &
+        SW_COMPLEX arg, cc, eigval, ea, e3, ra, r1c, r1, r2, r2c, r2d, r2dc, r3, &
                      sumi, sumdi, sumr, sumdr, termi, termdi, termr, termdr
 !  complex(knd) arays
-        complex(knd) aratio(maxq), coef1(maxq), coef2(maxq), coef3(maxq)
+        SW_COMPLEX aratio(maxq), coef1(maxq), coef2(maxq), coef3(maxq)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         em = m
         m2 = m + m
         dec = ten ** (-ndec - 1)
         arg = cc * x
-        xx = x * x + 1.0e0_knd
+        xx = x * x + SW_LITERAL(1.0e0_knd,"1.0e0")
         r1 = r1c * (ten ** (ir1e))
         ea = sin(arg) / cc
         ra = cos(arg) / cc
@@ -5889,19 +6507,19 @@ end if
           coef3(j) = cc * (n + n) * (n + m) / (n + n + m2 - 1)
 10        continue
         aratio(1) = coef2(1) / coef1(1)
-        aratio(limq) = 0.0e0_knd
+        aratio(limq) = SW_LITERAL(0.0e0_knd,"0.0e0")
           do 20 j = limq - 1, m + 2,-1
           aratio(j - 1) = coef3(j) / (coef1(j) * aratio(j) - coef2(j))
-          if(abs(aratio(j - 1)) > 1.0e0_knd) go to 30
+          if(abs(aratio(j - 1)) > SW_LITERAL(1.0e0_knd,"1.0e0")) go to 30
 20        continue
 30      continue
           do 40 n = 2, j - 1
           aratio(n) = (coef2(n) + coef3(n) / aratio(n - 1)) / coef1(n)
 40        continue
-        sumi = (1.0e0_knd, 0.0e0_knd)
-        sumdi = (1.0e0_knd, 0.0e0_knd)
-        termi = (1.0e0_knd, 0.0e0_knd)
-        termdi = (1.0e0_knd, 0.0e0_knd)
+        sumi = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumdi = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        termi = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        termdi = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         sumr = aratio(1) * qr(1)
         sumdr = aratio(1) * qdr(1)
         termr = sumr
@@ -5935,21 +6553,25 @@ end if
           end if
         ir2e = int(log10(abs(r2)))
         r2c = r2 * (ten ** (-ir2e))
-        if(abs(r2c) >= 1.0e0_knd) go to 70
+        if(abs(r2c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 70
         r2c = r2c * ten
         ir2e = ir2e - 1
         r2d = r2d + cc * r1
 70      continue
         ir2de = int(log10(abs(r2d)))
         r2dc = r2d * (ten ** (-ir2de))
-        if(abs(r2dc) >= 1.0e0_knd) go to 80
+        if(abs(r2dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 80
         r2dc = r2dc * ten
         ir2de = ir2de - 1
 80      continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 90) jleg1, limq
+#endif
+#ifndef SWF_PRECISION_MPFR
 90      format(8x,'r2leg1: series converged in ',i6, &
                ' terms; ',i6,' terms avail.')
+#endif
 end if
         return
         end subroutine
@@ -6020,27 +6642,30 @@ end if
 !               nsub0  : larger of the subtraction errors in the series
 !                        for r2 and r2d
 !
-        use complex_oblate_parameters
+    integer :: idfe, iexp, ir1de, ir2de, ir2e, iscale, iterm, itest, ix, j
+    integer :: jj, jneu, jtest, jtestdm, jtestm, l, lim, limneu, lm2, m
+    integer :: maxd, maxlp, maxn, minacc, mml, naccs1, naccs1i, naccs1r, naccs2, naccs2i
+    integer :: naccs2r, ndec, ndsub, nex, nfac, nsub0, nterms
 !
 !  real(knd) scalars
-        real(knd) con, dconb, dconf, dconi, dec, rj1, rj2, rm, r2est, sumpi, &
+        SW_REAL con, dconb, dconf, dconi, dec, rj1, rj2, rm, r2est, sumpi, &
                   sumpr, sumdpi, sumdpr, ten, test, testd, testdm, teste, &
                   testeo, testm, txi, txr, txdi, txdr, x
 !  complex(knd) scalars and arrays
-        complex(knd) cc, dfnorm, dnew, dnewd, dold, doldd, r1dc, r2, r2c, r2d, &
+        SW_COMPLEX cc, dfnorm, dnew, dnewd, dold, doldd, r1dc, r2, r2c, r2d, &
                      r2dc, r2dstore, r2dtemp, r2temp, sr2temp, sr2dtemp, &
                      sumcoef
-        complex(knd) enr(maxd), sneudr(maxlp), sneun(maxn), sneuf(maxn), &
+        SW_COMPLEX enr(maxd), sneudr(maxlp), sneun(maxn), sneuf(maxn), &
                      sneudf(maxn)
 !
 !  integer arrays
         integer ineue(maxn)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         iscale = 0
         rm = m
         dec = ten ** (-ndec - 1)
@@ -6049,13 +6674,13 @@ end if
         iexp = -ir1de - ineue(l + 1)
           if(iexp < nfac) then
           sumcoef = (ten ** (iexp))/ &
-                  (cc * (x * x + 1.0e0_knd) * r1dc * sneun(l + 1))
+                  (cc * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) * r1dc * sneun(l + 1))
           r2est = abs(sumcoef * dfnorm) * ten ** (idfe)
           else
           r2est = ten ** nfac
           end if
         dconb = r2est / dconi
-        con = x / sqrt(x * x + 1.0e0_knd)
+        con = x / sqrt(x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))
         lm2 = (l - m) / 2
 !
 !  ix = 0 for l-m even; ix = 1 for l-m odd
@@ -6066,16 +6691,16 @@ end if
 !  compute radial function of the second kind
 !
 !  backward series
-        r2temp = (1.0e0_knd, 0.0e0_knd)
-        sumpr = 1.0e0_knd
-        sumpi = 0.0e0_knd
-        r2dtemp = (1.0e0_knd, 0.0e0_knd)
-        sumdpr = 1.0e0_knd
-        sumdpi = 0.0e0_knd
+        r2temp = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        r2dtemp = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumdpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumdpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         if(r2est > dconi) go to 20
         if (lm2 == 0) go to 20
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 10 j = lm2, 1,-1
           jj = j + j + ix
           rj1 = jj - ix
@@ -6084,20 +6709,20 @@ end if
           dnewd = doldd * rj1 / (rj2 * sneudf(jj + m) * enr(j))
           r2temp = r2temp + dnew
           r2dtemp = r2dtemp + dnewd
-          if(real(dnew) > 0.0e0_knd) sumpr = sumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumpi = sumpi + aimag(dnew)
-          if(real(dnewd) > 0.0e0_knd) sumdpr = sumdpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpr = sumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnewd)
           dold = dnew
           doldd = dnewd
 10      continue
 20      continue
 !
 !  forward series
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd = (1.0e0_knd, 0.0e0_knd)
-        testm = 1.0e0_knd
-        testdm = 1.0e0_knd
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        testm = SW_LITERAL(1.0e0_knd,"1.0e0")
+        testdm = SW_LITERAL(1.0e0_knd,"1.0e0")
         sr2temp = r2temp
         sr2dtemp = r2dtemp
         jneu = lim
@@ -6110,16 +6735,16 @@ end if
           dnewd = doldd * enr(j) * sneudf(jj + m) * rj2 / rj1
           r2temp = r2temp + dnew
           r2dtemp = r2dtemp + dnewd
-          if(real(dnew) > 0.0e0_knd) sumpr = sumpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumpi = sumpi + aimag(dnew)
-          if(real(dnewd) > 0.0e0_knd) sumdpr = sumdpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpr = sumpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnewd)
           test = abs(dnew / r2temp)
           testd = abs(dnewd / r2dtemp)
           if(test + testd < testm + testdm) go to 30
           go to 40
-30    if(test /= 0.0e0_knd) testm = test
-          if(testd /= 0.0e0_knd) testdm = testd
+30    if(test /= SW_LITERAL(0.0e0_knd,"0.0e0")) testm = test
+          if(testd /= SW_LITERAL(0.0e0_knd,"0.0e0")) testdm = testd
           sr2temp = r2temp
           txr = sumpr
           txi = sumpi
@@ -6169,20 +6794,20 @@ end if
         if(jtestdm > ndec) jtestdm = ndec
         jtest = min(jtestm, jtestdm)
         naccs1r = 0
-        if(txr /= 0.0e0_knd) naccs1r = int(log10(abs(txr / real(r2temp))))
+        if(txr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccs1r = int(log10(abs(txr / SW_CONVERT_REAL(r2temp))))
         if(naccs1r < 0) naccs1r = 0
         if(naccs1r > ndec) naccs1r = ndec
         naccs1i = 0
-        if(txi /= 0.0e0_knd) naccs1i = int(log10(abs(txi / aimag(r2temp))))
+        if(txi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccs1i = int(log10(abs(txi / aimag(r2temp))))
         if(naccs1i < 0) naccs1i = 0
         if(naccs1i > ndec) naccs1i = ndec
         naccs2r = 0
-        if(txdr /= 0.0e0_knd) naccs2r = int(log10(abs(txdr/ &
-                                      real(r2dtemp))))
+        if(txdr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccs2r = int(log10(abs(txdr/ &
+                                      SW_CONVERT_REAL(r2dtemp))))
         if(naccs2r < 0) naccs2r = 0
         if(naccs2r > ndec) naccs2r = ndec
         naccs2i = 0
-        if(txdi /= 0.0e0_knd) naccs2i = int(log10(abs(txdi/ &
+        if(txdi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccs2i = int(log10(abs(txdi/ &
                                       aimag(r2dtemp))))
         if(naccs2i < 0) naccs2i = 0
         if(naccs2i > ndec) naccs2i = ndec
@@ -6196,33 +6821,41 @@ end if
         iterm = int(log10(abs(r2)))
         ir2e = ineue(l + 1) - idfe + iterm + iscale
         r2c = r2 * ten ** (-iterm)
-        if(abs(r2c) >= 1.0e0_knd) go to 100
+        if(abs(r2c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 100
         r2c = r2c * ten
         ir2e = ir2e - 1
 100 continue
         r2d = r2dtemp * sneun(l + 1) * cc * con * sneudr(l + 1) / dfnorm
         r2dstore = r2d * con
         ndsub = 0
-        if(ix == 1) r2d = r2dstore+r2 / (x * (x * x + 1.0e0_knd))
+        if(ix == 1) r2d = r2dstore+r2 / (x * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")))
         if(ix == 1) ndsub = -log10(abs(r2d / r2dstore))
         if(ndsub < 0) ndsub = 0
         naccs2 = naccs2 + ndsub
         nsub0 = max(naccs1, naccs2)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 110) nterms, lim, jtestm, naccs1, jtestdm, naccs2
+#endif
+#ifndef SWF_PRECISION_MPFR
 110     format(8x,'r2neu0 (eta=0) : numerator converged in ',i6, &
                ' terms; ',i6,' terms available.',/,15x,'r2 converged ', &
                'to ',i3,' digits with ',i3,' digits sub. error.',/, &
                15x,'r2d converged to ',i3,' digits with ',i3,' digits ', &
                'sub. error.')
+#endif
 
+#ifndef SWF_PRECISION_MPFR
         if(ix == 1 .and. ndsub > 0) write(40, 120) ndsub
+#endif
+#ifndef SWF_PRECISION_MPFR
 120     format(15x,'subtraction error in forming r2d = ',i2,' digits.')
+#endif
 end if
         iterm = int(log10(abs(r2d)))
         ir2de = ineue(l + 1) - idfe + iterm + iscale
     r2dc = r2d * ten ** (-iterm)
-        if(abs(r2dc) >= 1.0e0_knd) go to 130
+        if(abs(r2dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 130
         r2dc = r2dc * ten
         ir2de = ir2de - 1
 130 continue
@@ -6339,26 +6972,37 @@ end if
 !                         r2eta calculations (input) and including the
 !                         curent r2eta calculation (output)
 !
-        use complex_oblate_parameters
+    integer :: ipcoefn, ipdcoefn, ir1de, ir1e, ir2de, ir2e, iterm, ix, j, jden
+    integer :: jds, jeta, jj, jmax, js, jtestdm, jtestm, l, lim, limb
+    integer :: limeta, lm2, m, maxd, maxlp, maxn, maxp, minacc, nacccor, naccd
+    integer :: nacceta, naccetaw, naccn, naccn1, naccn2, naccnmax, naccnmaxp, naccns1, naccns1i, naccns1r
+    integer :: naccns2, naccns2i, naccns2r, naccr, naccr1, naccrpl, ndec, nee, numsub, numsubi
+    integer :: numsubr
+#ifdef SWF_PRECISION_MPFR
+    SW_REAL :: dnewdsum, dnewsum, doldd
+#else
+    ! Preserve the native default-real temporaries used by the original recurrence.
+    real(kind=kind(1.0)) :: dnewdsum, dnewsum, doldd
+#endif
 !
 !  real(knd) scalars and arrays
-        real(knd) c, dcon, dconi, dec, eta, etas, pcoefn, pdcoefn, rm, rm2, &
+        SW_REAL c, dcon, dconi, dec, eta, etas, pcoefn, pdcoefn, rm, rm2, &
                   r2dcoef1, r2est, r2test, sumdnpr, sumdnpi, sumdpi, &
                   sumdpr, sumnpi, sumnpr, ten, test, testd, testdm, testm, &
                   txi, txr, txdi, txdr, wm, xet, xets, x, pratb(maxp), &
                   pratt(maxp), pdratt(maxp)
 !  complex(knd) scalars and arrays
-        complex(knd) cc, denom, dnew, dnewd, dnewd1, dnewd2, dold, doldd1, &
+        SW_COMPLEX cc, denom, dnew, dnewd, dnewd1, dnewd2, dold, doldd1, &
                      doldd2, reld12, r1c, r1dc, r2c, r2dc, r2dcoef2, &
                      r2dtemp, r2temp, sr2temp, sr2dtemp, sumcoef, wronc, &
                      wronca, wroncb, wront
-        complex(knd) enr(maxd), sneudr(maxlp), sneun(maxn), sneuf(maxn), &
+        SW_COMPLEX enr(maxd), sneudr(maxlp), sneun(maxn), sneuf(maxn), &
                      sneudf(maxn)
 !
 !  integer arrays
         integer ineue(maxn)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec - 2)
         rm = m
         c = abs(cc)
@@ -6367,13 +7011,13 @@ end if
         etas = eta * eta
         xet = sqrt(x * x + wm)
         xets = xet * xet
-        naccrpl = ir1e+ir1de+int(log10(abs(r1c * r1dc) * c * (x * x + 1.0e0_knd)))
+        naccrpl = ir1e+ir1de+int(log10(abs(r1c * r1dc) * c * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))))
         if(naccrpl < 0) naccrpl = 0
         if(naccrpl > ndec) naccrpl = ndec
         sumcoef = (ten ** (-ir1de - ineue(l + 1) - ipcoefn))/ &
-                (cc * (x * x + 1.0e0_knd) * r1dc * sneun(l + 1) * pcoefn)
+                (cc * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0")) * r1dc * sneun(l + 1) * pcoefn)
           if(naccrpl > 1) then
-          sumcoef = sumcoef * (ten ** (ir1de+ir1de)) * cc * (x * x + 1.0e0_knd)
+          sumcoef = sumcoef * (ten ** (ir1de+ir1de)) * cc * (x * x + SW_LITERAL(1.0e0_knd,"1.0e0"))
           end if
         r2dcoef1 = eta * wm / (xets * xet)
         r2dcoef2 = cc * x / xet
@@ -6381,7 +7025,7 @@ end if
                pdcoefn) * ten ** (ipcoefn - ipdcoefn)
         rm2 = 2 * m
         lm2 = (l - m) / 2
-        limb = 4 * int(abs(xet * real(cc)) + abs(xet * aimag(cc)))
+        limb = 4 * int(abs(xet * SW_CONVERT_REAL(cc)) + abs(xet * aimag(cc)))
 !
 !  ix = 0 for l-m even; ix = 1 for l-m odd
         ix = l - m - 2 * lm2
@@ -6390,42 +7034,42 @@ end if
 !  compute radial function of the second kind and its first derivative
 !
 !  backward series for denominator
-        denom = (1.0e0_knd, 0.0e0_knd)
-        sumdpr = 1.0e0_knd
-        sumdpi = 0.0e0_knd
+        denom = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumdpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumdpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         if (lm2 < 1) go to 20
-        dold = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 10 j = lm2, 1,-1
           jj = j + j + ix
           dnew = dold / (pratb(jj + 1) * enr(j))
           denom = denom + dnew
-          if(real(dnew) > 0.0e0_knd) sumdpr = sumdpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnew)
           if(abs(dnew / denom) < dec) go to 20
           dold = dnew
 10        continue
 20      continue
 !
 !  forward series for denominator
-        dold = 1.0e0_knd
+        dold = SW_LITERAL(1.0e0_knd,"1.0e0")
           do 30 j = lm2 + 1, lim
           jj = j + j + ix
           dnew = dold * enr(j) * pratb(jj + 1)
           denom = denom + dnew
-          if(real(dnew) > 0.0e0_knd) sumdpr = sumdpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumdpi = sumdpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpr = sumdpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdpi = sumdpi + aimag(dnew)
           if(abs(dnew / denom) < dec) go to 40
           dold = dnew
 30        continue
 40      continue
         jden = j
         numsubr = 0
-        if(sumdpr /= 0.0e0_knd) numsubr = int(log10(abs(sumdpr/ &
-                                        real(denom))))
+        if(sumdpr /= SW_LITERAL(0.0e0_knd,"0.0e0")) numsubr = int(log10(abs(sumdpr/ &
+                                        SW_CONVERT_REAL(denom))))
         if(numsubr < 0) numsubr = 0
         if(numsubr > ndec) numsubr = ndec
         numsubi = 0
-        if(sumdpi /= 0.0e0_knd) numsubi = int(log10(abs(sumdpi/ &
+        if(sumdpi /= SW_LITERAL(0.0e0_knd,"0.0e0")) numsubi = int(log10(abs(sumdpi/ &
                                         aimag(denom))))
         if(numsubi < 0) numsubi = 0
         if(numsubi > ndec) numsubi = ndec
@@ -6436,19 +7080,21 @@ end if
         r2test = r2est * dconi
 !
 !  backward series for numerator
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd1 = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd1 = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd2 = reld12
-        r2temp = (1.0e0_knd, 0.0e0_knd)
-        sumnpr = 1.0e0_knd
-        sumnpi = 0.0e0_knd
+        r2temp = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumnpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumnpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         r2dtemp = doldd2
-        sumdnpr = 0.0e0_knd
-        sumdnpi = 0.0e0_knd
-        if(real(doldd2) > 0.0e0_knd) sumdnpr = real(doldd2)
-        if(aimag(doldd2) > 0.0e0_knd) sumdnpi = aimag(doldd2)
-        if(l /= 0) r2dtemp = r2dtemp + (1.0e0_knd, 0.0e0_knd)
-        if(l /= 0) sumdnpr = sumdnpr + 1.0e0_knd
+        sumdnpr = SW_LITERAL(0.0e0_knd,"0.0e0")
+        sumdnpi = SW_LITERAL(0.0e0_knd,"0.0e0")
+        if(SW_CONVERT_REAL(doldd2) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = SW_CONVERT_REAL(doldd2)
+        if(aimag(doldd2) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = aimag(doldd2)
+        if(l /= 0) r2dtemp = r2dtemp + &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        if(l /= 0) sumdnpr = sumdnpr + SW_LITERAL(1.0e0_knd,"1.0e0")
+        jj = 0
         if(lm2 < 1) go to 60
           do 50 j = lm2, 1,-1
           jj = j + j + ix
@@ -6458,10 +7104,10 @@ end if
           r2temp = r2temp + dnew
           dnewd = dnewd1 + dnewd2
           r2dtemp = r2dtemp + dnewd
-          if(real(dnew) > 0.0e0_knd) sumnpr = sumnpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumnpi = sumnpi + aimag(dnew)
-          if(real(dnewd) > 0.0e0_knd) sumdnpr = sumdnpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdnpi = sumdnpi + aimag(dnewd)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpr = sumnpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpi = sumnpi + aimag(dnew)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = sumdnpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = sumdnpi + aimag(dnewd)
           if(abs(dnew / r2temp) + abs(dnewd / r2dtemp) < dec) go to 60
           dold = dnew
           doldd1 = dnewd1
@@ -6471,13 +7117,13 @@ end if
         if(m == 0 .and. jj == 2) r2dtemp = r2dtemp - dnewd1
 !
 !  forward series for numerator
-        dold = (1.0e0_knd, 0.0e0_knd)
-        doldd1 = (1.0e0_knd, 0.0e0_knd)
+        dold = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        doldd1 = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd2 = reld12
-        test = 1.0e0_knd
-        testd = 1.0e0_knd
-        testm = 1.0e0_knd
-        testdm = 1.0e0_knd
+        test = SW_LITERAL(1.0e0_knd,"1.0e0")
+        testd = SW_LITERAL(1.0e0_knd,"1.0e0")
+        testm = SW_LITERAL(1.0e0_knd,"1.0e0")
+        testdm = SW_LITERAL(1.0e0_knd,"1.0e0")
         js = lm2
         jds = lm2
         sr2temp = r2temp
@@ -6486,19 +7132,19 @@ end if
         txi = sumnpi
         txdr = sumdnpr
         txdi = sumdnpi
-        dnewsum = (0.0e0_knd, 0.0e0_knd)
-        dnewdsum = (0.0e0_knd, 0.0e0_knd)
+        dnewsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        dnewdsum = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         doldd = reld12
-        if(l /= 0) doldd = reld12 + (1.0e0_knd, 0.0e0_knd)
+        if(l /= 0) doldd = reld12 + SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 110 j = lm2 + 1, lim - 1
           jj = j + j + ix
           dnew = -dold * enr(j) * sneuf(jj + m) * pratt(jj + 1)
           dnewd1 = -doldd1 * enr(j) * sneuf(jj + m) * pdratt(jj + 1)
           dnewd2 = -doldd2 * enr(j) * sneudf(jj + m) * pratt(jj + 1)
           r2temp = r2temp + dnew
-          if(real(dnew) > 0.0e0_knd) sumnpr = sumnpr + real(dnew)
-          if(aimag(dnew) > 0.0e0_knd) sumnpi = sumnpi + aimag(dnew)
-          if(abs(dnew) /= 0.0e0_knd) test = abs(dnew / r2temp)
+          if(SW_CONVERT_REAL(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpr = sumnpr + SW_CONVERT_REAL(dnew)
+          if(aimag(dnew) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumnpi = sumnpi + aimag(dnew)
+          if(abs(dnew) /= SW_LITERAL(0.0e0_knd,"0.0e0")) test = abs(dnew / r2temp)
           if(test >= testm) go to 80
           testm = test
           sr2temp = r2temp
@@ -6507,9 +7153,9 @@ end if
           txi = sumnpi
 80        dnewd = dnewd1 + dnewd2
           r2dtemp = r2dtemp + dnewd
-          if(real(dnewd) > 0.0e0_knd) sumdnpr = sumdnpr + real(dnewd)
-          if(aimag(dnewd) > 0.0e0_knd) sumdnpi = sumdnpi + aimag(dnewd)
-          if(abs(dnewd) /= 0.0e0_knd) testd = abs(dnewd / r2dtemp)
+          if(SW_CONVERT_REAL(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpr = sumdnpr + SW_CONVERT_REAL(dnewd)
+          if(aimag(dnewd) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumdnpi = sumdnpi + aimag(dnewd)
+          if(abs(dnewd) /= SW_LITERAL(0.0e0_knd,"0.0e0")) testd = abs(dnewd / r2dtemp)
           if(testd >= testdm) go to 100
           testdm = testd
           sr2dtemp = r2dtemp
@@ -6518,7 +7164,7 @@ end if
           txdi = sumdnpi
 100    if ((test + testd) < dcon .and. jj + m > limb) go to 130
           if(abs(r2temp) + abs(r2dtemp) > r2test) go to 120
-          if((abs(dnew) == 0.0e0_knd) .and. (abs(dnewd) == 0.0e0_knd)) &
+          if((abs(dnew) == SW_LITERAL(0.0e0_knd,"0.0e0")) .and. (abs(dnewd) == SW_LITERAL(0.0e0_knd,"0.0e0"))) &
                   go to 120
           dold = dnew
           doldd1 = dnewd1
@@ -6536,21 +7182,21 @@ end if
         if(jtestdm < 0) jtestdm = 0
         if(jtestdm > ndec) jtestdm = ndec
         naccns1r = 0
-        if(txr /= 0.0e0_knd) naccns1r = int(log10(abs(txr / real(r2temp))))
+        if(txr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns1r = int(log10(abs(txr / SW_CONVERT_REAL(r2temp))))
         if(naccns1r < 0) naccns1r = 0
         if(naccns1r > ndec) naccns1r = ndec
         naccns1i = 0
-        if(txi /= 0.0e0_knd) naccns1i = int(log10(abs(txi/ &
+        if(txi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns1i = int(log10(abs(txi/ &
                                         aimag(r2temp))))
         if(naccns1i < 0) naccns1i = 0
         if(naccns1i > ndec) naccns1i = ndec
         naccns2r = 0
-        if(txdr /= 0.0e0_knd) naccns2r = int(log10(abs(txdr/ &
-                                        real(r2dtemp))))
+        if(txdr /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns2r = int(log10(abs(txdr/ &
+                                        SW_CONVERT_REAL(r2dtemp))))
         if(naccns2r < 0) naccns2r = 0
         if(naccns2r > ndec) naccns2r = ndec
         naccns2i = 0
-        if(txdi /= 0.0e0_knd) naccns2i = int(log10(abs(txdi/ &
+        if(txdi /= SW_LITERAL(0.0e0_knd,"0.0e0")) naccns2i = int(log10(abs(txdi/ &
                                        aimag(r2dtemp))))
         if(naccns2i < 0) naccns2i = 0
         if(naccns2i > ndec) naccns2i = ndec
@@ -6567,18 +7213,21 @@ end if
 !  r2c and r2dc and corresponding exponents ir2e and ir2de
         r2c = r2temp * sneun(l + 1) * pcoefn / denom
         iterm = 0
-        if(abs(r2c) /= 0.0e0_knd) iterm = int(log10(abs(r2c)))
+        if(abs(r2c) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r2c)))
         ir2e = ineue(l + 1) + ipcoefn + iterm
         r2c = r2c * ten ** (-iterm)
         r2dc = (r2dcoef1 * r2dtemp * sneun(l + 1) * pdcoefn / denom)* &
              ten ** (ineue(l + 1) + ipdcoefn - ir2e)
         iterm = 0
-        if(abs(r2dc) /= 0.0e0_knd) iterm = int(log10(abs(r2dc)))
+        if(abs(r2dc) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(r2dc)))
         ir2de = ir2e + iterm
     r2dc = r2dc * ten ** (-iterm)
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 140) jmax, jden, lim, js, jtestm, naccns1, jds, jtestdm, &
                      naccns2, naccn, naccd
+#endif
+#ifndef SWF_PRECISION_MPFR
 140     format(8x,'r2eta: numerator, denominator converged in ', &
                i6,' ,',i6,' terms; ',i6,' terms available.',/, &
                15x,'best r2 at ',i6,' terms with convergence to ',i2, &
@@ -6587,11 +7236,13 @@ if (debug) then
                ' digits; ',i2,' digits subtr. error.',/,15x, &
                'estimated numerator and denominator accuracy is ',i2, &
                ' and ',i2,' digits.')
+#endif
 end if
         wronca = r1c * r2dc * (ten ** (ir1e + ir2de))
         wroncb = r2c * r1dc * (ten ** (ir2e + ir1de))
         wronc = wronca - wroncb
-        wront = (1.0e0_knd, 0.0e0_knd) / (cc * (x * x + 1.0e0_knd))
+        wront = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd) / (cc * (x * &
+      & x + SW_LITERAL(1.0e0_knd,"1.0e0")))
         nacceta = -int(log10(abs((wronc - wront) / wront) + dec))
         if(nacceta > ndec - 1) nacceta = ndec - 1
         if(nacceta < 0) nacceta = 0
@@ -6602,11 +7253,11 @@ end if
         if(nacccor > 0) nacceta = min(nacceta + nacccor, ndec - numsub)
         if(nacceta < 0) nacceta = 0
         if(nacceta < naccetaw) nacceta = naccetaw
-160   if(abs(r2c) >= 1.0e0_knd) go to 170
+160   if(abs(r2c) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 170
         r2c = r2c * ten
         ir2e = ir2e - 1
 170     continue
-        if(abs(r2dc) >= 1.0e0_knd) go to 180
+        if(abs(r2dc) >= SW_LITERAL(1.0e0_knd,"1.0e0")) go to 180
         r2dc = r2dc * ten
         ir2de = ir2de - 1
 180     continue
@@ -6639,19 +7290,19 @@ end if
 !     output:   d  : eigenvalues
 !
 
-        use complex_oblate_parameters
+    integer :: i, i1, ierr, j, l, m, maxe, mml, n, ndec
 !
-        real(knd) machep, eps, temp, t0, t1, zero, half, one, two
-        complex(knd) d(maxe), e(maxe), b, c, f, g, p, r, s, w, czero, cone
+        SW_REAL machep, eps, temp, t0, t1, zero, half, one, two
+        SW_COMPLEX d(maxe), e(maxe), b, c, f, g, p, r, s, w, czero, cone
 !
-        machep = 10.0e0_knd ** (-ndec)
-        eps = 100.0e0_knd * machep
-        zero = 0.0e0_knd
-        half = 0.5e0_knd
-        one = 1.0e0_knd
-        two = 2.0e0_knd
-        czero = cmplx(zero, zero, knd)
-        cone = cmplx(one, zero, knd)
+        machep = SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ndec)
+        eps = SW_LITERAL(100.0e0_knd,"100.0e0") * machep
+        zero = SW_LITERAL(0.0e0_knd,"0.0e0")
+        half = SW_LITERAL(0.5e0_knd,"0.5e0")
+        one = SW_LITERAL(1.0e0_knd,"1.0e0")
+        two = SW_LITERAL(2.0e0_knd,"2.0e0")
+        czero = SW_CONVERT_COMPLEX(zero, zero, knd)
+        cone = SW_CONVERT_COMPLEX(one, zero, knd)
         ierr = 0
         e(n) = czero
           do 140 l = 1, n
@@ -6775,9 +7426,17 @@ end if
 !                       eigenvalue or the first non-paired eigenvalue
 !                       if there are no prolate-like eigenvalues
 !
-        use complex_oblate_parameters
-        real(knd) testpr, testpi
-        complex(knd) c, cp, eigst(np2), f(np), g(np), fp(np), gp(np), p, testp, &
+    integer :: i, iflag, ilimit, imax, is, isav, iupp, j, jci, jmin
+    integer :: k, ka, limeig, limp, limpl, limpsav, lipl, liplp, lips, lnum
+    integer :: m, n, nf, ng, nmax, np, np2
+#ifdef SWF_PRECISION_MPFR
+    SW_REAL :: cm2
+#else
+    ! Preserve the native default-real temporaries used by the original recurrence.
+    real(kind=kind(1.0)) :: cm2
+#endif
+        SW_REAL testpr, testpi
+        SW_COMPLEX c, cp, eigst(np2), f(np), g(np), fp(np), gp(np), p, testp, &
                      temp
 !
         imax = limeig / 2
@@ -6791,7 +7450,7 @@ end if
           k = i
           p = f(i)
             do j = i + 1, n
-              if(real(f(j)) < real(p)) then
+              if(SW_CONVERT_REAL(f(j)) < SW_CONVERT_REAL(p)) then
               k = j
               p = f(j)
               end if
@@ -6807,7 +7466,7 @@ end if
           k = i
           p = g(i)
             do j = i + 1, n
-              if(real(g(j)) < real(p)) then
+              if(SW_CONVERT_REAL(g(j)) < SW_CONVERT_REAL(p)) then
               k = j
               p = g(j)
               end if
@@ -6822,9 +7481,11 @@ end if
         limp = 0
         limpl = 0
           do i = 1, imax
-            if(real(f(i)) < 0.0e0_knd .and. real(g(i)) < 0.0e0_knd) &
+            if(SW_CONVERT_REAL(f(i)) < SW_LITERAL(0.0e0_knd,"0.0e0") .and. SW_CONVERT_REAL(g(i)) < &
+      & SW_LITERAL(0.0e0_knd,"0.0e0")) &
                 limpl = limpl + 1
-            if(real(f(i)) < 0.0e0_knd .or. real(g(i)) < 0.0e0_knd) then
+            if(SW_CONVERT_REAL(f(i)) < SW_LITERAL(0.0e0_knd,"0.0e0") .or. SW_CONVERT_REAL(g(i)) < &
+      & SW_LITERAL(0.0e0_knd,"0.0e0")) then
             limp = limp + 1
             else
             go to 10
@@ -6842,10 +7503,10 @@ end if
           jmin = max(i - jci, limp + 1)
           limpsav = limp
             do j = jmin, imax
-            if(abs(real(f(i)) - real(g(j)))/ &
-                 abs(real(f(i))) > 0.001e0_knd) go to 20
-            if(aimag(c) /= 0.0e0_knd .and. abs(aimag(f(i)) - aimag(g(j)))/ &
-                 abs(aimag(f(i))) > 0.001e0_knd) go to 20
+            if(abs(SW_CONVERT_REAL(f(i)) - SW_CONVERT_REAL(g(j)))/ &
+                 abs(SW_CONVERT_REAL(f(i))) > SW_LITERAL(0.001e0_knd,"0.001e0")) go to 20
+            if(aimag(c) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. abs(aimag(f(i)) - aimag(g(j)))/ &
+                 abs(aimag(f(i))) > SW_LITERAL(0.001e0_knd,"0.001e0")) go to 20
             limp = limp + 1
             limpl = limpl + 1
             temp = f(i)
@@ -6877,20 +7538,20 @@ end if
         nf = 0
         ng = 0
         if(nmax == 0) go to 130
-        cp = (0.0e0_knd,-1.0e0_knd) * c
+        cp = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),-SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * c
           do j = 1, nmax
           ka = j - 1
           n = 2 * (j - 1) + 1
-          testp = n * cp + m * m - (n * n + 5) / 8.0e0_knd- &
-                 n * (n * n + 11 - 32 * m * m) / (64.0e0_knd * cp)
-          testpr = real(testp)
+          testp = n * cp + m * m - (n * n + 5) / SW_LITERAL(8.0e0_knd,"8.0e0")- &
+                 n * (n * n + 11 - 32 * m * m) / (SW_LITERAL(64.0e0_knd,"64.0e0") * cp)
+          testpr = SW_CONVERT_REAL(testp)
           testpi = aimag(testp)
           if(2 * (ka / 2) /= ka) go to 70
             do i = limpl + 1, imax
-            if(abs((real(f(i)) - testpr) / real(f(i))) > 0.02e0_knd) &
+            if(abs((SW_CONVERT_REAL(f(i)) - testpr) / SW_CONVERT_REAL(f(i))) > SW_LITERAL(0.02e0_knd,"0.02e0")) &
                go to 60
-            if(aimag(c) /= 0.0e0_knd .and. abs((aimag(f(i)) - testpi)/ &
-               aimag(f(i))) > 0.02e0_knd) go to 60
+            if(aimag(c) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. abs((aimag(f(i)) - testpi)/ &
+               aimag(f(i))) > SW_LITERAL(0.02e0_knd,"0.02e0")) go to 60
             nf = nf + 1
             fp(nf) = f(i)
             isav = i
@@ -6902,10 +7563,10 @@ end if
             end do
           go to 100
 70          do i = limpl + 1, imax
-            if(abs((real(g(i)) - testpr) / real(g(i))) > 0.02e0_knd) &
+            if(abs((SW_CONVERT_REAL(g(i)) - testpr) / SW_CONVERT_REAL(g(i))) > SW_LITERAL(0.02e0_knd,"0.02e0")) &
                go to 80
-            if(aimag(c) /= 0.0e0_knd .and. abs((aimag(g(i)) - testpi)/ &
-               aimag(g(i))) > 0.02e0_knd) go to 80
+            if(aimag(c) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. abs((aimag(g(i)) - testpi)/ &
+               aimag(g(i))) > SW_LITERAL(0.02e0_knd,"0.02e0")) go to 80
             ng = ng + 1
             gp(ng) = g(i)
               do k = i, imax - ng
@@ -7048,33 +7709,38 @@ end if
 !                       equal to zero or two when it is run in knd = 8
 !                       arithmetic.
 !
-        use complex_oblate_parameters
+    integer :: i, icheck, icheck1, icheck2, ienr, ienrs, iesub, ifc, ifcs, iflag
+    integer :: iglim, int1, int1s, int2, int2s, int3, int4, int5, iopeig, iopeigs
+    integer :: ioprad, ip, ipi, irio, itest, itestm, itry, iw1, iw15, ix
+    integer :: kflag, kindd, kindq, l, lim2, limd, limdb, lipl, liplp, lips
+    integer :: lm2, lmtest, lnum, m, match, maxd, minacc, n, naccre, nbp
+    integer :: ndec, ndec1, nlim, nlimp
 !
 !  real(knd) scalars
-        real(knd) c, dec, eigdec, ten
-        real(knd1) dec1, eigdec1, eigdec2
+        SW_REAL c, dec, eigdec, ten
+        SW_REAL1 dec1, eigdec1, eigdec2
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, cora, corb, de, dl, eign, eigp, eigstart, eigs, &
+        SW_COMPLEX cc, cora, corb, de, dl, eign, eigp, eigstart, eigs, &
                      eigest, eigmat, eigval, enrc, blist(maxd), enr(maxd), &
                      enrf(maxd), glist(maxd)
-        complex(knd1) cora1, corb1, de1, dl1, eigval1, enrc1, blist1(maxd), &
+        SW_COMPLEX1 cora1, corb1, de1, dl1, eigval1, enrc1, blist1(maxd), &
                       enr1(maxd), glist1(maxd)
 !  integer array
         integer ieigt(lnum)
 !
         c = abs(cc)
-        ten = 10.0e0_knd
-        nbp = int(2 * (real(cc) + aimag(cc)) / 3.1416)
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
+        nbp = int(2 * (SW_CONVERT_REAL(cc) + aimag(cc)) / SW_LITERAL(3.1416,"3.1416"))
         dec = ten ** (-ndec - 1)
-        eigdec = dec * 100.0e0_knd
+        eigdec = dec * SW_LITERAL(100.0e0_knd,"100.0e0")
         eigstart = eigmat
         if(l - m + 1 > lipl) iopeig = 0
         if(iopeig == 1) eigstart = eigest
         eigval = eigstart
-        dec1 = 10.0e0_knd1 ** (-ndec1 - 1)
-        eigdec1 = dec1 * 100.0e0_knd1
-        eigdec2 = dec * 100.0e0_knd
+        dec1 = SW_LITERAL(10.0e0_knd1,"10.0e0") ** (-ndec1 - 1)
+        eigdec1 = dec1 * SW_LITERAL(100.0e0_knd1,"100.0e0")
+        eigdec2 = dec * SW_LITERAL(100.0e0_knd,"100.0e0")
         eigval1 = eigval
         lm2 = (l - m) / 2
         lmtest = max(50, nbp)
@@ -7122,7 +7788,7 @@ end if
           end do
 55      ienr = i
         if(ienr < lim2 - 10 .and. l > m + 1) ienr = lim2 - 12
-        de = (1.0e0_knd, 0.0e0_knd)
+        de = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         cora = de
         if(lm2 == 0) go to 60
 !
@@ -7186,7 +7852,7 @@ end if
 95      ienr = i
         ienrs = ienr
         if(ienr < lim2 - 10 .and. l > m + 1) ienr = lim2 - 12
-        de1 = 1.0e0_knd1
+        de1 = SW_LITERAL(1.0e0_knd1,"1.0e0")
         cora1 = de1
         if(lm2 == 0) go to 100
 !
@@ -7219,7 +7885,7 @@ end if
         if(int2 < 3 .and. (l - m + 1 < lips .or. l - m + 1 >= liplp)) iflag = 1
         if(int2 < 1 .and. l - m + 1 >= lips .and. l - m + 1 < liplp) iflag = 1
           if(iflag == 1 .and. int1 > 5) then
-          if(real(eigval) > real(eigp) .and. real(eigval) < real(eign) &
+          if(SW_CONVERT_REAL(eigval) > SW_CONVERT_REAL(eigp) .and. SW_CONVERT_REAL(eigval) < SW_CONVERT_REAL(eign) &
               .and. int1 > 5) iflag = 0
           end if
             if(iflag == 1 .and. itry == 2) then
@@ -7240,7 +7906,7 @@ end if
           if(iflag == 1 .and. itry == 1 .and. (int1 > 5 .or. ifc == 21) .and. &
                 match < 6) then
           eigs = eigval
-          eigval = eigp + 0.5e0_knd * (eign - eigp)
+          eigval = eigp + SW_LITERAL(0.5e0_knd,"0.5e0") * (eign - eigp)
           ifcs = ifc
           ifc = 1
           itry = 2
@@ -7274,30 +7940,54 @@ end if
         if(iflag == 1) eigval = eigstart
 140     continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindd .and. ioprad /= 0 .and. iflag == 0) write(40, 150) l, &
                  eigval, eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindd .and. ioprad == 0 .and. iflag == 0) write(50, 150) l, &
                  eigval, eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindq .and. ioprad /= 0 .and. iflag == 0) write(40, 155) l, &
                  eigval, eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindq .and. ioprad == 0 .and. iflag == 0) write(50, 155) l, &
                  eigval, eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
 150     format(1x,'l =',i5, 6x,'eigenvalue =',e23.14, e23.14,/,16x, &
                      ' estimate =',e23.14, e23.14)
+#endif
+#ifndef SWF_PRECISION_MPFR
 155     format(1x,'l =',i5, 6x,'eigenvalue =',e39.30, e39.30,/,16x, &
                      ' estimate =',e39.30, e39.30)
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindd .and. ioprad /= 0 .and. iflag == 1) write(40, 160) l, &
                 eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindd .and. ioprad == 0 .and. iflag == 1) write(50, 160) l, &
                 eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindq .and. ioprad /= 0 .and. iflag == 1) write(40, 165) l, &
                 eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(knd == kindq .and. ioprad == 0 .and. iflag == 1) write(50, 165) l, &
                 eigstart
+#endif
+#ifndef SWF_PRECISION_MPFR
 160     format(1x,'l =',i5, 6x,'eigenvalue =',e23.14, e23.14' obtained' &
                      ' from tridiagonal matrix')
+#endif
+#ifndef SWF_PRECISION_MPFR
 165     format(1x,'l =',i5, 6x,'eigenvalue =',e39.30, e39.30,/,30x, &
                      ' obtained from tridiagonal matrix')
+#endif
 end if
         if(iflag == 0) naccre = min(int1, ndec)
         if(iflag == 1) naccre = max(int2, match)
@@ -7309,10 +7999,10 @@ end if
 !  calculate the d coefficient ratios (enr)
         lim2 = limd / 2 - ix
         iesub = 0
-          if(lm2 == 0 .and. real(cc) > 50.0e0_knd) then
+          if(lm2 == 0 .and. SW_CONVERT_REAL(cc) > SW_LITERAL(50.0e0_knd,"50.0e0")) then
           iesub = -int(log10(abs((eigval - glist(1)) / eigval) + dec))
           end if
-        if(real(cc) > 50.0e0_knd .and. iesub < 4) go to 200
+        if(SW_CONVERT_REAL(cc) > SW_LITERAL(50.0e0_knd,"50.0e0") .and. iesub < 4) go to 200
         enr(lim2) = -blist(lim2) / (glist(lim2 + 1) - eigval)
           do i = lim2 - 1, lm2 + 1,-1
           enr(i) = -blist(i) / (glist(i + 1) - eigval + enr(i + 1))
@@ -7326,10 +8016,16 @@ end if
 190     continue
         itestm = ndec
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(ioprad /= 0) write(40, 195) lim2, naccre
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioprad == 0) write(50, 195) lim2, naccre
+#endif
+#ifndef SWF_PRECISION_MPFR
 195     format(7x, i7,' d coefs. estimated eigenvalue accuracy is ', &
                i3,' digits')
+#endif
 end if
         go to 260
 200     enr(lim2) = -blist(lim2) / (glist(lim2 + 1) - eigval)
@@ -7355,11 +8051,17 @@ end if
 220       continue
 230     nlimp = 2 * (nlim - 1) + ix
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(ioprad /= 0) write(40, 240) lim2, itestm, nlimp, naccre
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioprad == 0) write(50, 240) lim2, itestm, nlimp, naccre
+#endif
+#ifndef SWF_PRECISION_MPFR
 240     format(7x, i7,' d coefs. Forward and backward recursion d ', &
                'ratios match to ',i2,' digits at n = ',i6,/,24x, &
                'estimated eigenvalue accuracy is ',i3,' digits')
+#endif
 end if
           do 250 n = 1, nlim
           enr(n) = enrf(n)
@@ -7448,18 +8150,28 @@ end if
 !               jsubms  : effective number of decimal digits of subtraction
 !                         error incurred in calculating dmsnorm
 !
-        use complex_oblate_parameters
+    integer :: i, idc01, idfe, idmfe, idmlfe, idmlmfe, idmlmse, idmse, iflag, iopang
+    integer :: ioprad, ir1tempe, iterm, ix, j, jcor, jf, jflag, jj, jlow
+    integer :: jmf, jn, jnorm, jsubf, jsubi, jsubmf, jsubms, jsubr, jterm, kjl
+    integer :: kkjl, l, lim2, limd, lm2, m, maxd, mml, nbp, ndec
+    integer :: nex, nfac
+#ifdef SWF_PRECISION_MPFR
+    SW_REAL :: aj2
+#else
+    ! Preserve the native default-real temporaries used by the original recurrence.
+    real(kind=kind(1.0)) :: aj2
+#endif
 !
 !  real(knd) scalars
-        real(knd) aj, arr, c, dec, ea, fterm, rm2, rm2m1, rm2m3, rm2p1, sgn, sumpr, &
+        SW_REAL aj, arr, c, dec, ea, fterm, rm2, rm2m1, rm2m3, rm2p1, sgn, sumpr, &
                   sumpi, ten, teste, testeo
 !
 !  complex(knd) scalars and array
-        complex(knd) cc, coef, csq, dfnorm, dmlf, dmfnorm, dmlmf, dmsnorm, &
+        SW_COMPLEX cc, coef, csq, dfnorm, dmlf, dmfnorm, dmlmf, dmsnorm, &
                      dmlms, dc01, enr(maxd), term
 !
         c = abs(cc)
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         rm2 = m + m
         rm2m1 = m + m - 1
         rm2p1 = m + m + 1
@@ -7468,30 +8180,31 @@ end if
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** nfac
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         ir1tempe = 0
-        nbp = int(2 * (real(cc) + aimag(cc)) / 3.1416)
+        nbp = int(2 * (SW_CONVERT_REAL(cc) + aimag(cc)) / SW_LITERAL(3.1416,"3.1416"))
         csq = cc * cc
         lm2 = (l - m) / 2
         ix = l - m - 2 * lm2
         mml = m + m - 1 + ix
         lim2 = limd / 2 - ix
-        sgn = 1.0e0_knd
+        sgn = SW_LITERAL(1.0e0_knd,"1.0e0")
         do 20 i = 1, lim2
           arr = ix + i + i
           ea = arr + arr + rm2
-          enr(i) = -(ea - 1.0e0_knd) * (ea + 1.0e0_knd) * enr(i) / ((arr + rm2)* &
-                   (arr + rm2 - 1.0e0_knd) * csq)
+          enr(i) = -(ea - SW_LITERAL(1.0e0_knd,"1.0e0")) * (ea + SW_LITERAL(1.0e0_knd,"1.0e0")) * enr(i) / ((arr &
+      & + rm2)* &
+                   (arr + rm2 - SW_LITERAL(1.0e0_knd,"1.0e0")) * csq)
             if(i <= lm2) then
-            if(real(enr(i)) < (0.0e0_knd)) sgn = sgn * (-1.0e0_knd)
+            if(SW_CONVERT_REAL(enr(i)) < (SW_LITERAL(0.0e0_knd,"0.0e0"))) sgn = sgn * (-SW_LITERAL(1.0e0_knd,"1.0e0"))
             end if
 20        continue
 !
 !  compute the Morse-Feshbach normalizing factor
-        term = (1.0e0_knd, 0.0e0_knd)
+        term = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         dmfnorm = term
-        sumpr = 1.0e0_knd
-        sumpi = 0.0e0_knd
+        sumpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         jlow = l - m + 2
         jterm = lm2
         iflag = 0
@@ -7500,10 +8213,10 @@ end if
           do 30 j = jlow, limd, 2
           aj = j
           jterm = jterm + 1
-          term = term * (aj + rm2) * enr(jterm) * (aj + rm2 - 1.0e0_knd)/ &
-               (aj * (aj - 1.0e0_knd))
-          if(real(term) > 0.0e0_knd) sumpr = sumpr + real(term)
-          if(aimag(term) > 0.0e0_knd) sumpi = sumpi + aimag(term)
+          term = term * (aj + rm2) * enr(jterm) * (aj + rm2 - SW_LITERAL(1.0e0_knd,"1.0e0"))/ &
+               (aj * (aj - SW_LITERAL(1.0e0_knd,"1.0e0")))
+          if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpr = sumpr + SW_CONVERT_REAL(term)
+          if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(term)
           dmfnorm = dmfnorm + term
           if(abs(term / dmfnorm) < dec) go to 40
           if(abs(dmfnorm) < teste) go to 30
@@ -7517,55 +8230,61 @@ end if
 40      jlow = l - m
         jmf = jterm
         if(jlow < 2 .or. iflag == 1) go to 60
-        term = (1.0e0_knd, 0.0e0_knd)
+        term = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         jterm = lm2
           do 50 j = jlow, 2,-2
           aj = j
-          term = term * aj * (aj - 1.0e0_knd) / ((aj + rm2 &
-               -1.0e0_knd) * (aj + rm2) * enr(jterm))
-          if(real(term) > 0.0e0_knd) sumpr = sumpr + real(term)
-          if(aimag(term) > 0.0e0_knd) sumpi = sumpi + aimag(term)
+          term = term * aj * (aj - SW_LITERAL(1.0e0_knd,"1.0e0")) / ((aj + rm2 &
+               -SW_LITERAL(1.0e0_knd,"1.0e0")) * (aj + rm2) * enr(jterm))
+          if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpr = sumpr + SW_CONVERT_REAL(term)
+          if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(term)
           jterm = jterm - 1
           dmfnorm = dmfnorm + term
           if(abs(term / dmfnorm) < dec) go to 60
 50        continue
 60      continue
         jsubr = ndec
-        if(real(dmfnorm) /= 0.0e0_knd) jsubr= &
-                    int(log10(abs(sumpr / real(dmfnorm)) + dec))
+        if(SW_CONVERT_REAL(dmfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) jsubr= &
+                    int(log10(abs(sumpr / SW_CONVERT_REAL(dmfnorm)) + dec))
         if(jsubr < 0) jsubr = 0
         if(jsubr > ndec) jsubr = ndec
         jsubi = 0
-        if(aimag(dmfnorm) /= 0.0e0_knd) jsubi= &
+        if(aimag(dmfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) jsubi= &
                     int(log10(abs(sumpi / aimag(dmfnorm)) + dec))
         if(jsubi < 0) jsubi = 0
         if(jsubi > ndec) jsubi = ndec
         iterm = 0
-        if(abs(dmfnorm) /= 0.0e0_knd) iterm = int(log10(abs(dmfnorm)))
+        if(abs(dmfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(dmfnorm)))
         idmfe = idmfe + iterm
         dmfnorm = dmfnorm * ten ** (-iterm)
-        dmlmf = 1.0e0_knd / dmfnorm
+        dmlmf = SW_LITERAL(1.0e0_knd,"1.0e0") / dmfnorm
         idmlmfe = -idmfe
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(ioprad /= 0) write(40, 70) jmf, jsubr, jsubi
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioprad == 0) write(50, 70) jmf, jsubr, jsubi
+#endif
+#ifndef SWF_PRECISION_MPFR
 70      format(15x,'Morse-Feshbach norm. converged', &
                ' in ',i6,' terms with ',i2,' and ',i2,' digits of', &
                ' subtr.',/,23x,'error in the real and imag. parts')
+#endif
 end if
         jsubmf = jsubr
-          if(aimag(cc) /= 0.0e0_knd .and. aimag(dmfnorm) /= 0.0e0_knd) &
+          if(aimag(cc) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(dmfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) &
               then
-          jcor = int(log10(abs(real(dmfnorm) / aimag(dmfnorm)) + dec))
+          jcor = int(log10(abs(SW_CONVERT_REAL(dmfnorm) / aimag(dmfnorm)) + dec))
           if(jcor >= 0) jsubmf = max(jsubr, jsubi - jcor)
           if(jcor < 0) jsubmf = max(jsubr + jcor, jsubi)
           end if
           if(jsubmf > ndec) jsubmf = ndec
 !
 !  compute the Flammer normalizing factor
-        term = (1.0e0_knd, 0.0e0_knd)
-        sumpr = 1.0e0_knd
-        sumpi = 0.0e0_knd
+        term = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        sumpr = SW_LITERAL(1.0e0_knd,"1.0e0")
+        sumpi = SW_LITERAL(0.0e0_knd,"0.0e0")
         dfnorm = term
         idfe = 0
         iflag = 0
@@ -7573,8 +8292,8 @@ end if
           jj = j + j + ix
           term = -term * enr(j) * (jj + mml) / (jj - ix)
           dfnorm = dfnorm + term
-          if(real(term) > 0.0e0 + knd) sumpr = sumpr + real(term)
-          if(aimag(term) > 0.0e0_knd) sumpi = sumpi + aimag(term)
+          if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0,"0.0e0") + knd) sumpr = sumpr + SW_CONVERT_REAL(term)
+          if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(term)
           if(abs(term / dfnorm) < dec) go to 90
           if(abs(dfnorm) < teste) go to 80
           dfnorm = dfnorm * testeo
@@ -7587,43 +8306,49 @@ end if
 90      continue
         jf = min(j, lim2)
         if(lm2 < 1 .or. iflag == 1) go to 110
-        term = (1.0e0_knd, 0.0e0_knd)
+        term = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do 100 j = lm2, 1,-1
           jj = j + j + ix
           term = -term * (jj - ix) / ((jj + mml) * enr(j))
           dfnorm = dfnorm + term
-          if(real(term) > 0.0e0_knd) sumpr = sumpr + real(term)
-          if(aimag(term) > 0.0e0_knd) sumpi = sumpi + aimag(term)
+          if(SW_CONVERT_REAL(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpr = sumpr + SW_CONVERT_REAL(term)
+          if(aimag(term) > SW_LITERAL(0.0e0_knd,"0.0e0")) sumpi = sumpi + aimag(term)
           if(abs(term / dfnorm) < dec) go to 110
 100       continue
 110     continue
         jnorm = max(jf, jmf)
         jsubr = ndec
-        if(real(dfnorm) /= 0.0e0_knd) jsubr= &
-                  int(log10(abs(sumpr / real(dfnorm)) + dec))
+        if(SW_CONVERT_REAL(dfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) jsubr= &
+                  int(log10(abs(sumpr / SW_CONVERT_REAL(dfnorm)) + dec))
         if(jsubr < 0) jsubr = 0
         if(jsubr > ndec) jsubr = ndec
         jsubi = 0
-        if(aimag(dfnorm) /= 0.0e0_knd) jsubi= &
+        if(aimag(dfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) jsubi= &
                   int(log10(abs(sumpi / aimag(dfnorm)) + dec))
         if(jsubi < 0) jsubi = 0
         if(jsubi > ndec) jsubi = ndec
         iterm = 0
-        if(abs(dfnorm) /= 0.0e0_knd) iterm = int(log10(abs(dfnorm)))
+        if(abs(dfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) iterm = int(log10(abs(dfnorm)))
         idfe = idfe + iterm
         dfnorm = dfnorm * ten ** (-iterm)
-        dmlf = 1.0e0_knd / dfnorm
+        dmlf = SW_LITERAL(1.0e0_knd,"1.0e0") / dfnorm
         idmlfe = -idfe
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(ioprad /= 0) write(40, 120) jf, jsubr, jsubi
+#endif
+#ifndef SWF_PRECISION_MPFR
         if(ioprad == 0) write(50, 120) jf, jsubr, jsubi
+#endif
+#ifndef SWF_PRECISION_MPFR
 120     format(15x,'Flammer norm. converged in ', &
                i6,' terms with ',i2,' and ',i2,' digits of ', &
                'subt.',/,22x,' error in real and imag. parts.')
+#endif
 end if
         jsubf = jsubr
-          if(aimag(cc) /= 0.0e0_knd .and. aimag(dfnorm) /= 0.0e0_knd) then
-          jcor = int(log10(abs(real(dfnorm) / aimag(dfnorm)) + dec))
+          if(aimag(cc) /= SW_LITERAL(0.0e0_knd,"0.0e0") .and. aimag(dfnorm) /= SW_LITERAL(0.0e0_knd,"0.0e0")) then
+          jcor = int(log10(abs(SW_CONVERT_REAL(dfnorm) / aimag(dfnorm)) + dec))
           if(jcor >= 0) jsubf = max(jsubr, jsubi - jcor)
           if(jcor < 0) jsubf = max(jsubr + jcor, jsubi)
           end if
@@ -7631,7 +8356,7 @@ end if
 !
 !  compute the d0(c|ml) or d1(c|ml)
         idc01 = 0
-    dc01 = (1.0e0_knd, 0.0e0_knd)
+    dc01 = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         if(lm2 == 0) go to 140
           do 130 kjl = 1, lm2
           kkjl = lm2 - kjl + 1
@@ -7653,9 +8378,9 @@ end if
 !  compute the Meixner-Schafke normalizing factor
         jflag = 0
         idmse = 0
-        coef = (1.0e0_knd, 0.0e0_knd)
+        coef = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         dmsnorm = coef
-        fterm = 1.0e0_knd
+        fterm = SW_LITERAL(1.0e0_knd,"1.0e0")
         jlow = l - m + 2
         jterm = lm2
           do 150 j = jlow, limd, 2
@@ -7663,7 +8388,7 @@ end if
           aj2 = aj + aj
           jterm = jterm + 1
           coef = coef * (aj + rm2) * enr(jterm) * (aj + rm2m1) * enr(jterm) &
-               *(aj2 + rm2m3) / (aj * (aj - 1.0e0_knd) * (aj2 + rm2p1))
+               *(aj2 + rm2m3) / (aj * (aj - SW_LITERAL(1.0e0_knd,"1.0e0")) * (aj2 + rm2p1))
           dmsnorm = dmsnorm + coef
           fterm = max(fterm, abs(dmsnorm))
           if(abs(coef / dmsnorm) < dec) go to 160
@@ -7679,13 +8404,13 @@ end if
         jn = jterm
         jnorm = max(jnorm, jn)
         if(jlow < 2 .or. jflag == 1) go to 180
-        coef = (1.0e0_knd, 0.0e0_knd)
+        coef = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
         jterm = lm2
         j = jlow
           do 170 jj = 2, jlow, 2
           aj = j
           aj2 = aj + aj
-          coef = coef * aj * (aj - 1.0e0_knd) * (aj2 + rm2p1) / ((aj2 + rm2m3)* &
+          coef = coef * aj * (aj - SW_LITERAL(1.0e0_knd,"1.0e0")) * (aj2 + rm2p1) / ((aj2 + rm2m3)* &
                   enr(jterm) * enr(jterm) * (aj + rm2) * (aj + rm2m1))
           jterm = jterm - 1
           j = j - 2
@@ -7706,9 +8431,13 @@ end if
         dmlms = sgn / sqrt(dmsnorm)
         idmlmse = -idmse / 2
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         if(iopang /= 0) write(50, 190) jn, jsubms
+#endif
+#ifndef SWF_PRECISION_MPFR
 190     format(5x,' Meixner-Schafke normalization converged in ', &
                i6,' terms with ',i2,' digits of subt. error')
+#endif
 end if
 200     continue
         return
@@ -7751,22 +8480,23 @@ end if
 !                         drhor(1) from drhor(2)
 !               nsdrho  : subtraction error in calculating drhor(1)
 !
-        use complex_oblate_parameters
+    integer :: i, idneg, ii, ioppsum, iterm, ix, j, l, limdr, m
+    integer :: maxdr, maxmp, mnsdrho, n, ndec, nex, nfac, nsdneg, nsdrho, nsdrhor1
 !
 !  real(knd) scalars and arrays
-        real(knd) r, rm, rn, t, ten, teste, testeo, uterm, wterm
-        real(knd) amnsdrho, ansdneg, ansdrho, asub, bsub
+        SW_REAL r, rm, rn, t, ten, teste, testeo, uterm, wterm
+        SW_REAL amnsdrho, ansdneg, ansdrho, asub, bsub
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, dneg, eigval
-        complex(knd) enrneg(maxmp), drhor(maxdr)
-        complex(knd) vterm
+        SW_COMPLEX cc, dneg, eigval
+        SW_COMPLEX enrneg(maxmp), drhor(maxdr)
+        SW_COMPLEX vterm
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
 !  if l-m is even, ix=0; if l-m is odd, ix=1
         ix = (l - m) - 2 * ((l - m) / 2)
         t = m + m - ix - ix
@@ -7778,23 +8508,26 @@ end if
 !
         rm = m
           if(m == 0) then
-          dneg = (1.0e0_knd, 0.0e0_knd)
+          dneg = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           idneg = 0
           go to 30
           end if
           do 10 i = 1, m + 1
-          enrneg(i) = (0.0e0_knd, 0.0e0_knd)
+          enrneg(i) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
 10        continue
 !
 !  first calculate enrneg(1)
         n = 2 - 2 * m + ix
         rn = n
         r = n + m + m
-        uterm = r * (r - 1.0e0_knd) / ((rn + r + 1.0e0_knd) * (rn + r - 1.0e0_knd))
+        uterm = r * (r - SW_LITERAL(1.0e0_knd,"1.0e0")) / ((rn + r + SW_LITERAL(1.0e0_knd,"1.0e0")) * (rn + r - &
+      & SW_LITERAL(1.0e0_knd,"1.0e0")))
         r = n + m - 2
-        vterm = (2.0e0_knd * r * (r + 1.0e0_knd) - 2.0e0_knd * rm * rm- &
-              1.0e0_knd) / ((2.0e0_knd * r + 3.0e0_knd) * (2.0e0_knd * r- &
-              1.0e0_knd)) - (r * (r + 1.0e0_knd) - eigval) / (cc * cc)
+        vterm = (SW_LITERAL(2.0e0_knd,"2.0e0") * r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - &
+      & SW_LITERAL(2.0e0_knd,"2.0e0") * rm * rm- &
+              SW_LITERAL(1.0e0_knd,"1.0e0")) / ((SW_LITERAL(2.0e0_knd,"2.0e0") * r + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")) * (SW_LITERAL(2.0e0_knd,"2.0e0") * r- &
+              SW_LITERAL(1.0e0_knd,"1.0e0"))) - (r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - eigval) / (cc * cc)
 !
 !       calculations continue up to and including
 !       enrneg(k=m) = { d(-2)/d(0), l-m even }
@@ -7803,7 +8536,7 @@ end if
         enrneg(1) = -uterm / vterm
         dneg = enrneg(1)
         idneg = 0
-        ansdneg = 0.0e0_knd
+        ansdneg = SW_LITERAL(0.0e0_knd,"0.0e0")
         nsdneg = 0
 !
 !  backward recursion beginning with enrneg(1) and
@@ -7816,25 +8549,28 @@ end if
           rn = n
           r = n + m + m
 
-          uterm = r * (r - 1.0e0_knd) / ((rn + r + 1.0e0_knd) * (rn + r- &
-                     1.0e0_knd))
+          uterm = r * (r - SW_LITERAL(1.0e0_knd,"1.0e0")) / ((rn + r + SW_LITERAL(1.0e0_knd,"1.0e0")) * (rn + r- &
+                     SW_LITERAL(1.0e0_knd,"1.0e0")))
           r = n + m - 2
 
-          vterm = (2.0e0_knd * r * (r + 1.0e0_knd) - 2.0e0_knd * rm * rm- &
-                1.0e0_knd) / ((2.0e0_knd * r + 3.0e0_knd) * (2.0e0_knd * r- &
-                1.0e0_knd)) - (r * (r + 1.0e0_knd) - eigval) / (cc * cc)
+          vterm = (SW_LITERAL(2.0e0_knd,"2.0e0") * r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - &
+      & SW_LITERAL(2.0e0_knd,"2.0e0") * rm * rm- &
+                SW_LITERAL(1.0e0_knd,"1.0e0")) / ((SW_LITERAL(2.0e0_knd,"2.0e0") * r + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")) * (SW_LITERAL(2.0e0_knd,"2.0e0") * r- &
+                SW_LITERAL(1.0e0_knd,"1.0e0"))) - (r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - eigval) / (cc * cc)
           r = n - 4
-          wterm = (r + 2.0e0_knd) * (r + 1.0e0_knd) / ((r + r + rm + rm+ &
-                      3.0e0_knd) * (r + r + rm + rm + 1.0e0_knd))
+          wterm = (r + SW_LITERAL(2.0e0_knd,"2.0e0")) * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) / ((r + r + rm + rm+ &
+                      SW_LITERAL(3.0e0_knd,"3.0e0")) * (r + r + rm + rm + SW_LITERAL(1.0e0_knd,"1.0e0")))
           enrneg(j + 1) = -uterm / (wterm * enrneg(j) + vterm)
           dneg = dneg * enrneg(j + 1)
-            if(wterm * enrneg(j) * vterm /= (0.0e0_knd, 0.0e0)) &
+            if(wterm * enrneg(j) * vterm /= &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0,"0.0e0"),knd)) &
                then
             asub = log10(abs(vterm / (vterm+ &
                              wterm * enrneg(j))))
-            if(asub > 0.0e0_knd) ansdneg = ansdneg + asub
+            if(asub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdneg = ansdneg + asub
             bsub = log10(abs(vterm / (wterm * enrneg(j))))
-            if(bsub > 0.0e0_knd) ansdneg = max(0.0e0_knd, ansdneg - bsub)
+            if(bsub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdneg = max(SW_LITERAL(0.0e0_knd,"0.0e0"), ansdneg - bsub)
             if(int(ansdneg) > nsdneg) nsdneg = ansdneg
             end if
             if(abs(dneg) > teste) then
@@ -7850,7 +8586,7 @@ end if
         iterm = int(log10(abs(dneg)))
         dneg = dneg * (ten ** (-iterm))
         idneg = idneg + iterm
-        if(nsdneg > 6 .and. aimag(cc) <= 5.0e0_knd) nsdneg = nsdneg - 1
+        if(nsdneg > 6 .and. aimag(cc) <= SW_LITERAL(5.0e0_knd,"5.0e0")) nsdneg = nsdneg - 1
 !
 !  calculate ratios of d rho coefficients
 !
@@ -7858,58 +8594,68 @@ end if
 !                    { d(rho|2k-1)/d(rho|2k-3), l-m odd }
 !
 30   if(ioppsum == 0) go to 60
-          ansdrho = 0.0e0_knd
-          amnsdrho = 0.0e0_knd
+          ansdrho = SW_LITERAL(0.0e0_knd,"0.0e0")
+          amnsdrho = SW_LITERAL(0.0e0_knd,"0.0e0")
           nsdrho = 0
           mnsdrho = 0
           do 40 i = 1, limdr
-          drhor(i) = (0.0e0_knd, 0.0e0_knd)
+          drhor(i) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
 40        continue
           do 50 i = 2 * limdr, 6,-2
           n = 4 - i + ix - m - m
           ii = (i - 2) / 2
           rn = n
           r = n + m + m
-          uterm = r * (r - 1.0e0_knd) / ((rn + r + 1.0e0_knd) * (rn + r - 1.0e0_knd))
+          uterm = r * (r - SW_LITERAL(1.0e0_knd,"1.0e0")) / ((rn + r + SW_LITERAL(1.0e0_knd,"1.0e0")) * (rn + r &
+      & - SW_LITERAL(1.0e0_knd,"1.0e0")))
           r = n + m - 2
-          vterm = (2.0e0_knd * r * (r + 1.0e0_knd) - 2.0e0_knd * rm * rm- &
-                 1.0e0_knd) / ((2.0e0_knd * r + 3.0e0_knd) * (2.0e0_knd * r- &
-                 1.0e0_knd)) - (r * (r + 1.0e0_knd) - eigval) / (cc * cc)
+          vterm = (SW_LITERAL(2.0e0_knd,"2.0e0") * r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - &
+      & SW_LITERAL(2.0e0_knd,"2.0e0") * rm * rm- &
+                 SW_LITERAL(1.0e0_knd,"1.0e0")) / ((SW_LITERAL(2.0e0_knd,"2.0e0") * r + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0")) * (SW_LITERAL(2.0e0_knd,"2.0e0") * r- &
+                 SW_LITERAL(1.0e0_knd,"1.0e0"))) - (r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - eigval) / (cc * cc)
           r = n - 4
-          wterm = (r + 2.0e0_knd) * (r + 1.0e0_knd) / ((r + r + rm + rm + 3.0e0_knd)* &
-                (r + r + rm + rm + 1.0e0_knd))
+          wterm = (r + SW_LITERAL(2.0e0_knd,"2.0e0")) * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) / ((r + r + rm + rm &
+      & + SW_LITERAL(3.0e0_knd,"3.0e0"))* &
+                (r + r + rm + rm + SW_LITERAL(1.0e0_knd,"1.0e0")))
           drhor(ii) = -uterm / (wterm * drhor(ii + 1) + vterm)
-            if(wterm * drhor(ii + 1) * vterm /= (0.0e0_knd, 0.0e0)) &
+            if(wterm * drhor(ii + 1) * vterm /= &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0,"0.0e0"),knd)) &
                then
             asub = log10(abs(vterm / (vterm + wterm * drhor(ii + 1))))
-            if(asub > 0.0e0_knd) ansdrho = ansdrho + asub
+            if(asub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdrho = ansdrho + asub
             bsub = log10(abs(vterm / (wterm * drhor(ii + 1))))
-            if(bsub > 0.0e0_knd) ansdrho = max(0.0e0_knd, ansdrho - bsub)
+            if(bsub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdrho = max(SW_LITERAL(0.0e0_knd,"0.0e0"), ansdrho - bsub)
             if(ansdrho > amnsdrho) amnsdrho = ansdrho
             end if
 50        continue
         n = -2 * m + ix
         r = n + m - 2
-        vterm = (2.0e0_knd * r * (r + 1.0e0_knd) - 2.0e0_knd * rm * rm - 1.0e0_knd)/ &
-              ((2.0e0_knd * r + 3.0e0_knd) * (2.0e0_knd * r - 1.0e0_knd))- &
-              (r * (r + 1.0e0_knd) - eigval) / (cc * cc)
+        vterm = (SW_LITERAL(2.0e0_knd,"2.0e0") * r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - &
+      & SW_LITERAL(2.0e0_knd,"2.0e0") * rm * rm - SW_LITERAL(1.0e0_knd,"1.0e0"))/ &
+              ((SW_LITERAL(2.0e0_knd,"2.0e0") * r + SW_LITERAL(3.0e0_knd,"3.0e0")) * &
+      & (SW_LITERAL(2.0e0_knd,"2.0e0") * r - SW_LITERAL(1.0e0_knd,"1.0e0")))- &
+              (r * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) - eigval) / (cc * cc)
         r = n - 4
-        wterm = (r + 2.0e0_knd) * (r + 1.0e0_knd) / ((r + r + rm + rm + 3.0e0_knd)* &
-              (r + r + rm + rm + 1.0e0_knd))
+        wterm = (r + SW_LITERAL(2.0e0_knd,"2.0e0")) * (r + SW_LITERAL(1.0e0_knd,"1.0e0")) / ((r + r + rm + rm + &
+      & SW_LITERAL(3.0e0_knd,"3.0e0"))* &
+              (r + r + rm + rm + SW_LITERAL(1.0e0_knd,"1.0e0")))
 !
 !       the final value of ii is 1;
 !       drhor(1) has a special value:
 !       drhor(1) = { d(rho|2m+2)/d(-2m), l-m even  }
 !                  { d(rho|2m+1)/d(-2m+1), l-m odd }
 !
-        drhor(1) = 1.0e0_knd / ((t - 1.0e0_knd) * (t + 1.0e0_knd)* &
+        drhor(1) = SW_LITERAL(1.0e0_knd,"1.0e0") / ((t - SW_LITERAL(1.0e0_knd,"1.0e0")) * (t + &
+      & SW_LITERAL(1.0e0_knd,"1.0e0"))* &
                  (wterm * drhor(2) + vterm))
-          if(wterm * drhor(2) * vterm /= (0.0e0_knd, 0.0e0)) &
+          if(wterm * drhor(2) * vterm /= &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0,"0.0e0"),knd)) &
                then
           asub = log10(abs(vterm / (vterm + wterm * drhor(2))))
-          if(asub > 0.0e0_knd) ansdrho = ansdrho + asub
+          if(asub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdrho = ansdrho + asub
           bsub = log10(abs(vterm / (wterm * drhor(2))))
-          if(bsub > 0.0e0_knd) ansdrho = max(0.0e0_knd, ansdrho - bsub)
+          if(bsub > SW_LITERAL(0.0e0_knd,"0.0e0")) ansdrho = max(SW_LITERAL(0.0e0_knd,"0.0e0"), ansdrho - bsub)
           if(ansdrho > amnsdrho) amnsdrho = ansdrho
           end if
         nsdrho = int(amnsdrho) + 1
@@ -7934,38 +8680,38 @@ end if
 !     output:   x   : coordinate values for quadrature
 !               w   : weighting factors
 !
-        use complex_oblate_parameters
+    integer :: i, imax, j, k, n, ndec
 !
 !  real(knd) scalars and arrays
-        real(knd) delta, der, pi, ri, s, t, ten, test, u, v, z
-        real(knd) x(n), w(n)
+        SW_REAL delta, der, pi, ri, s, t, ten, test, u, v, z
+        SW_REAL x(n), w(n)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         test = ten ** (-ndec)
         imax = (n + 1) / 2
-        pi = acos(-1.0_knd)
+        pi = acos(-SW_LITERAL(1.0_knd,"1.0"))
           do 40 i = 1, imax
           ri = i
-      z = cos(pi * (ri - 0.25e0_knd) / (n + 0.5e0_knd))
+      z = cos(pi * (ri - SW_LITERAL(0.25e0_knd,"0.25e0")) / (n + SW_LITERAL(0.5e0_knd,"0.5e0")))
             do 20 j = 1, 30
-            u = 0.0e0_knd
-        v = 1.0e0_knd
+            u = SW_LITERAL(0.0e0_knd,"0.0e0")
+        v = SW_LITERAL(1.0e0_knd,"1.0e0")
           do 10 k = 1, n
           t = u
               u = v
           v = ((k + k - 1) * z * u - (k - 1) * t) / k
 10            continue
-            s = z * z - 1.0e0_knd
+            s = z * z - SW_LITERAL(1.0e0_knd,"1.0e0")
         der = n * (z * v - u) / s
-        delta = -v / der - 0.5e0_knd * v * v * ((n * n * s - n * z * z - n) * v+ &
-                  2.0e0_knd * n * z * u) / (der * der * der * s * s)
+        delta = -v / der - SW_LITERAL(0.5e0_knd,"0.5e0") * v * v * ((n * n * s - n * z * z - n) * v+ &
+                  SW_LITERAL(2.0e0_knd,"2.0e0") * n * z * u) / (der * der * der * s * s)
             z = z + delta
         if(abs(delta / z) < test) go to 30
 20          continue
 30        continue
       x(i) = -z
       x(n + 1 - i) = z
-      w(i) = 2.0e0_knd / ((1.0e0_knd - z * z) * der * der)
+      w(i) = SW_LITERAL(2.0e0_knd,"2.0e0") / ((SW_LITERAL(1.0e0_knd,"1.0e0") - z * z) * der * der)
       w(n + 1 - i) = w(i)
 40    continue
     return
@@ -8080,13 +8826,16 @@ end if
 !                        relating the derivative ratios pdr to the
 !                        function ratios pr
 !
-        use complex_oblate_parameters
+    integer :: iopd, iterm, j, jdelta, jlow, jm, jterm, k, lim, limcsav
+    integer :: m, m2, m2m1, maxp, maxt, mm1, mm2, msqp1, n, n2
+    integer :: n2m1, n2p1, n2p3, narg, ndec, nex, nfac, nmmm1, nmmm2, npm
+    integer :: npmm1, npmp1, npmp2
 !
 !  real(knd) scalars and arrays
-        real(knd) adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, coef, &
+        SW_REAL adec, ajterm, am2p1, anden1, anden2, an2tnp1, bargs, coef, &
                   den, rm, rm2, temp1, temp2, temp3, ten, term, teste, testeo, &
                   ta, tb, tc, t1, t2, t3
-        real(knd) alpha(maxp), barg(maxt), beta(maxp), coefa(maxp), &
+        SW_REAL alpha(maxp), barg(maxt), beta(maxp), coefa(maxp), &
                   coefb(maxp), coefc(maxp), coefd(maxp), coefe(maxp), &
                   gamma(maxp), pdnorm(maxt), pdr(maxt, maxp), pdr1(maxp), &
                   pr(maxt, maxp), pnorm(maxt)
@@ -8094,12 +8843,12 @@ end if
 !  integer array
         integer ipdnorm(maxt), ipnorm(maxt)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         adec = ten ** (-ndec + 2)
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** nfac
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         rm = m
         rm2 = m * m
         am2p1 = m + m + 1
@@ -8108,8 +8857,8 @@ end if
         mm1 = m - 1
         mm2 = m - 2
         msqp1 = 2 * m * m + 1
-        coef = 1.0e0_knd
-        if(iopd == 4) coef = -1.0e0_knd
+        coef = SW_LITERAL(1.0e0_knd,"1.0e0")
+        if(iopd == 4) coef = -SW_LITERAL(1.0e0_knd,"1.0e0")
 !
 !  calculate the coefficients alpha(j), beta(j), and gamma(j) for
 !  the three term recursion relating the Legendre function ratios
@@ -8131,36 +8880,9 @@ end if
 !  P  and P   . Also, pdr(k,1) and pdr(k,2) are equal to P'  and P' .
 !   m      m+1                                            m       m+1
 !
-        if(limcsav >= lim) go to 30
-          do 10 j = limcsav + 3, lim + 2
-          n = m + j - 3
-          n2 = n + n
-          n2p3 = n2 + 3
-          n2p1 = n2 + 1
-          n2m1 = n2 - 1
-          nmmm2 = n - mm2
-          nmmm1 = n - mm1
-          npmm1 = n + mm1
-          npm = n + m
-          npmm1 = n + mm1
-          npmp1 = n + m + 1
-          npmp2 = npmp1 + 1
-          an2tnp1 = 2 * n * real(n + 1, knd)
-          anden1 = nmmm2 * real(nmmm1, knd)
-          anden2 = n2m1 * anden1
-          alpha(j) = real(n2p3, knd) * n2p1 / anden1
-          beta(j) = real(n2p1, knd) * (real(msqp1, knd) - an2tnp1) / anden2
-          gamma(j) = -real(n2p3, knd) * real(npm, knd) * real(npmm1, knd)/ &
-                    anden2
-          coefa(j) = -real(npmp2, knd) / real(nmmm1, knd)
-          coefb(j) = real(n2p3, knd) * (n + 2) / anden1
-          coefc(j) = -real(npmp1, knd) * npmp2 / anden1
-          coefd(j) = real(npmp1, knd) / real(nmmm2, knd)
-          coefe(j) = -real(n + 1, knd) * n2p3 / anden1
-10        continue
-        gamma(3) = 0.0e0_knd
-        gamma(4) = 0.0e0_knd
-        term = 1.0e0_knd
+        if(limcsav < lim) call pleg_coefficients(m,limcsav+3,lim+2,maxp,alpha,beta,gamma, &
+          coefa,coefb,coefc,coefd,coefe)
+        term = SW_LITERAL(1.0e0_knd,"1.0e0")
         iterm = 0
         if(m < 2) go to 30
           do jm = 2, m
@@ -8188,9 +8910,10 @@ end if
           ipnorm(k) = iterm
           pdnorm(k) = term
           ipdnorm(k) = iterm
+          pdr(k,1:lim+2) = SW_LITERAL(0.0e0_knd,"0.0e0")
 !
 !   define the first two ratios equal to unity and (2m+1)*barg(k)
-          pr(k, 1) = 1.0e0_knd
+          pr(k, 1) = SW_LITERAL(1.0e0_knd,"1.0e0")
           pr(k, 2) = am2p1 * barg(k)
           jdelta = 1
           if(abs(barg(k)) < adec) jdelta = 2
@@ -8214,49 +8937,50 @@ end if
 !   where coef = -1 when computing functions for r2leg, = +1 otherwise
 !
           if(iopd == 0 .or. iopd == 2) go to 120
-          pdr(k, 1) = 1.0e0_knd
-          pdr(k, 2) = 1.0e0_knd
+          pdr(k, 1) = SW_LITERAL(1.0e0_knd,"1.0e0")
+          pdr(k, 2) = SW_LITERAL(1.0e0_knd,"1.0e0")
           if(abs(barg(k)) >= adec) go to 50
           pdr(k, 2) = am2p1
             do j = 4, lim + 2, 2
-            pdr(k, j) = -real(m2m1 + j, knd) / (j - 2)
+            pdr(k, j) = -SW_CONVERT_REAL(m2m1 + j, knd) / (j - 2)
             end do
           go to 140
 50    if(abs(abs(barg(k)) - coef) >= adec) go to 70
           if(m == 0) go to 60
           if(m /= 2) go to 130
-          pdr(k, 1) = -2.0e0_knd * barg(k)
+          pdr(k, 1) = -SW_LITERAL(2.0e0_knd,"2.0e0") * barg(k)
           go to 80
-60        temp1 = 1.0e0_knd
-          temp2 = 3.0e0_knd
-          pdr(k, 2) = 1.0e0_knd
-          pdr(k, 3) = 3.0e0_knd * barg(k)
+60        temp1 = SW_LITERAL(1.0e0_knd,"1.0e0")
+          temp2 = SW_LITERAL(3.0e0_knd,"3.0e0")
+          pdr(k, 2) = SW_LITERAL(1.0e0_knd,"1.0e0")
+          pdr(k, 3) = SW_LITERAL(3.0e0_knd,"3.0e0") * barg(k)
             do j = 4, lim + 2
-            temp3 = temp2 + real(j - 1, knd)
+            temp3 = temp2 + SW_CONVERT_REAL(j - 1, knd)
             pdr(k, j) = temp3 / temp1
             temp1 = temp2
             temp2 = temp3
             end do
           go to 140
 70    if(m /= 0) go to 80
-          pdr(k, 1) = 1.0e0_knd
-          pdr(k, 2) = 1.0e0_knd
-          pdr(k, 3) = 3.0e0_knd * barg(k)
+          pdr(k, 1) = SW_LITERAL(1.0e0_knd,"1.0e0")
+          pdr(k, 2) = SW_LITERAL(1.0e0_knd,"1.0e0")
+          pdr(k, 3) = SW_LITERAL(3.0e0_knd,"3.0e0") * barg(k)
           jlow = 4
           go to 90
-80        pdr(k, 2) = am2p1 * (coef * (rm + 1.0e0_knd) * bargs - 1.0e0_knd)/ &
+80        pdr(k, 2) = am2p1 * (coef * (rm + SW_LITERAL(1.0e0_knd,"1.0e0")) * bargs - SW_LITERAL(1.0e0_knd,"1.0e0"))/ &
                    (rm * barg(k))
-          if(pdr(k, 2) == 0.0e0_knd) pdr(k, 2) = ten ** (-ndec)         
+          if(pdr(k, 2) == SW_LITERAL(0.0e0_knd,"0.0e0")) pdr(k, 2) = ten ** (-ndec)
           jlow = 3
-          if(abs(coef * (rm + 1.0e0_knd) * bargs - 1.0e0_knd) < 0.01e0_knd) go to 110
+          if(abs(coef * (rm + SW_LITERAL(1.0e0_knd,"1.0e0")) * bargs - SW_LITERAL(1.0e0_knd,"1.0e0")) < &
+      & SW_LITERAL(0.01e0_knd,"0.01e0")) go to 110
 90        continue
-          if(abs(barg(k)) <= 0.1e0_knd) go to 110
+          if(abs(barg(k)) <= SW_LITERAL(0.1e0_knd,"0.1e0")) go to 110
             do 100 j = jlow, lim + 2
             den = (pr(k, j) + coefd(j) + coef * coefe(j) * bargs)
-            if(den == 0.0e0_knd) den = ten ** (-ndec)
+            if(den == SW_LITERAL(0.0e0_knd,"0.0e0")) den = ten ** (-ndec)
             pdr(k, j) = ((coefa(j) + coef * coefb(j) * bargs) * pr(k, j)+ &
                      coefc(j)) / den
-            if(iopd == 3 .and. abs(pdr(k, j)) < 1.0e-5_knd) go to 110
+            if(iopd == 3 .and. abs(pdr(k, j)) < SW_LITERAL(1.0e-5_knd,"1.0e-5")) go to 110
 100        continue
          go to 120
 110      continue
@@ -8265,8 +8989,8 @@ end if
            do j = jlow - 1, lim + 1
            n = j + m - 1
            t3 = coef
-           if(coef == -1.0e0_knd .and. 2 * (j / 2) == j) t3 = 1.0e0_knd
-           t1 = coef * bargs - 1.0e0_knd
+           if(coef == -SW_LITERAL(1.0e0_knd,"1.0e0") .and. 2 * (j / 2) == j) t3 = SW_LITERAL(1.0e0_knd,"1.0e0")
+           t1 = coef * bargs - SW_LITERAL(1.0e0_knd,"1.0e0")
            t2 = (n * n * t1 + rm2)
            ta = j * t2
            tb = (n + n + 1) * t3 * barg(k) * (t2 + n * t1)
@@ -8278,22 +9002,24 @@ end if
            end do
 120       continue
           if(m == 0 .or. iopd == 2 .or. iopd == 3 .or. iopd == 4) go to 140
-          if(abs(abs(barg(k)) - 1.0e0_knd) < adec) go to 130
-          ajterm = rm * log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
+          if(abs(abs(barg(k)) - SW_LITERAL(1.0e0_knd,"1.0e0")) < adec) go to 130
+          ajterm = rm * log10((SW_LITERAL(1.0e0_knd,"1.0e0") - abs(barg(k))) * (SW_LITERAL(1.0e0_knd,"1.0e0") + &
+      & abs(barg(k)))) / SW_LITERAL(2.0e0_knd,"2.0e0")
           jterm = int(ajterm)
           ipnorm(k) = ipnorm(k) + jterm
-          pnorm(k) = pnorm(k) * (ten ** (ajterm - real(jterm, knd)))
+          pnorm(k) = pnorm(k) * (ten ** (ajterm - SW_CONVERT_REAL(jterm, knd)))
           if(iopd == 0) go to 140
-          ajterm = log10(rm * abs(barg(k))) + (rm - 2.0e0_knd)* &
-                 log10((1.0e0_knd - abs(barg(k))) * (1.0e0_knd + abs(barg(k)))) / 2.0e0_knd
+          ajterm = log10(rm * abs(barg(k))) + (rm - SW_LITERAL(2.0e0_knd,"2.0e0"))* &
+                 log10((SW_LITERAL(1.0e0_knd,"1.0e0") - abs(barg(k))) * (SW_LITERAL(1.0e0_knd,"1.0e0") + &
+      & abs(barg(k)))) / SW_LITERAL(2.0e0_knd,"2.0e0")
           jterm = int(ajterm)
           ipdnorm(k) = ipdnorm(k) + jterm
-          pdnorm(k) = -pdnorm(k) * (ten ** (ajterm - real(jterm, knd)))
-          if(barg(k) < 0.0e0_knd) pdnorm(k) = -pdnorm(k)
+          pdnorm(k) = -pdnorm(k) * (ten ** (ajterm - SW_CONVERT_REAL(jterm, knd)))
+          if(barg(k) < SW_LITERAL(0.0e0_knd,"0.0e0")) pdnorm(k) = -pdnorm(k)
           go to 140
-130       pnorm(k) = 0.0e0_knd
+130       pnorm(k) = SW_LITERAL(0.0e0_knd,"0.0e0")
           ipnorm(k) = 0
-          if(m /= 2) pdnorm(k) = 0.0e0_knd
+          if(m /= 2) pdnorm(k) = SW_LITERAL(0.0e0_knd,"0.0e0")
           if(m /= 2) ipdnorm(k) = 0
 140       continue
         return
@@ -8385,15 +9111,17 @@ end if
 !                                       -m/2
 !                        (2m-1)!!(x*x+1)
 !
-        use complex_oblate_parameters
+    integer :: iflag, iflagl1, iqdm1, iqlterm, iqm1, iterm, itermpq, ixfac, j, jl
+    integer :: jm, jn, jterm, limm, limq, lnum, m, m2m1, maxmp, maxq
+    integer :: mxqr, ndec, nex, nfac
 !
 !  real(knd) scalars and arrays
-        real(knd) ajm, dec, qdm1, qlow, qlow0, qlow1, qmid, qmid0, qmid1, qm1, &
+        SW_REAL ajm, dec, qdm1, qlow, qlow0, qlow1, qmid, qmid0, qmid1, qm1, &
                   qupp, qupp0, qupp1, q00, q0m, q1m, q11, qmmm1, rin, rin1, &
                   rin2, rin3, rin4, rm, rmsq, ten, term, termpq, teste, testeo, &
                   tjm, tm, tmr, x, xang, xfac, xc, x1d, xsqr
-        real(knd) qdl(lnum), qdr(maxq), ql(lnum), qr(maxq), qdqr(maxmp)
-        real(knd) qr1(maxq), qdr1(maxq), qdm0, qm0
+        SW_REAL qdl(lnum), qdr(maxq), ql(lnum), qr(maxq), qdqr(maxmp)
+        SW_REAL qr1(maxq), qdr1(maxq), qdm0, qm0
 !
 !  integer arrays
         integer iqdl(lnum), iql(lnum)
@@ -8401,23 +9129,23 @@ end if
 !  Note that the factor i involved in these functions is suppressed
 !  and taken into account in calculations in the subroutine r2leg
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         dec = ten ** (-ndec)
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         rm = m
         rmsq = rm * rm
         tm = rm + rm
-        tmr = tm / (tm + 1.0e0_knd)
-        x1d = x * x + 1.0e0_knd
+        tmr = tm / (tm + SW_LITERAL(1.0e0_knd,"1.0e0"))
+        x1d = x * x + SW_LITERAL(1.0e0_knd,"1.0e0")
         xsqr = sqrt(x1d)
         xang = asin(x / xsqr)
-        q00 = -atan(1.0e0_knd / x)
+        q00 = -atan(SW_LITERAL(1.0e0_knd,"1.0e0") / x)
         if(m == 0) qm0 = q00
         iflag = 0
-        if(x < 0.001e0_knd) iflag = 1
+        if(x < SW_LITERAL(0.001e0_knd,"0.001e0")) iflag = 1
 !
 !                m
 !  For x < 0.1: Q   is calculated by forward recursion in m starting
@@ -8443,21 +9171,21 @@ end if
         iqlterm = 0
         if(m /= 0) go to 10
         ql(1) = q00
-        qr(1) = x + 1.0e0_knd / q00
+        qr(1) = x + SW_LITERAL(1.0e0_knd,"1.0e0") / q00
         go to 30
 10      q11 = -x1d * q00 - x
         if(m /= 1) go to 20
         ql(1) = q11
-        qr(3) = 3.0e0_knd * x - 2.0e0_knd / q11
+        qr(3) = SW_LITERAL(3.0e0_knd,"3.0e0") * x - SW_LITERAL(2.0e0_knd,"2.0e0") / q11
         go to 30
 20      continue
-        if(x >= 0.1e0_knd) go to 25
+        if(x >= SW_LITERAL(0.1e0_knd,"0.1e0")) go to 25
         qlow = q00
         qupp = q11
-        if(iflag == 1) qmmm1 = 3.0e0_knd * x * q11 - 2.0e0_knd
+        if(iflag == 1) qmmm1 = SW_LITERAL(3.0e0_knd,"3.0e0") * x * q11 - SW_LITERAL(2.0e0_knd,"2.0e0")
           do jm = 1, m - 1
           ajm = jm
-          tjm = real(jm + jm, knd) / real(jm + jm + 1, knd)
+          tjm = SW_CONVERT_REAL(jm + jm, knd) / SW_CONVERT_REAL(jm + jm + 1, knd)
           ql(1) = (-x1d - tjm) * qupp - tjm * x1d * qlow
             if(iflag == 1) then
             qmmm1 = -((ajm + ajm + 2) / (ajm + ajm + 1)) * x1d * qmmm1 + x * ql(1)
@@ -8468,10 +9196,10 @@ end if
         if(iflag == 1) qr(m + m + 1) = qmmm1 / ql(1)
         go to 30
 25      limm = -int(ndec / (log10(xsqr - x)))
-        qupp0 = 0.0e0_knd
-        qmid0 = 1.0e0_knd
-        qupp1 = 0.0e0_knd
-        qmid1 = 1.0e0_knd
+        qupp0 = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qmid0 = SW_LITERAL(1.0e0_knd,"1.0e0")
+        qupp1 = SW_LITERAL(0.0e0_knd,"0.0e0")
+        qmid1 = SW_LITERAL(1.0e0_knd,"1.0e0")
           do jn = limm + m, m,-1
           rin1 = jn + 1
           rin2 = jn + 2
@@ -8507,7 +9235,7 @@ end if
           qmid1 = qlow1
           end do
         rin3 = qlow0
-        qlow0 = 3.0e0_knd * x * qmid0 - 2.0e0_knd * qupp0
+        qlow0 = SW_LITERAL(3.0e0_knd,"3.0e0") * x * qmid0 - SW_LITERAL(2.0e0_knd,"2.0e0") * qupp0
         q1m = (q11 / qlow1) * q1m
         q0m = (q00 / qlow0) * q0m
         qlow = q0m
@@ -8547,21 +9275,22 @@ end if
         qupp = x - xsqr
           do jn = mxqr + m, limq + m + 1,-1
           rin = jn
-          qlow = -(rin + rm - 1.0e0_knd) / (x * (rin + rin - 1.0e0_knd) &
+          qlow = -(rin + rm - SW_LITERAL(1.0e0_knd,"1.0e0")) / (x * (rin + rin - SW_LITERAL(1.0e0_knd,"1.0e0")) &
                -(rin - rm) * qupp)
           qupp = qlow
           end do
         qr(limq + m + m) = qupp
           do jn = limq + m, m + 2,-1
           rin = jn
-          qr(jn + m - 1) = -(rin + rm - 1.0e0_knd) / (x * (rin + rin - 1.0e0_knd) &
+          qr(jn + m - 1) = -(rin + rm - SW_LITERAL(1.0e0_knd,"1.0e0")) / (x * (rin + rin - &
+      & SW_LITERAL(1.0e0_knd,"1.0e0")) &
                      -(rin - rm) * qr(jn + m))
           end do
         go to 50
 40      continue
           do jn = m + 2, limq + m
           rin = jn
-          qr(jn + m) = ((rin + rin - 1.0e0_knd) * x + (rin + rm - 1.0e0_knd)/ &
+          qr(jn + m) = ((rin + rin - SW_LITERAL(1.0e0_knd,"1.0e0")) * x + (rin + rm - SW_LITERAL(1.0e0_knd,"1.0e0"))/ &
                    qr(jn + m - 1)) / (rin - rm)
           end do
 50      continue
@@ -8579,9 +9308,9 @@ end if
         if(m == 1) go to 70
           do 60 jn = m - 1, 2 - m,-1
           rin = jn
-          qr(jn + m - 1) = (x * (rin + rin - 1.0e0_knd) &
-                     +((rin - rm) / qr(jn + m))) / (rin + rm - 1.0e0_knd)
-          if(qr(jn + m - 1) == 0.0e0_knd) qr(jn + m - 1) = dec
+          qr(jn + m - 1) = (x * (rin + rin - SW_LITERAL(1.0e0_knd,"1.0e0")) &
+                     +((rin - rm) / qr(jn + m))) / (rin + rm - SW_LITERAL(1.0e0_knd,"1.0e0"))
+          if(qr(jn + m - 1) == SW_LITERAL(0.0e0_knd,"0.0e0")) qr(jn + m - 1) = dec
 60        continue
 70      continue
 !
@@ -8602,15 +9331,15 @@ end if
           qm0 = qm1
           qdm0 = -rm * sin(rm * xang) / x1d
           end if
-        xfac = 0.5e0_knd * rm * log10(x1d)
+        xfac = SW_LITERAL(0.5e0_knd,"0.5e0") * rm * log10(x1d)
         ixfac = int(xfac)
         qm1 = qm1 * (ten ** (xfac - ixfac))
-        term = 1.0e0_knd
+        term = SW_LITERAL(1.0e0_knd,"1.0e0")
         iterm = 0
         if(m < 2) go to 90
           do jm = 2, m
           ajm = jm
-          term = term * (ajm - 1.0e0_knd) / (ajm + ajm - 1.0e0_knd)
+          term = term * (ajm - SW_LITERAL(1.0e0_knd,"1.0e0")) / (ajm + ajm - SW_LITERAL(1.0e0_knd,"1.0e0"))
             if(term < testeo) then
             term = term * teste
             iterm = iterm - nfac
@@ -8664,7 +9393,7 @@ end if
 !        m
 !
         if(m > 0) go to 140
-        qdl(1) = 1.0e0_knd / x1d
+        qdl(1) = SW_LITERAL(1.0e0_knd,"1.0e0") / x1d
         iqdl(1) = 0
         qdm0 = qdl(1)
         go to 150
@@ -8672,7 +9401,7 @@ end if
         iterm = int(log10(abs(qdm1)))
         qdm1 = qdm1 * (ten ** (-iterm))
         iqdm1 = iqm1 + iterm
-        qdl(1) = rm * (x * ql(1) - 2.0e0_knd * qm1 * (ten ** (iqm1 - iql(1)))) / x1d
+        qdl(1) = rm * (x * ql(1) - SW_LITERAL(2.0e0_knd,"2.0e0") * qm1 * (ten ** (iqm1 - iql(1)))) / x1d
         iqdl(1) = iql(1)
 150     continue
         m2m1 = m + m - 1
@@ -8722,20 +9451,20 @@ end if
 !  (x*x*(m-1)-1)/(m*x).
 !
         if(m == 0) go to 180
-        qdr(m + m - 1) = (x * x * (rm - 1.0e0_knd) - 1.0e0_knd) / (rm * x)
-        if(qdr(m + m - 1) == 0.0e0_knd) qdr(m + m - 1) = dec
+        qdr(m + m - 1) = (x * x * (rm - SW_LITERAL(1.0e0_knd,"1.0e0")) - SW_LITERAL(1.0e0_knd,"1.0e0")) / (rm * x)
+        if(qdr(m + m - 1) == SW_LITERAL(0.0e0_knd,"0.0e0")) qdr(m + m - 1) = dec
         if(m < 3) go to 180
           do jn = m - 1, 2,-1
           rin = jn
           term = rin * rin * x1d - rmsq
-            if(term == 0.0e0_knd) then
-            xc = x * (1.0e0_knd + dec)
-            term = rin * rin * (xc * xc + 1.0e0_knd) - rmsq
+            if(term == SW_LITERAL(0.0e0_knd,"0.0e0")) then
+            xc = x * (SW_LITERAL(1.0e0_knd,"1.0e0") + dec)
+            term = rin * rin * (xc * xc + SW_LITERAL(1.0e0_knd,"1.0e0")) - rmsq
             end if
           qdr(jn + m - 1) = (x * (jn + jn - 1) * (jn * (jn - 1) * x1d - rmsq)+ &
                       ((jn - m) * ((jn - 1) * (jn - 1) * x1d - rmsq))/ &
                       qdr(jn + m)) / ((jn + m - 1) * term)
-          if(qdr(jn + m - 1) == 0.0e0_knd) qdr(jn + m - 1) = dec
+          if(qdr(jn + m - 1) == SW_LITERAL(0.0e0_knd,"0.0e0")) qdr(jn + m - 1) = dec
           end do
 180     continue
 !
@@ -8748,10 +9477,11 @@ end if
 !
 !
         if(m == 0) go to 190
-        qdqr(1) = ((rm - 1.0e0_knd) * x + (rm + rm - 1.0e0_knd) / qr(1)) / x1d
+        qdqr(1) = ((rm - SW_LITERAL(1.0e0_knd,"1.0e0")) * x + (rm + rm - SW_LITERAL(1.0e0_knd,"1.0e0")) / qr(1)) / x1d
           do jn = 2, m + m
           rin = jn
-          qdqr(jn) = (x * (-rm + rin - 1.0e0_knd) - (rin - 1.0e0_knd) * qr(jn - 1))/ &
+          qdqr(jn) = (x * (-rm + rin - SW_LITERAL(1.0e0_knd,"1.0e0")) - (rin - SW_LITERAL(1.0e0_knd,"1.0e0")) * &
+      & qr(jn - 1))/ &
                     x1d
           end do
 190     continue
@@ -8772,8 +9502,8 @@ end if
           end do
           if(m > 1) then
             do j = 1, m - 1
-            qr1(j) = -1.0e0_knd / qr(m + j)
-            qdr1(j) = -1.0e0_knd / qdr(m + j)
+            qr1(j) = -SW_LITERAL(1.0e0_knd,"1.0e0") / qr(m + j)
+            qdr1(j) = -SW_LITERAL(1.0e0_knd,"1.0e0") / qdr(m + j)
             end do
           end if
           if(m /= 0) then
@@ -8865,43 +9595,46 @@ end if
 !               coefmo : coefficient used to multiply r2 to get one of
 !                        the two contributions to r2d when l-m is odd
 !
-        use complex_oblate_parameters
+    integer :: i, iexp, ifac, iflag, il, iterm, iterm1, iterm2, iterm3, j
+    integer :: k, lim, lim1, lim1max, limb, limi, limint, ll, lnum, lown
+    integer :: m, maxint, maxlp, maxmp, n, ndec, nex, nf2, nfac, ngau
+    integer :: ngqs, norm, norme, normy, nstep1, nstep2, nstep3
 !
 !  real(knd) scalars and arrays
-        real(knd) amo2, an, argb, arn, bn, coef, coefme, coefmo, coefo, dec, &
+        SW_REAL amo2, an, argb, arn, bn, coef, coefme, coefmo, coefo, dec, &
                   emo2, etai, etaism1, etcoef1, etcoef2, factor, factor2, &
                   f2exp, rm, rn, sargb, step1, step2, step3, substep1, &
                   substep2, substep3, ten, term, tf2, term1, term2, test, &
                   teste, testeo, test1, twom, twomi, x, x2, xsp1, zi, zl, zu
-        real(knd) alpha(maxint), beta(maxint), p(maxint), pnorm(maxlp), &
+        SW_REAL alpha(maxint), beta(maxint), p(maxint), pnorm(maxlp), &
                   step(ngqs), wg(ngau), xg(ngau)
 !
 !  complex(knd) scalars and arrays
-        complex(knd) arg, cc, coef1, coef2, coef4, darg, darg2, sbes1, sbes2, &
+        SW_COMPLEX arg, cc, coef1, coef2, coef4, darg, darg2, sbes1, sbes2, &
                      sneuna, sneunb, sneunc, sneu1, sneu2, sneu3, ynorm1, &
                      ynorm2, ynorm3
-        complex(knd) pint1(maxint), pint2(maxint), pint3(maxint), &
+        SW_COMPLEX pint1(maxint), pint2(maxint), pint3(maxint), &
                      pint4(maxint), rpint1(maxint), rpint2(maxint), &
                      sbesf(lim1max)
 !
 !  integer array
         integer ipnorm(maxlp)
 !
-        ten = 10.0e0_knd
-        emo2 = (0.5e0_knd) * m
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
+        emo2 = (SW_LITERAL(0.5e0_knd,"0.5e0")) * m
         nfac = nex / 3
         if(2 * (nfac / 2) /= nfac) nfac = nfac - 1
         teste = ten ** (nfac)
-        testeo = 1.0e0_knd / teste
+        testeo = SW_LITERAL(1.0e0_knd,"1.0e0") / teste
         test1 = ten ** (nex - 10)
         ifac = nex - 30
         factor = ten ** (-ifac)
-        test = 1.0e0_knd / factor
+        test = SW_LITERAL(1.0e0_knd,"1.0e0") / factor
         x2 = x * x
-        xsp1 = x2 + 1.0e0_knd
+        xsp1 = x2 + SW_LITERAL(1.0e0_knd,"1.0e0")
         dec = ten ** (-ndec - 1)
         rm = m
-        amo2 = 0.5e0_knd * rm
+        amo2 = SW_LITERAL(0.5e0_knd,"0.5e0") * rm
         lim = limint
         limi = lim
         coefme = rm * x / xsp1
@@ -8920,8 +9653,8 @@ end if
             end do
 !
 !  calculation of scaling factors for the associated Legendre functions
-    pnorm(1) = 1.0e0_knd
-    pnorm(2) = 1.0e0_knd
+    pnorm(1) = SW_LITERAL(1.0e0_knd,"1.0e0")
+    pnorm(2) = SW_LITERAL(1.0e0_knd,"1.0e0")
     ipnorm(1) = 0
     ipnorm(2) = 0
         if(m == 0) go to 50
@@ -8957,12 +9690,12 @@ end if
 !
 !  calculation of the coefficients in the recursion relation used
 !  for the scaled associated Legendre functions
-    alpha(1) = (twom + 1.0e0_knd) * pnorm(1) / pnorm(2)
+    alpha(1) = (twom + SW_LITERAL(1.0e0_knd,"1.0e0")) * pnorm(1) / pnorm(2)
         alpha(1) = alpha(1) * ten ** (ipnorm(1) - ipnorm(2))
-        beta(1) = 0.0e0_knd
-        alpha(2) = (twom + 3.0e0_knd) * pnorm(2) / (pnorm(3) * 2.0e0_knd)
+        beta(1) = SW_LITERAL(0.0e0_knd,"0.0e0")
+        alpha(2) = (twom + SW_LITERAL(3.0e0_knd,"3.0e0")) * pnorm(2) / (pnorm(3) * SW_LITERAL(2.0e0_knd,"2.0e0"))
         alpha(2) = alpha(2) * ten ** (ipnorm(2) - ipnorm(3))
-        beta(2) = -(twom + 1.0e0_knd) / (twom + 2.0e0_knd)
+        beta(2) = -(twom + SW_LITERAL(1.0e0_knd,"1.0e0")) / (twom + SW_LITERAL(2.0e0_knd,"2.0e0"))
           do 80 il = 3, lim + 2
           alpha(il) = alpha(il - 2) * (twom + il - 1) * (twom + il + il - 1)* &
           (il - 2) / ((il - 1) * (twom + il) * (twom + il + il - 5))
@@ -8970,22 +9703,22 @@ end if
 80    continue
 !
           do 90 il = 1, lim + 1, 2
-          pint1(il) = (0.0e0_knd, 0.0e0_knd)
-          pint2(il) = (0.0e0_knd, 0.0e0_knd)
-          pint3(il + 1) = (0.0e0_knd, 0.0e0_knd)
-          pint4(il + 1) = (0.0e0_knd, 0.0e0_knd)
+          pint1(il) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          pint2(il) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          pint3(il + 1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          pint4(il + 1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
 90    continue
 !
 !  calculation of the scaling exponents for the spherical Neumann
 !  functions required for the four types of integrals
-        twomi = 1.0e0_knd
+        twomi = SW_LITERAL(1.0e0_knd,"1.0e0")
         if(m == 0) go to 110
           do 100 n = 1, m
-      twomi = twomi * real(n + n - 1, knd) / real(n + n, knd)
+      twomi = twomi * SW_CONVERT_REAL(n + n - 1, knd) / SW_CONVERT_REAL(n + n, knd)
 100       continue
 110 continue
         arg = cc * sqrt(xsp1)
-        darg = (1.0e0_knd, 0.0e0_knd) / arg
+        darg = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd) / arg
         ynorm1 = -cos(arg) * darg
         ynorm2 = ynorm1 * darg - sin(arg) * darg
         normy = 0
@@ -9009,40 +9742,40 @@ end if
 !  into ngqs steps
             do 180 k = 1, ngqs
               if(k == 1) then
-              zl = 0.0e0_knd
+              zl = SW_LITERAL(0.0e0_knd,"0.0e0")
               zu = step(1)
               end if
               if(k > 1) then
               zl = zu
               zu = zl + step(k)
               end if
-          etcoef1 = (zl + zu) / 2.0e0_knd
-          etcoef2 = step(k) / 2.0e0_knd
+          etcoef1 = (zl + zu) / SW_LITERAL(2.0e0_knd,"2.0e0")
+          etcoef2 = step(k) / SW_LITERAL(2.0e0_knd,"2.0e0")
           coef = step(k)
 !
 !  Gaussian quadrature integration over each step
             do 170 i = 1, ngau
         zi = etcoef1 + xg(i) * etcoef2
-            etai = 1.0e0_knd - zi
-            etaism1 = zi * (2.0e0_knd - zi)
+            etai = SW_LITERAL(1.0e0_knd,"1.0e0") - zi
+            etaism1 = zi * (SW_LITERAL(2.0e0_knd,"2.0e0") - zi)
             argb = x2 + etaism1
             term2 = xsp1 * etaism1 * etaism1 / argb
             term1 = sqrt(term2)
             sargb = sqrt(argb)
-            coefo = 1.0e0_knd / sargb
+            coefo = SW_LITERAL(1.0e0_knd,"1.0e0") / sargb
             arg = cc * sargb
-            darg = (1.0e0_knd, 0.0e0_knd) / arg
+            darg = SW_CONVERT_COMPLEX(SW_LITERAL(1.0e0_knd,"1.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd) / arg
             sneu1 = -cos(arg) * darg
             sneu2 = term1 * darg * (sneu1 - sin(arg))
             norm = ifac
             lown = 3
-            limb = 2 * int(abs(real(arg)) + abs(aimag(arg)))
+            limb = 2 * int(abs(SW_CONVERT_REAL(arg)) + abs(aimag(arg)))
             lim1 = 2 * limb + 20
-            if(abs(aimag(arg)) < 2.0e0_knd .or. m < 3) go to 130
-            sbesf(lim1) = arg / real(lim1 + lim1 + 1, knd)
+            if(abs(aimag(arg)) < SW_LITERAL(2.0e0_knd,"2.0e0") .or. m < 3) go to 130
+            sbesf(lim1) = arg / SW_CONVERT_REAL(lim1 + lim1 + 1, knd)
               do n = lim1 - 1, 1,-1
-              rn = real(n + n + 1, knd)
-              sbesf(n) = 1.0e0_knd / (rn * darg - sbesf(n + 1))
+              rn = SW_CONVERT_REAL(n + n + 1, knd)
+              sbesf(n) = SW_LITERAL(1.0e0_knd,"1.0e0") / (rn * darg - sbesf(n + 1))
               end do
             darg2 = darg * darg
             sneuna = sneu1
@@ -9058,9 +9791,9 @@ end if
                 sneunb = sneunc
                 end if
               end do
-              nf2 = int(real(limb - 2, knd) * abs(log10(term1))) / nfac + 1
-              f2exp = real(limb - 2, knd) / real(nf2, knd)
-              factor2 = 1.0e0_knd
+              nf2 = int(SW_CONVERT_REAL(limb - 2, knd) * abs(log10(term1))) / nfac + 1
+              f2exp = SW_CONVERT_REAL(limb - 2, knd) / SW_CONVERT_REAL(nf2, knd)
+              factor2 = SW_LITERAL(1.0e0_knd,"1.0e0")
               tf2 = term1 ** (f2exp)
                 do ll = 1, nf2
                 factor2 = factor2 * tf2
@@ -9085,7 +9818,7 @@ end if
               end if
 130         continue
               do n = lown, m + 3
-              rn = real(n + n - 3, knd)
+              rn = SW_CONVERT_REAL(n + n - 3, knd)
               sneu3 = -term2 * sneu1 + term1 * darg * rn * sneu2
               if(n == m + 3) go to 150
                 if(abs(sneu3) > teste) then
@@ -9140,9 +9873,9 @@ end if
                 pint1(il + 1) = pint1(il + 1) + coef1 * p(il + 1)
                 pint2(il + 1) = pint2(il + 1) + coef2 * p(il + 1)
                 pint4(il + 2) = pint4(il + 2) + coef4 * p(il + 2)
-                  if(abs(real(pint1(il + 1))) > test1 .or. &
-                     abs(real(pint2(il + 1))) > test1 .or. &
-                     abs(real(pint4(il + 2))) > test1) then
+                  if(abs(SW_CONVERT_REAL(pint1(il + 1))) > test1 .or. &
+                     abs(SW_CONVERT_REAL(pint2(il + 1))) > test1 .or. &
+                     abs(SW_CONVERT_REAL(pint4(il + 2))) > test1) then
                   limi = il
                   go to 160
                   end if
@@ -9175,7 +9908,7 @@ end if
           do 200 il = 1, limi - 1, 2
           pint3(il + 1) = (pint2(il + 2) - beta(il + 1) * pint2(il)) &
                       /alpha(il + 1)
-            if(real(pint3(il + 1)) > test1 .or. aimag(pint3(il + 1)) > &
+            if(SW_CONVERT_REAL(pint3(il + 1)) > test1 .or. aimag(pint3(il + 1)) > &
               test1) then
             limi = il
             go to 210
@@ -9183,18 +9916,22 @@ end if
 200   continue
 210     continue
 if (debug) then
+#ifndef SWF_PRECISION_MPFR
         write(40, 220) ngau, substep1, substep2, substep3, limi
+#endif
+#ifndef SWF_PRECISION_MPFR
 220     format(15x,'Gauss quad. order =',i5,'; step sizes = ',f12.10, &
                ', ',f12.10,', 'f12.10,'.',/,15x,'integrals for ',i5, &
                ' lowest order Legendre functions will be used for r2.')
+#endif
 end if
 !
 !  calculation of ratios of integrals for ease in compution of r2 and
 !  r2d in subroutine r2int
-        rpint1(1) = (0.0e0_knd, 0.0e0_knd)
-        rpint1(2) = (0.0e0_knd, 0.0e0_knd)
-        rpint2(1) = (0.0e0_knd, 0.0e0_knd)
-        rpint2(2) = (0.0e0_knd, 0.0e0_knd)
+        rpint1(1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        rpint1(2) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        rpint2(1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+        rpint2(2) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
           do il = 3, limi, 2
           rpint1(il) = (twom + il - 1) * (pint1(il) / pint1(il - 2)) / (il - 1)
           rpint2(il) = (twom + il - 1) * (pint2(il) / pint2(il - 2)) / (il - 1)
@@ -9241,23 +9978,23 @@ end if
 !                        functions to the corresponding spherical
 !                        spherical functions
 !
-        use complex_oblate_parameters
+    integer :: iadj, iterm, lim1, limj, maxj, maxlp, n, nex
 !
 !  real(knd) scalars
-        real(knd) adj, ci, cm, cr, rn, ten, x
+        SW_REAL adj, ci, cm, cr, rn, ten, x
 !
 !  complex(knd) scalars and arrays
-        complex(knd) cc, cx, stemp0, stemp1
-        complex(knd) sbesdf(maxj), sbesdr(maxlp), sbesf(maxj), &
+        SW_COMPLEX cc, cx, stemp0, stemp1
+        SW_COMPLEX sbesdf(maxj), sbesdr(maxlp), sbesf(maxj), &
                      sbesn(maxlp)
 !
 !  integer array
         integer ibese(maxlp)
 !
-        ten = 10.0e0_knd
+        ten = SW_LITERAL(10.0e0_knd,"10.0e0")
         cx = cc * x
         ci = aimag(cc)
-        cr = real(cc)
+        cr = SW_CONVERT_REAL(cc)
         cm = abs(cc)
         lim1 = 2 * cm * x + 20
 !
@@ -9265,7 +10002,7 @@ end if
 !        sbesf(k)= j(n=k,c*x)/j(n=k-1,c*x)
 !        sbesn(k)= (j(n=k-1),c*x))*10.0e0_knd**(-ibese(k))
 !
-        if(int(abs(cx)) < limj .or. aimag(cc) /= 0.0e0_knd) go to 20
+        if(int(abs(cx)) < limj .or. aimag(cc) /= SW_LITERAL(0.0e0_knd,"0.0e0")) go to 20
 !
 !  for c*x >= limj and aimag(cc) = 0, use forward recursion to
 !  get fcn. ratios:
@@ -9275,7 +10012,7 @@ end if
         sbesf(1) = (stemp0 / cx - cos(cx) / cx) / stemp0
           do 10 n = 1, limj - 1
           rn = n + n + 1
-          sbesf(n + 1) = (rn / cx) - (1.0e0_knd / sbesf(n))
+          sbesf(n + 1) = (rn / cx) - (SW_LITERAL(1.0e0_knd,"1.0e0") / sbesf(n))
 10        continue
         go to 60
 20      continue
@@ -9284,42 +10021,44 @@ end if
 !  to get fcn. ratios:
 !       j(n,c*x)/j(n-1,c*x) = 1/( (2*n+1)/(c*x) - j(n+1,c*x)/j(n,c*x) )
 !
-        stemp0 = 0.0e0_knd
+        stemp0 = SW_LITERAL(0.0e0_knd,"0.0e0")
         if(lim1 <= limj) go to 40
           do 30 n = lim1, limj,-1
           rn = n + n + 1
-          stemp1 = 1.0e0_knd / (rn / cx - stemp0)
+          stemp1 = SW_LITERAL(1.0e0_knd,"1.0e0") / (rn / cx - stemp0)
           stemp0 = stemp1
 30        continue
 40      sbesf(limj) = stemp0
           do 50 n = limj - 1, 1,-1
           rn = n + n + 1
-          sbesf(n) = 1.0e0_knd / (rn / cx - sbesf(n + 1))
+          sbesf(n) = SW_LITERAL(1.0e0_knd,"1.0e0") / (rn / cx - sbesf(n + 1))
 50        continue
 60      continue
 !
 !  for all c*x, calculate the amplitude and sign scale
 !  factors by forward operation on the Bessel function
 !  ratios.
-          if(0.43e0_knd * x * ci > nex / 3) then
-          adj = x * ci / log(10.0e0_knd)
+          if(SW_LITERAL(0.43e0_knd,"0.43e0") * x * ci > nex / 3) then
+          adj = x * ci / log(SW_LITERAL(10.0e0_knd,"10.0e0"))
           iadj = int(adj)
-          sbesn(1) = (0.0e0_knd, 1.0e0_knd)* &
-                     exp((0.0e0_knd,-1.0e0_knd) * cr * x) / (2.0e0_knd * cx)
-          sbesn(1) = sbesn(1) * (10.0e0_knd ** (adj - iadj))
+          sbesn(1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd)* &
+                     exp(SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),-SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * &
+      & cr * x) / (SW_LITERAL(2.0e0_knd,"2.0e0") * cx)
+          sbesn(1) = sbesn(1) * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (adj - iadj))
           iterm = int(log10(abs(sbesn(1))))
-          sbesn(1) = sbesn(1) * (10.0e0_knd ** (-iterm))
+          sbesn(1) = sbesn(1) * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-iterm))
           ibese(1) = iadj + iterm
-          sbesn(2) = sbesn(1) / cx + (0.0e0_knd, 1.0e0_knd) * sbesn(1)
+          sbesn(2) = sbesn(1) / cx + &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * sbesn(1)
           iterm = log10(abs(sbesn(2)))
-          sbesn(2) = sbesn(2) * (10.0e0_knd ** (-iterm))
+          sbesn(2) = sbesn(2) * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-iterm))
           ibese(2) = ibese(1) + iterm
           else
           stemp0 = sin(cx) / cx
           stemp1 = stemp0 / cx - cos(cx) / cx
           ibese(1) = log10(abs(stemp0))
           sbesn(1) = stemp0 * ten ** (-ibese(1))
-          if(abs(sin(cx)) < 0.5e0_knd .and. abs(cx) > 1.0e0_knd) &
+          if(abs(sin(cx)) < SW_LITERAL(0.5e0_knd,"0.5e0") .and. abs(cx) > SW_LITERAL(1.0e0_knd,"1.0e0")) &
              go to 70
           sbesn(2) = sbesn(1) * sbesf(1)
           ibese(2) = log10(abs(sbesn(2)))
@@ -9342,7 +10081,7 @@ end if
 !  Bessel functions using corresponding function ratios
           do 100 n = 1, limj
           rn = n - 1
-          sbesdf(n) = (cx - (rn + 2.0e0_knd) * sbesf(n)) / (rn - cx * sbesf(n))
+          sbesdf(n) = (cx - (rn + SW_LITERAL(2.0e0_knd,"2.0e0")) * sbesf(n)) / (rn - cx * sbesf(n))
 100       continue
 !
 !  calculate the ratios of the first derivative to the corresponding
@@ -9399,14 +10138,15 @@ end if
 !                        Neumann functions to the corresponding
 !                        function
 !
-        use complex_oblate_parameters
+    integer :: iadj, ibes1, ibes2, ineue, iterm, itest, j, lim1, limb, limbes
+    integer :: limn, maxlp, maxn, n, ndec, nex
 !
 !  real(knd) scalars
-        real(knd) adj, ci, cr, rn, rnn, test, x
+        SW_REAL adj, ci, cr, rn, rnn, test, x
 !
 !  complex scalars and arrays
-        complex(knd) cc, cx, cx2, sbes1, sbes2, stemp0, stemp1
-        complex(knd) sneudf(maxn), sneudr(maxlp), sneuf(maxn), &
+        SW_COMPLEX cc, cx, cx2, sbes1, sbes2, stemp0, stemp1
+        SW_COMPLEX sneudf(maxn), sneudr(maxlp), sneuf(maxn), &
                      sneun(maxn), sbesf(limbes)
 !
 !  integer arrays
@@ -9426,63 +10166,65 @@ end if
 !
         cx = cc * x
         cx2 = cx * cx
-        cr = real(cc)
+        cr = SW_CONVERT_REAL(cc)
         ci = aimag(cc)
-        test = 1.0e0_knd / abs(cx)
+        test = SW_LITERAL(1.0e0_knd,"1.0e0") / abs(cx)
         itest = -int(log10(abs(cx)))
-        limb = 2 * int(abs(real(cx)) + abs(aimag(cx)))
+        limb = 2 * int(abs(SW_CONVERT_REAL(cx)) + abs(aimag(cx)))
         lim1 = 2 * limb + 20
         if(limb < 2) limb = 2
         sbesf(lim1) = cx / (lim1 + lim1 + 1)
           do 10 n = lim1 - 1, 1,-1
-          rn = real(n + n + 1)
-          sbesf(n) = 1.0e0_knd / (rn / cx - sbesf(n + 1))
+          rn = SW_CONVERT_REAL(n + n + 1)
+          sbesf(n) = SW_LITERAL(1.0e0_knd,"1.0e0") / (rn / cx - sbesf(n + 1))
 10      continue
 !
 !  use relation with j's to compute y's from order zero
 !  to the turning point. compute derivative ratios
 !  at same time.
 !
-          if(0.43e0_knd * x * ci <= nex / 3) go to 30
-          adj = x * ci / log(10.0e0_knd)
+          if(SW_LITERAL(0.43e0_knd,"0.43e0") * x * ci <= nex / 3) go to 30
+          adj = x * ci / log(SW_LITERAL(10.0e0_knd,"10.0e0"))
           iadj = int(adj)
-          sbes1 = (0.0e0_knd, 1.0e0_knd)* &
-                  exp((0.0e0_knd,-1.0e0_knd) * cr * x) / (2.0e0_knd * cx)
-          sbes1 = sbes1 * (10.0e0_knd ** (adj - iadj))
+          sbes1 = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd)* &
+                  exp(SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),-SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * cr &
+      & * x) / (SW_LITERAL(2.0e0_knd,"2.0e0") * cx)
+          sbes1 = sbes1 * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (adj - iadj))
           iterm = int(log10(abs(sbes1)))
           ibes1 = iadj + iterm
-          sbes1 = sbes1 * (10.0e0_knd ** (-iterm))
-          sneun(1) = (0.0e0_knd, 1.0e0_knd) * sbes1
+          sbes1 = sbes1 * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-iterm))
+          sneun(1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * sbes1
           ineue(1) = ibes1
-          sbes2 = sbes1 / cx + (0.0e0_knd, 1.0e0_knd) * sbes1
+          sbes2 = sbes1 / cx + &
+      & SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * sbes1
           sneuf(1) = sbes2 / sbes1
           iterm = int(log10(abs(sbes2)))
           ibes2 = ibes1 + iterm
-          sbes2 = sbes2 * (10.0e0_knd ** (-iterm))
-          sneun(2) = (0.0e0_knd, 1.0e0_knd) * sbes2
+          sbes2 = sbes2 * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-iterm))
+          sneun(2) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(1.0e0_knd,"1.0e0"),knd) * sbes2
           ineue(2) = ibes2
-        sneudf(1) = -(cx - 2.0e0_knd * sneuf(1)) / (cx * sneuf(1))
+        sneudf(1) = -(cx - SW_LITERAL(2.0e0_knd,"2.0e0") * sneuf(1)) / (cx * sneuf(1))
         if(limb > limn) limb = limn
         j = 1
         sbes1 = sbes2
         ibes1 = ibes2
           do n = 2, limb
           j = j + 1
-          rn = real(n)
-          rnn = real(n - 1)
+          rn = SW_CONVERT_REAL(n)
+          rnn = SW_CONVERT_REAL(n - 1)
           sbes2 = sbesf(n) * sbes1
           iterm = int(log10(abs(sbes2)))
-          sbes2 = sbes2 * (10.0e0 ** (-iterm))
+          sbes2 = sbes2 * (SW_LITERAL(10.0e0,"10.0e0") ** (-iterm))
           ibes2 = ibes1 + iterm
           sneun(n + 1) = sbesf(n) * sneun(n)
           if(ibes1 + ineue(n) < ndec + 10) &
-          sneun(n + 1) = sneun(n + 1) - (10.0e0_knd ** (-ibes1 - ineue(n)))/ &
+          sneun(n + 1) = sneun(n + 1) - (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ibes1 - ineue(n)))/ &
                      (cx2 * sbes1)
           sneuf(n) = sneun(n + 1) / sneun(n)
           iterm = int(log10(abs(sneun(n + 1))))
-          sneun(n + 1) = sneun(n + 1) * (10.0e0_knd ** (-iterm))
+          sneun(n + 1) = sneun(n + 1) * (SW_LITERAL(10.0e0_knd,"10.0e0") ** (-iterm))
           ineue(n + 1) = ineue(n) + iterm
-          sneudf(n) = (cx - (rn + 1.0e0_knd) * sneuf(n)) / (rnn - cx * sneuf(n))
+          sneudf(n) = (cx - (rn + SW_LITERAL(1.0e0_knd,"1.0e0")) * sneuf(n)) / (rnn - cx * sneuf(n))
           if(ibes1 + ibes2 < itest) go to 20
           sbes1 = sbes2
           ibes1 = ibes2
@@ -9496,17 +10238,17 @@ end if
         sneun(1) = stemp0
         sneun(2) = stemp1
         sbes1 = sbesf(1) * sin(cx) / cx
-        sneudf(1) = -(cx - 2.0e0_knd * sneuf(1)) / (cx * sneuf(1))
+        sneudf(1) = -(cx - SW_LITERAL(2.0e0_knd,"2.0e0") * sneuf(1)) / (cx * sneuf(1))
         if(limb > limn) limb = limn
         j = 1
           do 40 n = 2, limb
           j = j + 1
-          rn = real(n)
-          rnn = real(n - 1)
+          rn = SW_CONVERT_REAL(n)
+          rnn = SW_CONVERT_REAL(n - 1)
           sbes2 = sbesf(n) * sbes1
-          sneun(n + 1) = sbesf(n) * sneun(n) - 1.0e0_knd / (cx2 * sbes1)
+          sneun(n + 1) = sbesf(n) * sneun(n) - SW_LITERAL(1.0e0_knd,"1.0e0") / (cx2 * sbes1)
           sneuf(n) = sneun(n + 1) / sneun(n)
-          sneudf(n) = (cx - (rn + 1.0e0_knd) * sneuf(n)) / (rnn - cx * sneuf(n))
+          sneudf(n) = (cx - (rn + SW_LITERAL(1.0e0_knd,"1.0e0")) * sneuf(n)) / (rnn - cx * sneuf(n))
           if(abs(sbes1 + sbes2) < test) go to 50
           sbes1 = sbes2
 40        continue
@@ -9515,12 +10257,12 @@ end if
 !  calculate characteristics and exponents for the Neumann functions
 !  up to and including the turning point
         ineue(1) = int(log10(abs(stemp0)))
-        sneun(1) = stemp0 * 10.0e0_knd ** (-ineue(1))
+        sneun(1) = stemp0 * SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ineue(1))
         ineue(2) = int(log10(abs(stemp1)))
-        sneun(2) = stemp1 * 10.0e0_knd ** (-ineue(2))
+        sneun(2) = stemp1 * SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ineue(2))
           do 60 n = 3, limb
           ineue(n) = int(log10(abs(sneun(n))))
-          sneun(n) = sneun(n) * 10.0e0_knd ** (-ineue(n))
+          sneun(n) = sneun(n) * SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ineue(n))
 60        continue
 70      continue
 !
@@ -9531,16 +10273,16 @@ end if
 !  compute derivative ratios at same time using function ratios.
         if(limb == limn) go to 90
           do 80 n = limb + 1, limn
-          rn = real(n - 1, knd)
-          rnn = real(n + n - 1, knd)
-          sneuf(n) = rnn / cx - 1.0e0_knd / sneuf(n - 1)
-          sneudf(n) = (cx - (rn + 2.0e0_knd) * sneuf(n)) / (rn - cx * sneuf(n))
+          rn = SW_CONVERT_REAL(n - 1, knd)
+          rnn = SW_CONVERT_REAL(n + n - 1, knd)
+          sneuf(n) = rnn / cx - SW_LITERAL(1.0e0_knd,"1.0e0") / sneuf(n - 1)
+          sneudf(n) = (cx - (rn + SW_LITERAL(2.0e0_knd,"2.0e0")) * sneuf(n)) / (rn - cx * sneuf(n))
 80        continue
 90      continue
-          sneuf(limn + 1) = (0.0e0_knd, 0.0e0_knd)
-          sneuf(limn + 2) = (0.0e0_knd, 0.0e0_knd)
-          sneudf(limn + 1) = (0.0e0_knd, 0.0e0_knd)
-          sneudf(limn + 2) = (0.0e0_knd, 0.0e0_knd)
+          sneuf(limn + 1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          sneuf(limn + 2) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          sneudf(limn + 1) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
+          sneudf(limn + 2) = SW_CONVERT_COMPLEX(SW_LITERAL(0.0e0_knd,"0.0e0"),SW_LITERAL(0.0e0_knd,"0.0e0"),knd)
 !
 !  calculate the characteristics and exponents for Neumann
 !  functions beyond the turning point by forward operation
@@ -9549,7 +10291,7 @@ end if
           do 100 n = limb + 1, maxlp
           sneun(n) = sneun(n - 1) * sneuf(n - 1)
           ineue(n) = int(log10(abs(sneun(n))))
-          sneun(n) = sneun(n) * 10.0e0_knd ** (-ineue(n))
+          sneun(n) = sneun(n) * SW_LITERAL(10.0e0_knd,"10.0e0") ** (-ineue(n))
           ineue(n) = ineue(n) + ineue(n - 1)
 100       continue
 110     continue
@@ -9557,7 +10299,7 @@ end if
 !  calculate the ratios of the first derivatives to the corresponding
 !  spherical Neumann functions
           do 120 n = 1, maxlp
-          rn = real(n - 1)
+          rn = SW_CONVERT_REAL(n - 1)
           sneudr(n) = (rn / cx) - sneuf(n)
 120       continue
 !
@@ -9569,5 +10311,58 @@ end if
 130       continue
         return
         end subroutine
-end module complex_oblate_swf
-
+#ifdef SWF_PRECISION_MPFR
+  ! Count lazy tables, temporary copies, caches and allocator overhead before main allocates.
+  logical function mpfr_workspace_ok(jnebmax, jnenmax, lnum, maxd, maxdr, maxe, maxe2, maxint, maxj, maxlp, &
+      & maxmp, maxn, maxp, maxpdr, maxq, maxt, narg, neta, ngau) result(allowed)
+    integer, intent(in) :: jnebmax, jnenmax, lnum, maxd, maxdr, maxe, maxe2, maxint, maxj, maxlp, maxmp, maxn, &
+      & maxp, maxpdr, maxq, maxt, narg, neta, ngau
+    integer(c_int64_t) :: total, element_bytes, limit
+    limit = mpfr_workspace_limit_bytes
+    allowed = .false.
+    mpfr_status = 4
+    total = 1048576_c_int64_t
+    if (total > limit) return
+    if (max(0_c_int64_t,auxiliary_cache_limit_bytes) > limit-total) return
+    total = total+max(0_c_int64_t,auxiliary_cache_limit_bytes)
+    element_bytes = sw_real_bytes()
+    if (.not.sw_account_workspace(total,element_bytes,24_c_int64_t,[int(lnum,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(lnum,c_int64_t),int(narg,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(lnum,c_int64_t) + 1_c_int64_t],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,36_c_int64_t,[int(maxd,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(maxdr,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,24_c_int64_t,[int(maxint,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,16_c_int64_t,[int(maxj,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,26_c_int64_t,[int(maxlp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,6_c_int64_t,[int(maxmp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,26_c_int64_t,[int(maxn,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,28_c_int64_t,[int(maxp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(maxt,c_int64_t),int(maxp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(maxpdr,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(maxq,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,32_c_int64_t,[int(maxt,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(ngau,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(maxe2,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,16_c_int64_t,[int(maxe,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(neta,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(jnebmax,c_int64_t),int(maxj,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,8_c_int64_t,[int(jnebmax,c_int64_t),int(maxlp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,6_c_int64_t,[int(jnebmax,c_int64_t),int(maxp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,4_c_int64_t,[int(jnenmax,c_int64_t),int(maxlp,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,12_c_int64_t,[int(jnenmax,c_int64_t),int(maxn,c_int64_t)],limit)) return
+    if (.not.sw_account_workspace(total,element_bytes,6_c_int64_t,[int(jnenmax,c_int64_t),int(maxp,c_int64_t)],limit)) return
+    mpfr_status = 0
+    allowed = .true.
+  end function mpfr_workspace_ok
+  subroutine mpfr_clear_caches()
+    integer :: slot
+    do slot = 1, pleg_cache_slots
+    call clear_pleg_cache_slot(slot)
+    end do
+    if(allocated(gauss_cache%x)) deallocate(gauss_cache%x)
+    if(allocated(gauss_cache%w)) deallocate(gauss_cache%w)
+    gauss_cache%bytes = 0_int64
+    gauss_cache%valid = .false.
+  end subroutine mpfr_clear_caches
+#endif
+end module

@@ -1,6 +1,10 @@
 name: CI
 env:
   JULIA_NUM_THREADS: 2
+  JULIA_NUM_PRECOMPILE_TASKS: 1
+  OPENBLAS_NUM_THREADS: 1
+  OMP_NUM_THREADS: 1
+  JULIA_CPU_TARGET: generic
 
 on:
   push:
@@ -15,16 +19,51 @@ on:
     paths-ignore:
       - 'README.md'
   workflow_dispatch:
+    inputs:
+      clean:
+        description: Bypass native and Julia compilation caches
+        type: boolean
+        default: false
+      source_run:
+        description: Run focused timings using this CI run's artifacts (blank runs full CI)
+        type: string
+        default: ''
+      timing_julia:
+        description: Julia version for focused timings
+        type: choice
+        options: ['1', 'pre', '1.10']
+        default: '1'
+      timing_runtime:
+        description: Measure reuse of the prepared Intel macOS Julia runtime
+        type: boolean
+        default: false
+      timing_cases:
+        description: JSON cases with name, groups, threads, optimize, and optional os/arch values
+        type: string
+        default: '[{"name":"functions-2","groups":"angular-and-coefficients,functions-and-coefficients","threads":2,"optimize":1},{"name":"functions-4","groups":"angular-and-coefficients,functions-and-coefficients","threads":4,"optimize":1}]'
 concurrency:
   # Skip intermediate builds: always.
   # Cancel intermediate builds: only if it is a pull request build.
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ inputs.source_run != '' && github.run_id || github.ref }}
   cancel-in-progress: ${{ startsWith(github.ref, 'refs/pull/') }}
 jobs:
+  timing:
+    if: inputs.source_run != ''
+    uses: ./.github/workflows/Timings.yml
+    permissions:
+      contents: read
+      actions: read
+    with:
+      source_run: ${{ inputs.source_run }}
+      julia: ${{ inputs.timing_julia }}
+      cases: ${{ inputs.timing_cases }}
+      prepare_runtime: ${{ inputs.timing_runtime || false }}
+
   native-backends:
-    name: Build and check native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    if: inputs.source_run == ''
+    name: Build native backends - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -34,18 +73,18 @@ jobs:
         platform:
           - os: ubuntu-latest
             arch: x64
-            library-pattern: build/lib/libspheroidal_batch_*.so
           - os: windows-latest
             arch: x64
-            library-pattern: build/bin/spheroidal_batch_*.dll
           - os: macos-26-intel
             arch: x64
-            library-pattern: build/lib/libspheroidal_batch_*.dylib
           - os: macos-latest
             arch: aarch64
-            library-pattern: build/lib/libspheroidal_batch_*.dylib
     steps:
       - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.10'
+          arch: ${{ matrix.platform.arch }}
       - uses: fortran-lang/setup-fortran@v1
         if: runner.os != 'Linux'
         with:
@@ -55,117 +94,428 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: echo "FC=$(command -v gfortran)" >> "$GITHUB_ENV"
-      # Build this checkout once per platform, then share only its libraries
-      # with the Julia version and test-group jobs in this workflow run.
-      - name: Build backends from source
+      - name: Install MPFR/MPC development files
+        if: runner.os != 'Windows'
         shell: bash
         run: |
-          generator="Unix Makefiles"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            generator="MinGW Makefiles"
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
+          else
+            brew install mpfr libmpc gmp
+            echo "CMAKE_PREFIX_PATH=$(brew --prefix)" >> "$GITHUB_ENV"
           fi
-          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DSWF_BUILD_TESTS=ON
-          cmake --build build --parallel 2
-      - name: Check native quadrature cache bounds and concurrency
-        run: ctest --test-dir build --output-on-failure
+      - uses: msys2/setup-msys2@v2
+        if: runner.os == 'Windows'
+        id: mpfr-msys
+        with:
+          msystem: UCRT64
+          install: mingw-w64-ucrt-x86_64-mpfr mingw-w64-ucrt-x86_64-mpc mingw-w64-ucrt-x86_64-gmp
+      - name: Configure MPFR/MPC search paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          prefix=$(cygpath -m '${{ steps.mpfr-msys.outputs.msys2-location }}/ucrt64')
+          echo "$prefix/bin" >> "$GITHUB_PATH"
+          echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
+          mkdir -p build/bin
+          cp "$prefix/bin/"*.dll build/bin/
+      - name: Configure native backends
+        shell: bash
+        run: |
+          generator='Unix Makefiles'
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then generator='MinGW Makefiles'; fi
+          cmake -S . -B build -G "$generator" -DCMAKE_Fortran_COMPILER="$FC" -DCMAKE_BUILD_TYPE=Release -DSWF_BUILD_TESTS=ON
+      - name: Fingerprint native build inputs
+        id: native-key
+        run: julia --startup-file=no scripts/native_cache_key.jl build
+      - uses: actions/cache/restore@v4
+        id: native-cache
+        if: inputs.clean != true
+        with:
+          path: |
+            build/lib
+            build/bin
+          key: native-v1-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ steps.native-key.outputs.key }}
+      - name: Compile double backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --target spheroidal_batch_double --parallel 1
+      - name: Compile quad backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --target spheroidal_batch_quad --parallel 1
+      - name: Compile MPFR backend
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --target spheroidal_batch_mpfr --parallel 1
+      - name: Compile native test executables
+        if: steps.native-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
+          cmake --build build --parallel 1
+      - uses: actions/cache/save@v4
+        if: inputs.clean != true && steps.native-cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            build/lib
+            build/bin
+          key: ${{ steps.native-cache.outputs.cache-primary-key }}
+      - name: Upload native build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-diagnostics-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: |
+            build/CMakeCache.txt
+            build/CMakeFiles/CMakeConfigureLog.yaml
+            build/bin/
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
-          path: ${{ matrix.platform.library-pattern }}
+          path: |
+            build/lib/*.so
+            build/lib/*.dylib
+            build/bin/*.dll
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-tests-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
+          path: |
+            build/bin/*_test*
+            build/CTestTestfile.cmake
+            build/test/CTestTestfile.cmake
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
 
-  test:
-    name: Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }} - ${{ matrix.group }}
-    needs: native-backends
-    runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 10
-    continue-on-error: ${{ matrix.version == 'nightly' }}
-    env:
-      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
-      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.group }}
-    permissions: # needed to allow julia-actions/cache to proactively delete old caches that it has created
-      actions: write
+  build-configurations:
+    if: inputs.source_run == ''
+    name: Shared-source build - ${{ matrix.configuration.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
       contents: read
     strategy:
       fail-fast: false
-      max-parallel: 48
+      max-parallel: 1
       matrix:
-        group: ['api-and-precision', 'parameter-derivatives', 'coordinates-and-endpoints', 'functions-and-coefficients']
-        version:
-          - '1'
-          - 'pre'
-          - '1.10'
-          # - 'nightly'
-        platform:
-          - os: ubuntu-latest
-            arch: x64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: so
-          - os: windows-latest
-            arch: x64
-            library-prefix: build/bin/spheroidal_batch_
-            library-extension: dll
-          - os: macos-26-intel
-            arch: x64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: dylib
-          - os: macos-latest
-            arch: aarch64
-            library-prefix: build/lib/libspheroidal_batch_
-            library-extension: dylib
+        configuration:
+          - {name: double-only, quad: 'OFF', mpfr: 'OFF', type: Release}
+          - {name: mpfr-without-quad, quad: 'OFF', mpfr: 'ON', type: Release}
+          - {name: debug, quad: 'ON', mpfr: 'ON', type: Debug}
     steps:
       - uses: actions/checkout@v7
-      # Match the build job's Fortran/OpenMP runtime libraries and search path.
-      - uses: fortran-lang/setup-fortran@v1
-        if: runner.os != 'Linux'
+      - uses: julia-actions/setup-julia@v2
         with:
-          compiler: gcc
-          version: '15'
+          version: '1.10'
+      - name: Install MPFR/MPC development files
+        if: matrix.configuration.mpfr == 'ON'
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr-dev libmpc-dev libgmp-dev
+      - name: Build the selected backends and native tests
+        shell: bash
+        env:
+          SWF_BUILD_QUAD: ${{ matrix.configuration.quad }}
+          SWF_BUILD_MPFR: ${{ matrix.configuration.mpfr }}
+          SWF_BUILD_TYPE: ${{ matrix.configuration.type }}
+          SWF_BUILD_TESTS: 'ON'
+          SWF_RUN_TESTS: 'OFF'
+        run: |
+          ulimit -v 3145728
+          julia --startup-file=no --heap-size-hint=1G scripts/build_from_source.jl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-configuration-${{ matrix.configuration.name }}
+          path: |
+            build/lib/*.so
+            build/bin/*_test*
+            build/CTestTestfile.cmake
+            build/test/CTestTestfile.cmake
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  configuration-tests:
+    name: Native ${{ matrix.configuration }}
+    needs: build-configurations
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        configuration: ['double-only', 'mpfr-without-quad', 'debug']
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install arithmetic runtime dependencies
+        if: matrix.configuration != 'double-only'
+        run: sudo apt-get update -qq && sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-configuration-${{ matrix.configuration }}
+          path: build
+      - name: Run native regression group
+        run: |
+          ulimit -v 3145728
+          chmod +x build/bin/*
+          ctest --test-dir build --no-tests=error --output-on-failure --parallel 1
+
+  julia-environments:
+    if: inputs.source_run == ''
+    name: Prepare Julia ${{ matrix.version }} - ${{ matrix.platform.os }} - ${{ matrix.platform.arch }}
+    runs-on: ${{ matrix.platform.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        version: ['1', 'pre', '1.10']
+        platform:
+          - {os: ubuntu-latest, arch: x64}
+          - {os: windows-latest, arch: x64}
+          - {os: macos-latest, arch: aarch64}
+          - {os: macos-26-intel, arch: x64}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+    steps:
+      - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.version }}
           arch: ${{ matrix.platform.arch }}
       - uses: julia-actions/cache@v2
-      - name: Resolve and instantiate dependencies
-        shell: julia --color=yes --project=. {0}
-        env:
-          # Pkg.test precompiles with its own bounds-checking and optimization flags.
-          JULIA_PKG_PRECOMPILE_AUTO: '0'
+        with:
+          cache-name: julia-packages-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
+          include-matrix: 'false'
+          cache-compiled: 'false'
+          delete-old-caches: 'false'
+      - name: Resolve the shared environment and fingerprint compilation inputs
+        id: julia-key
+        shell: bash
         run: |
-          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
-          using Pkg
-          # Test normal startup once per Julia/platform combination. Other groups
-          # compile the methods they exercise without repeating the startup workload.
-          if ENV["SPHEROIDALWAVES_TEST_GROUP"] != "api-and-precision"
-              write("LocalPreferences.toml", "[SpheroidalWaves]\nprecompile_workload = false\n")
-          end
-          Pkg.Registry.add("General")
-          Pkg.resolve()
-          Pkg.instantiate()
+          # Julia 1.10 checks source mtimes; the compilation key checks source contents.
+          git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
+          julia --startup-file=no --project=. scripts/prepare_ci_environment.jl
+      - uses: actions/cache/restore@v4
+        id: compiled-cache
+        if: inputs.clean != true
+        with:
+          path: ${{ steps.julia-key.outputs.depot }}/compiled
+          key: julia-compiled-v1-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ steps.julia-key.outputs.key }}
+      - name: Compile the shared test environment
+        if: steps.compiled-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G --project=. --check-bounds=yes --inline=yes -O1 scripts/precompile_ci_environment.jl
+      - uses: actions/cache/save@v4
+        if: inputs.clean != true && steps.compiled-cache.outputs.cache-hit != 'true'
+        with:
+          path: ${{ steps.julia-key.outputs.depot }}/compiled
+          key: ${{ steps.compiled-cache.outputs.cache-primary-key }}
+      - name: Package the prepared environment
+        shell: bash
+        env:
+          PREPARED_DEPOT: ${{ steps.julia-key.outputs.depot }}
+        run: |
+          mkdir -p .scratch/ci-environment
+          cp Manifest.toml .scratch/ci-environment/
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then PREPARED_DEPOT=$(cygpath -u "$PREPARED_DEPOT"); fi
+          mkdir -p "$PREPARED_DEPOT"/{artifacts,packages,registries,compiled,logs,scratchspaces}
+          tar -czf .scratch/ci-environment/depot.tar.gz -C "$PREPARED_DEPOT" artifacts packages registries compiled logs scratchspaces
+          julia --startup-file=no -e 'print(VERSION, " ", Base.GIT_VERSION_INFO.commit)' > .scratch/ci-environment/julia-version.txt
+          if [[ '${{ matrix.platform.os }}' == 'macos-26-intel' ]]; then
+            bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+          fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: julia-environment-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
+          path: .scratch/ci-environment/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  test:
+    name: Julia ${{ matrix.version }} - ${{ matrix.suite.os }} - ${{ matrix.suite.arch }} - ${{ matrix.suite.name }}
+    needs: [native-backends, julia-environments]
+    runs-on: ${{ matrix.suite.os }}
+    continue-on-error: ${{ matrix.version == 'nightly' }}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ matrix.suite.arch }}
+      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.suite.groups }}
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 48
+      matrix:
+        version: ['1', 'pre', '1.10']
+        suite:
+          - {os: ubuntu-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
+          - {os: ubuntu-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-curvature,precision-complex-curvature'}
+          - {os: ubuntu-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
+          - {os: ubuntu-latest, arch: x64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,angular-and-coefficients,degree-batches,functions-and-coefficients'}
+          - {os: ubuntu-latest, arch: x64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints,precision-eigen-differences,precision-wave-differences'}
+          - {os: macos-latest, arch: aarch64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
+          - {os: macos-latest, arch: aarch64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-curvature,precision-complex-curvature'}
+          - {os: macos-latest, arch: aarch64, name: waves, groups: 'precision-wave-references,precision-wave-sensitivities,precision-wave-behavior'}
+          - {os: macos-latest, arch: aarch64, name: parameters-and-functions, groups: 'parameter-derivatives,static-and-second-derivatives,angular-and-coefficients,degree-batches,functions-and-coefficients'}
+          - {os: macos-latest, arch: aarch64, name: coordinates, groups: 'coordinate-sensitivities,coordinates-and-endpoints,precision-eigen-differences,precision-wave-differences'}
+          - {os: windows-latest, arch: x64, name: core, groups: 'api-and-precision,thread-safety,quad-and-domain,precision-eigen-differences'}
+          - {os: windows-latest, arch: x64, name: accuracy, groups: 'accuracy-and-roots,accuracy-diagnostics,numerical-regressions,precision-diagnostics'}
+          - {os: windows-latest, arch: x64, name: precision, groups: 'arbitrary-precision,precision-quantities,precision-edge-cases,precision-complex-curvature', optimize: '0'}
+          - {os: windows-latest, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior,precision-curvature', optimize: '0'}
+          - {os: windows-latest, arch: x64, name: sensitivities, groups: 'precision-wave-sensitivities,parameter-derivatives,static-and-second-derivatives'}
+          - {os: windows-latest, arch: x64, name: coordinate-sensitivities, groups: 'coordinate-sensitivities'}
+          - {os: windows-latest, arch: x64, name: endpoints, groups: 'coordinates-and-endpoints,precision-wave-differences', optimize: '0'}
+          - {os: windows-latest, arch: x64, name: functions, groups: 'angular-and-coefficients,degree-batches,functions-and-coefficients'}
+          - {os: macos-26-intel, arch: x64, name: api, groups: 'api-and-precision,quad-and-domain'}
+          - {os: macos-26-intel, arch: x64, name: wave-differences, groups: 'precision-wave-differences', optimize: '0'}
+          - {os: macos-26-intel, arch: x64, name: thread-regressions, groups: 'thread-safety,precision-edge-cases,numerical-regressions,precision-diagnostics'}
+          - {os: macos-26-intel, arch: x64, name: accuracy, groups: 'accuracy-diagnostics,coordinates-and-endpoints'}
+          - {os: macos-26-intel, arch: x64, name: precision, groups: 'arbitrary-precision,precision-curvature,accuracy-and-roots'}
+          - {os: macos-26-intel, arch: x64, name: quantities, groups: 'precision-quantities,degree-batches,precision-eigen-differences'}
+          - {os: macos-26-intel, arch: x64, name: waves, groups: 'precision-wave-references,precision-wave-behavior'}
+          - {os: macos-26-intel, arch: x64, name: wave-sensitivities, groups: 'precision-wave-sensitivities,precision-complex-curvature'}
+          - {os: macos-26-intel, arch: x64, name: parameters, groups: 'parameter-derivatives,static-and-second-derivatives'}
+          - {os: macos-26-intel, arch: x64, name: coordinates, groups: 'coordinate-sensitivities'}
+          - {os: macos-26-intel, arch: x64, name: functions, groups: 'angular-and-coefficients,functions-and-coefficients'}
+        include:
+          - {version: '1.10', suite: {os: ubuntu-latest, arch: x64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
+          - {version: '1.10', suite: {os: macos-latest, arch: aarch64, name: native, groups: 'native-basic,native-prolate,native-oblate,native-context'}}
+          - {version: '1.10', suite: {os: windows-latest, arch: x64, name: native-context, groups: 'native-basic,native-context'}}
+          - {version: '1.10', suite: {os: windows-latest, arch: x64, name: native-kernels, groups: 'native-prolate,native-oblate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-prolate, groups: 'native-basic,native-prolate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-oblate, groups: 'native-oblate'}}
+          - {version: '1.10', suite: {os: macos-26-intel, arch: x64, name: native-context, groups: 'native-context'}}
+    steps:
+      - uses: actions/checkout@v7
+      # Windows needs the build job's matching Fortran/OpenMP runtime search path.
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os == 'Windows'
+        with:
+          compiler: gcc
+          version: '15'
+      - uses: julia-actions/setup-julia@v2
+        if: startsWith(matrix.suite.groups, 'native-') == false && matrix.suite.os != 'macos-26-intel'
+        with:
+          version: ${{ matrix.version }}
+          arch: ${{ matrix.suite.arch }}
+      - name: Download the prepared Julia environment
+        if: startsWith(matrix.suite.groups, 'native-') == false
+        uses: actions/download-artifact@v8
+        with:
+          name: julia-environment-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
+          path: .scratch/ci-environment
+      - name: Restore the prepared Julia runtime
+        if: startsWith(matrix.suite.groups, 'native-') == false && matrix.suite.os == 'macos-26-intel'
+        shell: bash
+        run: bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
+      - name: Restore the prepared Julia environment
+        if: startsWith(matrix.suite.groups, 'native-') == false
+        shell: bash
+        run: |
+          git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
+          cp .scratch/ci-environment/Manifest.toml Manifest.toml
+          depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
+          mkdir -p "$depot"
+          tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
+          julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
+          if [[ '${{ matrix.version }}' == '1.10' && "$SPHEROIDALWAVES_TEST_GROUP" != *api-and-precision* ]]; then
+            printf '[SpheroidalWaves]\nprecompile_workload = false\n' > LocalPreferences.toml
+          fi
       - name: Download this platform's source-built backends
         uses: actions/download-artifact@v8
         with:
-          name: native-backends-${{ matrix.platform.os }}-${{ matrix.platform.arch }}
-          path: build/${{ runner.os == 'Windows' && 'bin' || 'lib' }}
+          name: native-backends-${{ matrix.suite.os }}-${{ matrix.suite.arch }}
+          path: build
+      - name: Download this platform's native tests
+        if: startsWith(matrix.suite.groups, 'native-')
+        uses: actions/download-artifact@v8
+        with:
+          name: native-tests-${{ matrix.suite.os }}-${{ matrix.suite.arch }}
+          path: build
       - name: Point tests at the freshly built backends
         shell: bash
-        env:
-          LIBRARY_PREFIX: ${{ matrix.platform.library-prefix }}
-          LIBRARY_EXTENSION: ${{ matrix.platform.library-extension }}
         run: |
-          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}double.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
-          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${LIBRARY_PREFIX}quad.${LIBRARY_EXTENSION}" >> "$GITHUB_ENV"
+          library_prefix=build/lib/libspheroidal_batch_
+          library_extension=so
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            library_prefix=build/bin/spheroidal_batch_
+            library_extension=dll
+          elif [[ "$RUNNER_OS" == 'macOS' ]]; then
+            library_extension=dylib
+          fi
+          echo "SPHEROIDALWAVES_LIBRARY_DOUBLE=${GITHUB_WORKSPACE}/${library_prefix}double.${library_extension}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_QUAD=${GITHUB_WORKSPACE}/${library_prefix}quad.${library_extension}" >> "$GITHUB_ENV"
+          echo "SPHEROIDALWAVES_LIBRARY_MPFR=${GITHUB_WORKSPACE}/${library_prefix}mpfr.${library_extension}" >> "$GITHUB_ENV"
+      - name: Install MPFR/MPC runtime dependencies
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+          else
+            prefix=$(brew --prefix)
+            missing=()
+            for formula in gcc@15 mpfr libmpc gmp; do
+              [[ -d "$prefix/opt/$formula" ]] || missing+=("$formula")
+            done
+            if (( ${#missing[@]} )); then brew install "${missing[@]}"; fi
+          fi
+      - name: Configure MPFR/MPC runtime paths
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
       - uses: julia-actions/julia-runtest@v1
+        if: startsWith(matrix.suite.groups, 'native-') == false
+        env:
+          JULIA_PKG_PRECOMPILE_AUTO: ${{ contains(matrix.suite.groups, 'api-and-precision') && '1' || '0' }}
         with:
           coverage: false # Collected by Coverage.yml.
-          optimize: 1
+          allow_reresolve: false
+          # Use lower optimization only for groups measured in the focused timing workflow.
+          optimize: >-
+            ${{ matrix.suite.optimize ||
+                (matrix.suite.os == 'macos-26-intel' && matrix.version == 'pre' &&
+                 (matrix.suite.name == 'thread-regressions' || matrix.suite.name == 'quantities') && '0') ||
+                (matrix.suite.os == 'macos-26-intel' && matrix.suite.name == 'coordinates' && matrix.version != '1.10' && '0') || '1' }}
+          # Keep cached stdlibs on Julia 1.10, which lacks the existing-images mode.
+          compiled_modules: ${{ (contains(matrix.suite.groups, 'api-and-precision') || matrix.version == '1.10') && 'yes' || 'existing' }}
+      - name: Run native regression tests
+        if: startsWith(matrix.suite.groups, 'native-')
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          if [[ "$RUNNER_OS" != 'Windows' ]]; then chmod +x build/bin/*; fi
+          ctest --test-dir build -L "${SPHEROIDALWAVES_TEST_GROUP//,/|}" --no-tests=error --output-on-failure --parallel 1
+      - name: Capture the Windows test crash
+        if: failure() && runner.os == 'Windows'
+        shell: bash
+        run: |
+          printf 'set pagination off\nhandle SIGILL nostop noprint pass\nrun\nthread apply all bt 20\ninfo sharedlibrary\n' > build/windows-test.gdb
+          if [[ "$SPHEROIDALWAVES_TEST_GROUP" == native-* ]]; then
+            gdb --batch --nx -x build/windows-test.gdb --args build/bin/spheroidal_shared_precision_mpfr_test.exe
+          else
+            gdb --batch --nx -x build/windows-test.gdb --args "$(command -v julia)" --startup-file=no --project=. --check-bounds=yes -O1 test/runtests.jl
+          fi
 
   jll-backends:
+    if: inputs.source_run == ''
     name: SpheroidalWaves_jll backends - ${{ matrix.os }} - ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:

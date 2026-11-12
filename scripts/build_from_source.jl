@@ -1,9 +1,6 @@
 #!/usr/bin/env julia
 # scripts/build_from_source.jl
-# Compiles the Fortran batch modules into shared libraries from source.
-# Not run automatically: SpheroidalWaves_jll supplies prebuilt binaries for
-# normal installs. Run this explicitly for local Fortran development or to
-# exercise the source build in CI.
+# Optional source build; normal installations use prebuilt SpheroidalWaves_jll libraries.
 
 using Libdl
 
@@ -12,19 +9,15 @@ using Libdl
 # ============================================================================
 const SCRIPT_DIR = dirname(@__FILE__)
 const PROJECT_DIR = dirname(SCRIPT_DIR)
-const BUILD_DIR = joinpath(PROJECT_DIR, "build")
-const BUILD_LOG = joinpath(SCRIPT_DIR, "build_output.txt")
+const BUILD_DIR = abspath(get(ENV, "SWF_BUILD_DIR", joinpath(PROJECT_DIR, "build")))
+const BUILD_TYPE = get(ENV, "SWF_BUILD_TYPE", "Release")
+const BUILD_LOG = joinpath(BUILD_DIR, "build_output.txt")
 const SELECTED_FORTRAN = Ref{Union{Nothing, String}}(nothing)
-
-function detect_library_dir()
-    candidates = [joinpath(BUILD_DIR, "lib"), joinpath(BUILD_DIR, "bin"), BUILD_DIR]
-    for dir in candidates
-        if isdir(dir)
-            return dir
-        end
-    end
-    return joinpath(BUILD_DIR, "lib")
-end
+const BUILD_QUAD = lowercase(get(ENV, "SWF_BUILD_QUAD", "on")) ∉ ("off", "false", "0")
+const BUILD_MPFR = lowercase(get(ENV, "SWF_BUILD_MPFR", "on")) ∉ ("off", "false", "0")
+const BUILD_TESTS = lowercase(get(ENV, "SWF_BUILD_TESTS", "off")) ∉ ("off", "false", "0")
+const RUN_TESTS = BUILD_TESTS && lowercase(get(ENV, "SWF_RUN_TESTS", "on")) ∉ ("off", "false", "0")
+const BACKENDS = ["double"; BUILD_QUAD ? ["quad"] : []; BUILD_MPFR ? ["mpfr"] : []]
 
 # ============================================================================
 # Helper Functions
@@ -35,10 +28,6 @@ end
 
 function error_msg(msg)
     println("[SpheroidalWaves.jl ERROR] $msg")
-end
-
-function warn_msg(msg)
-    println("[SpheroidalWaves.jl WARNING] $msg")
 end
 
 function _compiler_target(path::String)
@@ -87,6 +76,11 @@ function _gfortran_candidates()
 end
 
 function choose_fortran_compiler()
+    if haskey(ENV, "FC")
+        path = Sys.which(ENV["FC"])
+        path === nothing && error("Fortran compiler specified by FC was not found: $(ENV["FC"])")
+        return (path, basename(path), _compiler_target(path))
+    end
     gfortran_paths = _gfortran_candidates()
     for path in gfortran_paths
         target = _compiler_target(path)
@@ -111,6 +105,7 @@ function choose_fortran_compiler()
 end
 
 function choose_cmake_generator()
+    haskey(ENV, "CMAKE_GENERATOR") && return ENV["CMAKE_GENERATOR"]
     if Sys.iswindows()
         return "MinGW Makefiles"
     end
@@ -163,36 +158,17 @@ end
 # Step 3: Verify Source Files Exist
 # ============================================================================
 function verify_sources()
-    base_solvers_double = [
-        "prolate_swf.f90",
-        "oblate_swf.f90",
-        "complex_prolate_swf.f90",
-        "complex_oblate_swf.f90"
-    ]
-
-    batch_wrappers_double = [
-        "psms_batch_fortran.f90",
-        "oblate_batch_fortran.f90",
-        "complex_prolate_batch_fortran.f90",
-        "complex_oblate_batch_fortran.f90"
-    ]
-
-    base_solvers_quad = [
-        "prolate_swf_quad.f90",
-        "oblate_swf_quad.f90",
-        "complex_prolate_swf_quad.f90",
-        "complex_oblate_swf_quad.f90"
-    ]
-
-    batch_wrappers_quad = [
-        "psms_batch_fortran_quad.f90",
-        "oblate_batch_fortran_quad.f90",
-        "complex_prolate_batch_fortran_quad.f90",
-        "complex_oblate_batch_fortran_quad.f90"
-    ]
-
-    all_sources = [base_solvers_double; batch_wrappers_double; base_solvers_quad;
-                   batch_wrappers_quad; "scaled_batch.f90"]
+    all_sources = ["precision.inc", "precision.F90", "scaled_batch.f90"]
+    for geometry in ("prolate", "oblate", "complex_prolate", "complex_oblate")
+        push!(all_sources, "$(geometry)_kernel.F90")
+    end
+    for wrapper in ("psms", "oblate", "complex_prolate", "complex_oblate")
+        push!(all_sources, "$(wrapper)_batch_fortran.f90")
+        BUILD_QUAD && push!(all_sources, "$(wrapper)_batch_fortran_quad.f90")
+    end
+    BUILD_MPFR && append!(all_sources,
+        ["mpfr_real.f90", "mpfr_complex.f90", "mpfr_batch.f90",
+         "mpfr_arithmetic.h", "mpfr_arithmetic.c", "mpc_arithmetic.c"])
     deps_dir = joinpath(PROJECT_DIR, "deps")
 
     for src in all_sources
@@ -219,7 +195,11 @@ function run_build()
     configure_cmd = [
         "cmake",
         "-S", PROJECT_DIR,
-        "-B", BUILD_DIR
+        "-B", BUILD_DIR,
+        "-DCMAKE_BUILD_TYPE=$BUILD_TYPE",
+        "-DSWF_BUILD_QUAD=$(BUILD_QUAD ? "ON" : "OFF")",
+        "-DSWF_BUILD_MPFR=$(BUILD_MPFR ? "ON" : "OFF")",
+        "-DSWF_BUILD_TESTS=$(BUILD_TESTS ? "ON" : "OFF")"
     ]
 
     generator = choose_cmake_generator()
@@ -242,13 +222,26 @@ function run_build()
 
     # Run CMake build
     info_msg("Running CMake build...")
-    build_cmd = ["cmake", "--build", BUILD_DIR, "--config", "Release"]
+    build_cmd = ["cmake", "--build", BUILD_DIR, "--config", BUILD_TYPE, "--parallel", "1"]
 
     info_msg("Command: $(join(build_cmd, " "))")
 
     try
         open(BUILD_LOG, "w") do io
-            run(pipeline(Cmd(build_cmd), stdout = io, stderr = io))
+            output = Pipe()
+            process = run(pipeline(Cmd(build_cmd), stdout = output, stderr = output); wait = false)
+            close(output.in)
+            try
+                for line in eachline(output)
+                    println(io, line)
+                    flush(io)
+                    println(line)
+                end
+            finally
+                close(output)
+            end
+            wait(process)
+            success(process) || error("CMake build exited with code $(process.exitcode)")
         end
     catch e
         error_msg("CMake build failed: $e")
@@ -269,7 +262,7 @@ function run_build()
 end
 
 # ============================================================================
-# Step 5: Verify Library Exists
+# Step 5: Verify Libraries and Entry Points
 # ============================================================================
 function _backend_filename(stem::String)
     if Sys.iswindows()
@@ -293,9 +286,11 @@ function _backend_filename_candidates(stem::String)
     return names
 end
 
-function _find_built_library(lib_dir::String, stem::String)
-    for name in _backend_filename_candidates(stem)
-        path = joinpath(lib_dir, name)
+function _find_built_library(stem::String)
+    directories = [joinpath(BUILD_DIR, subdir, config)
+                   for subdir in ("lib", "bin", "") for config in (BUILD_TYPE, "")]
+    for dir in directories, name in _backend_filename_candidates(stem)
+        path = joinpath(dir, name)
         if isfile(path)
             return path
         end
@@ -304,34 +299,31 @@ function _find_built_library(lib_dir::String, stem::String)
 end
 
 function verify_libraries_built()
-    lib_dir = detect_library_dir()
-    stems = ["spheroidal_batch_double", "spheroidal_batch_quad"]
-    ok = true
-    for stem in stems
-        path = _find_built_library(lib_dir, stem)
+    symbols = Dict(
+        "double" => (:psms_eigenvalue_double, :oblate_eigenvalue_double,
+                     :cprolate_eigenvalue_c8, :coblate_eigenvalue_c8, :spheroidal_scaled_text),
+        "quad" => (:psms_eigenvalue_quad_fullsplit, :oblate_eigenvalue_quad_fullsplit,
+                   :cprolate_batch_quad_text, :coblate_batch_quad_text, :spheroidal_scaled_text),
+        "mpfr" => (:spheroidal_mpfr_batch,))
+    for backend in BACKENDS
+        path = _find_built_library("spheroidal_batch_$backend")
         if path === nothing
-            error_msg("Library not found after build for $stem in $lib_dir")
-            ok = false
-        else
-            info_msg("Library verified: $path")
+            error_msg("Library not found after build for $backend in $BUILD_DIR")
+            return false
         end
+        try
+            Libdl.dlopen(path) do handle
+                for symbol in symbols[backend]
+                    Libdl.dlsym(handle, symbol)
+                end
+            end
+        catch e
+            error_msg("Cannot load $backend library or its required symbols: $e")
+            return false
+        end
+        info_msg("$backend library verified: $path")
+        info_msg("SPHEROIDALWAVES_LIBRARY_$(uppercase(backend))=$path")
     end
-    return ok
-end
-
-# ============================================================================
-# Step 6: Report Library Paths
-# ============================================================================
-function report_library_paths()
-    lib_dir = detect_library_dir()
-    lib_double_path = _find_built_library(lib_dir, "spheroidal_batch_double")
-    lib_quad_path = _find_built_library(lib_dir, "spheroidal_batch_quad")
-    if lib_double_path === nothing || lib_quad_path === nothing
-        error_msg("Cannot report library paths because one or more built libraries were not found.")
-        return false
-    end
-    info_msg("double library path: $lib_double_path")
-    info_msg("quad library path: $lib_quad_path")
     return true
 end
 
@@ -339,8 +331,9 @@ end
 # Main Build Workflow
 # ============================================================================
 function main()
-    info_msg("SpheroidalWaves Fortran batch build starting...")
-    info_msg("Building dual precision backends (double and quad)")
+    info_msg("SpheroidalWaves native backend build starting...")
+    info_msg("Building $(join(BACKENDS, ", ")) backends ($BUILD_TYPE)")
+    BUILD_MPFR && info_msg("MPFR/MPC requires C/Fortran compilers and MPFR/MPC/GMP development files.")
     info_msg("Build directory: $BUILD_DIR")
 
     # Check prerequisites
@@ -366,18 +359,16 @@ function main()
         return false
     end
 
-    # Report the library locations. The module probes these known build paths.
-    if !report_library_paths()
-        return false
+    if RUN_TESTS
+        try
+            run(Cmd(`ctest --build-config $BUILD_TYPE -j1 --output-on-failure`; dir=BUILD_DIR))
+        catch e
+            error_msg("Native backend tests failed: $e")
+            return false
+        end
     end
 
     info_msg("Build successful!")
-    info_msg("")
-    info_msg("Next steps:")
-    info_msg("  1. Library is ready at: $(detect_library_dir())")
-    info_msg("  2. Use SpheroidalWaves module in Julia")
-    info_msg("  3. Call smn/rmn with precision=:double or precision=:quad")
-    info_msg("")
 
     return true
 end
@@ -386,27 +377,7 @@ end
 # Entry Point
 # ============================================================================
 if !main()
-    is_ci = get(ENV, "CI", "false") == "true"
-
-    if is_ci
-        error("Build failed in CI. This indicates a real installation problem. See errors above.")
-    else
-        warn_msg("Local backend build failed. This is expected if:")
-        warn_msg("  - You don't have a Fortran compiler installed")
-        warn_msg("  - CMake is not available")
-        warn_msg("")
-        warn_msg("Normal use of SpheroidalWaves does not require this script: the")
-        warn_msg("package installs prebuilt binaries automatically via SpheroidalWaves_jll.")
-        warn_msg("This is only needed to compile the Fortran sources locally, e.g. for")
-        warn_msg("development. To do so:")
-        warn_msg("  1. Install a Fortran compiler and CMake")
-        warn_msg("  2. Rerun: julia --project=. scripts/build_from_source.jl")
-        warn_msg("  3. Point SpheroidalWaves at the result with")
-        warn_msg("     SPHEROIDALWAVES_LIBRARY_DOUBLE / SPHEROIDALWAVES_LIBRARY_QUAD")
-        warn_msg("")
-        warn_msg("To install a Fortran compiler:")
-        warn_msg("  - Ubuntu/Debian: sudo apt-get install gfortran cmake")
-        warn_msg("  - macOS: brew install gcc cmake")
-        warn_msg("  - Windows: install MinGW-w64 (gfortran) and CMake")
-    end
+    error_msg("Source build failed; see errors above and $BUILD_LOG.")
+    info_msg("Normal installations use prebuilt SpheroidalWaves_jll libraries and do not run this script.")
+    exit(1)
 end

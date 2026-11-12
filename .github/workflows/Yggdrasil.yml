@@ -11,30 +11,48 @@ on:
         description: Your Yggdrasil fork (owner/Yggdrasil)
         type: string
         default: brandynlucca/Yggdrasil
+      targets:
+        description: Comma-separated targets for focused build timings (blank validates all targets)
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
+env:
+  BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+  BUILDER_DEPOT: ${{ github.workspace }}/.scratch/binarybuilder-depot
+  JULIA_CPU_TARGET: generic
+  JULIA_NUM_THREADS: '1'
+  JULIA_NUM_PRECOMPILE_TASKS: '1'
+
 concurrency:
-  group: yggdrasil-${{ github.ref }}
+  group: yggdrasil-${{ github.ref }}-${{ inputs.targets || 'all' }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: BinaryBuilder builds and audits for all supported targets
+  prepare:
+    name: Prepare BinaryBuilder and select targets
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 15
     env:
-      BINARYBUILDER_AUTOMATIC_APPLE: 'true'
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     outputs:
       version: ${{ steps.recipe.outputs.version }}
+      platforms: ${{ steps.targets.outputs.platforms }}
+      targets: ${{ steps.targets.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           # BinaryBuilder's RISC-V audit needs Julia's newer architecture table.
           version: '1.12'
-      - name: Select the source commit and version
+      - uses: actions/cache@v4
+        with:
+          path: .scratch/binarybuilder-depot
+          key: binarybuilder-tools-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
+          restore-keys: binarybuilder-tools-v1-${{ runner.os }}-
+      - name: Select the shared-source commit and version
         id: recipe
         shell: julia --color=yes {0}
         run: |
@@ -44,6 +62,9 @@ jobs:
           @assert version in Pkg.Types.semver_spec(project["compat"]["SpheroidalWaves_jll"]) "Package compatibility must include generated JLL $version"
           revision = ENV["GITHUB_SHA"]
           @assert occursin(r"^[0-9a-f]{40}$", revision)
+          for geometry in ("prolate", "oblate", "complex_prolate", "complex_oblate")
+              @assert isfile("deps/$(geometry)_kernel.F90")
+          end
           path = "contrib/yggdrasil/build_tarballs.jl"
           recipe = read(path, String)
           @assert length(collect(eachmatch(r"(?m)^version = v\"[^\"]+\"$", recipe))) == 1
@@ -55,21 +76,116 @@ jobs:
               println(io, "version=$version")
           end
       - name: Install BinaryBuilder and check target support
+        id: targets
         shell: julia --color=yes --project=@binarybuilder {0}
+        env:
+          SELECTED_TARGETS: ${{ inputs.targets }}
         run: |
           using Pkg
-          Pkg.add("BinaryBuilder")
+          isfile(Base.active_project()) ? Pkg.instantiate() : Pkg.add("BinaryBuilder")
           using BinaryBuilder
           for platform in supported_platforms()
               BinaryBuilder.Auditor.generic_march(platform)
           end
-      - name: Build and audit both precision libraries
-        run: >-
-          julia --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl
-          --verbose --deploy=local
+          push!(ARGS, "--meta-json=$(ENV["RUNNER_TEMP"])/recipe.json")
+          include(joinpath(ENV["GITHUB_WORKSPACE"], "contrib/yggdrasil/build_tarballs.jl"))
+          supported = BinaryBuilder.JSON.parsefile(joinpath(ENV["RUNNER_TEMP"], "recipe.json"))["platforms"]
+          selected = isempty(ENV["SELECTED_TARGETS"]) ? supported : strip.(split(ENV["SELECTED_TARGETS"], ','))
+          @assert !isempty(selected) && all(in(supported), selected) "Unknown or empty build target"
+          @assert length(unique(selected)) == length(selected) "Duplicate build target"
+          open(ENV["GITHUB_OUTPUT"], "a") do io
+              println(io, "platforms=$(BinaryBuilder.JSON.json(selected))")
+              println(io, "targets=$(join(selected, ','))")
+          end
+      - name: Save the prepared build tools and recipe
+        run: |
+          mkdir -p .scratch/binarybuilder-tools
+          tar -czf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT" .
+          cp contrib/yggdrasil/build_tarballs.jl .scratch/binarybuilder-tools/build_tarballs.jl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools/
+          compression-level: 0
+          retention-days: 1
+
+  target-build:
+    name: Build and audit ${{ matrix.target }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        target: ${{ fromJSON(needs.prepare.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: actions/download-artifact@v8
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools
+      - name: Restore the prepared build tools and recipe
+        run: |
+          mkdir -p "$BUILDER_DEPOT"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
+          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+      - name: Build and audit all three precision libraries
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          ulimit -v 3145728
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl "$BUILD_TARGET" --verbose
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: yggdrasil-target-${{ matrix.target }}
+          path: products/
+          if-no-files-found: ignore
+          compression-level: 0
+
+  build:
+    name: Assemble the audited JLL artifacts
+    needs: [prepare, target-build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
+    outputs:
+      version: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: '1.12'
+      - uses: actions/download-artifact@v8
+        with:
+          name: binarybuilder-tools
+          path: .scratch/binarybuilder-tools
+      - name: Restore the prepared build tools and recipe
+        run: |
+          mkdir -p "$BUILDER_DEPOT"
+          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
+          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: yggdrasil-target-*
+          merge-multiple: true
+          path: products
+      - name: Generate the JLL from the audited tarballs
+        env:
+          BUILD_TARGETS: ${{ needs.prepare.outputs.targets }}
+        run: |
+          ulimit -v 3145728
+          julia --heap-size-hint=1G --project=@binarybuilder contrib/yggdrasil/build_tarballs.jl "$BUILD_TARGETS" --skip-build --deploy=local --verbose
       - name: Collect the generated JLL and recipe
         run: |
-          cp -R "$HOME/.julia/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
+          cp -R "$BUILDER_DEPOT/dev/SpheroidalWaves_jll" products/SpheroidalWaves_jll
           cp contrib/yggdrasil/build_tarballs.jl products/build_tarballs.jl
       - uses: actions/upload-artifact@v7
         if: always()
@@ -79,14 +195,15 @@ jobs:
           if-no-files-found: ignore
 
   runtime:
-    name: JLL runtime and accuracy - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
+    if: inputs.targets == ''
+    name: JLL ${{ matrix.suite }} - ${{ matrix.platform.os }} - Julia ${{ matrix.julia }}
     needs: build
     runs-on: ${{ matrix.platform.os }}
-    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         julia: ['1.10', '1']
+        suite: ['native', 'wave-references-and-behavior', 'wave-sensitivities']
         platform:
           - os: ubuntu-latest
             arch: x64
@@ -98,12 +215,25 @@ jobs:
             arch: x64
     env:
       EXPECTED_JULIA_ARCH: ${{ matrix.platform.arch }}
+      JULIA_NUM_THREADS: '2'
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      JLL_TEST_SUITE: ${{ matrix.suite }}
+      JULIA_NUM_PRECOMPILE_TASKS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v2
         with:
           version: ${{ matrix.julia }}
           arch: ${{ matrix.platform.arch }}
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: jll-validation-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.julia }}
+          include-matrix: 'false'
+          cache-compiled: 'false'
+          delete-old-caches: 'false'
       - uses: actions/download-artifact@v8
         with:
           name: yggdrasil-build
@@ -123,14 +253,15 @@ jobs:
           end
           open(io -> TOML.print(io, artifacts), path, "w")
       - name: Load JLL runtimes and test the cross-built libraries
-        timeout-minutes: 5
         shell: bash
         run: |
           unset LD_LIBRARY_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
-          julia --startup-file=no - <<'JULIA'
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G --check-bounds=yes -O1 - <<'JULIA'
           using Pkg, Libdl, Test
           @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
           Pkg.activate(;temp=true)
+          write(joinpath(dirname(Base.active_project()), "LocalPreferences.toml"), "[SpheroidalWaves]\nprecompile_workload = false\n")
           Pkg.develop([
               Pkg.PackageSpec(path=pwd()),
               Pkg.PackageSpec(path="binarybuilder-products/SpheroidalWaves_jll"),
@@ -138,13 +269,15 @@ jobs:
           using SpheroidalWaves_jll
           ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
           ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
+          ENV["SPHEROIDALWAVES_LIBRARY_MPFR"] = SpheroidalWaves_jll.libspheroidal_batch_mpfr_path
           using SpheroidalWaves
+          include("test/require_backends.jl")
           @testset "JLL libraries and runtime dependencies" begin
               @test !isdir("build")
               @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
               @test realpath(dirname(dirname(pathof(SpheroidalWaves_jll)))) == realpath("binarybuilder-products/SpheroidalWaves_jll")
               @test SpheroidalWaves.SpheroidalWaves_jll === SpheroidalWaves_jll
-              for precision in (:double,:quad)
+              for precision in (:double,:quad,:mpfr)
                   library = SpheroidalWaves.backend_library(;precision)
                   @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]
                   @test occursin("/artifacts/", replace(library, '\\' => '/'))
@@ -168,13 +301,25 @@ jobs:
                   end
               end
           end
-          include("test/quad_precision.jl")
-          include("test/numerical_regressions.jl")
+          @testset "Arbitrary precision JLL backend" begin
+              value = eigenvalue(0, 0, 1; precision_bits=160)
+              reference = parse(BigFloat, "0.31900005514689273978398198587182649410381437651074172911497005923805300976367"; precision=256)
+              @test precision(value) == 160
+              @test isapprox(value, reference; rtol=big"1e-46")
+          end
+          if ENV["JLL_TEST_SUITE"] == "native"
+              include("test/quad_precision.jl")
+              include("test/numerical_regressions.jl")
+          else
+              ENV["SPHEROIDALWAVES_PRECISION_CASE"] = ENV["JLL_TEST_SUITE"] == "wave-sensitivities" ?
+                  "sensitivities" : "references,derivatives,static,dispatch,storage,settings"
+              include("test/precision_waves.jl")
+          end
           JULIA
 
   submit:
     name: Open Yggdrasil update
-    if: github.event_name == 'workflow_dispatch' && inputs.submit
+    if: github.event_name == 'workflow_dispatch' && inputs.submit && inputs.targets == ''
     needs: [build, runtime]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -210,15 +355,15 @@ jobs:
           cp ../validated/build_tarballs.jl S/SpheroidalWaves/build_tarballs.jl
           git add S/SpheroidalWaves/build_tarballs.jl
           if ! git diff --cached --quiet; then
-            git -c user.name=github-actions\[bot\] -c user.email=41898282+github-actions\[bot\]@users.noreply.github.com commit -m "[SpheroidalWaves] Build v$BACKEND_VERSION"
+            git -c user.name=github-actions\[bot\] -c user.email=41898282+github-actions\[bot\]@users.noreply.github.com commit -m "[SpheroidalWaves] Update to v$BACKEND_VERSION"
             git push origin "$branch"
           fi
           existing="$(gh pr list --repo JuliaPackaging/Yggdrasil --head "$owner:$branch" --json url --jq '.[0].url // empty')"
           if [[ -n "$existing" ]]; then
             echo "$existing" >> "$GITHUB_STEP_SUMMARY"
           else
-            printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all recipe targets. Native double/quad checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
+            printf 'Builds SpheroidalWaves backends from %s at commit %s.\n\nBinaryBuilder builds and dependency audits passed for all recipe targets. Native double, quad, and MPFR checks passed on current Ubuntu, Windows, Apple Silicon macOS, and Intel macOS runners with Julia 1.10 and latest stable: %s/actions/runs/%s\n' \
               "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" > "$RUNNER_TEMP/yggdrasil-pr.md"
             gh pr create --repo JuliaPackaging/Yggdrasil --base master --head "$owner:$branch" \
-              --title "[SpheroidalWaves] Build v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
+              --title "[SpheroidalWaves] Update to v$BACKEND_VERSION" --body-file "$RUNNER_TEMP/yggdrasil-pr.md" >> "$GITHUB_STEP_SUMMARY"
           fi

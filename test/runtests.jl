@@ -1,16 +1,27 @@
 using SpheroidalWaves
 using Test
 
-const TEST_GROUP = get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all")
-TEST_GROUP in
-("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
-    "functions-and-coefficients") ||
-    error("Unknown SPHEROIDALWAVES_TEST_GROUP: $TEST_GROUP")
+include("require_backends.jl")
+
+const TEST_GROUPS = Set(strip.(split(get(ENV, "SPHEROIDALWAVES_TEST_GROUP", "all"), ',')))
+const VALID_TEST_GROUPS = ("all", "api-and-precision", "parameter-derivatives", "coordinates-and-endpoints",
+    "static-and-second-derivatives",
+    "coordinate-sensitivities",
+    "functions-and-coefficients", "angular-and-coefficients", "degree-batches", "thread-safety",
+    "quad-and-domain", "accuracy-and-roots",
+    "accuracy-diagnostics", "numerical-regressions",
+    "arbitrary-precision", "precision-quantities", "precision-edge-cases",
+    "precision-wave-references", "precision-wave-sensitivities", "precision-wave-behavior",
+    "precision-diagnostics", "precision-curvature", "precision-complex-curvature", "precision-eigen-differences", "precision-wave-differences")
+all(group -> group in VALID_TEST_GROUPS, TEST_GROUPS) ||
+    error("Unknown SPHEROIDALWAVES_TEST_GROUP: $(join(TEST_GROUPS, ','))")
+test_group_selected(group) = "all" in TEST_GROUPS || group in TEST_GROUPS
 
 # Ordinary Pkg.test() and coverage run the complete suite.
-if TEST_GROUP in ("all", "api-and-precision")
+if test_group_selected("thread-safety")
     include("thread_safety.jl")
-
+end
+if test_group_selected("api-and-precision")
     @testset "SpheroidalWaves.jl" begin
         assert_allclose(actual, expected; atol = 1e-10, rtol = 0.0) = begin
             @test length(actual) == length(expected)
@@ -45,6 +56,7 @@ if TEST_GROUP in ("all", "api-and-precision")
         @testset "Local Backend Configuration Does Not Evaluate Generated Code" begin
             @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_DOUBLE)
             @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_QUAD)
+            @test !isdefined(SpheroidalWaves, :SPHEROIDAL_BATCH_LIBRARY_MPFR)
         end
 
         @testset "Precompiled package runtime state" begin
@@ -61,12 +73,17 @@ if TEST_GROUP in ("all", "api-and-precision")
                 @assert isapprox(only(r.derivative), -29.533616783570416; rtol=1e-13)
             end
             @assert !isempty(SW._backend_handles)
+            if haskey(ENV, "SPHEROIDALWAVES_LIBRARY_MPFR")
+                @assert SW.backend_library(; precision=:mpfr) == ENV["SPHEROIDALWAVES_LIBRARY_MPFR"]
+            end
             """
             command = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) -e $code`
             command = addenv(command,
                 "SPHEROIDALWAVES_LIBRARY_DOUBLE" => SpheroidalWaves.backend_library(),
                 "SPHEROIDALWAVES_LIBRARY_QUAD" =>
                     SpheroidalWaves.backend_library(; precision = :quad))
+            mpfr_library = SpheroidalWaves.backend_library(; precision = :mpfr)
+            mpfr_library === nothing || (command = addenv(command, "SPHEROIDALWAVES_LIBRARY_MPFR" => mpfr_library))
             @test success(command)
         end
 
@@ -81,14 +98,19 @@ if TEST_GROUP in ("all", "api-and-precision")
                 missing = joinpath(tempdir(), "spheroidalwaves-nonexistent-library")
                 @test_logs (:warn, r"does not exist") !SW._set_backend_from_candidate(missing, :double, "test")
                 withenv(SW._ENV_BACKEND_DOUBLE => saved[:double], SW._ENV_BACKEND_QUAD =>
-                    saved[:quad]) do
+                    saved[:quad], SW._ENV_BACKEND_MPFR => nothing) do
                     @test SW._configure_backends_from_env!()
                     @test SW.backend_library() == saved[:double]
                     @test SW.backend_library(precision = :quad) == saved[:quad]
                 end
                 withenv(SW._ENV_BACKEND_DOUBLE => nothing, SW._ENV_BACKEND_QUAD =>
-                    nothing) do
+                    nothing, SW._ENV_BACKEND_MPFR => nothing) do
                     @test !SW._configure_backends_from_env!()
+                end
+                withenv(SW._ENV_BACKEND_DOUBLE => nothing, SW._ENV_BACKEND_QUAD => nothing,
+                    SW._ENV_BACKEND_MPFR => saved[:mpfr]) do
+                    @test SW._configure_backends_from_env!() == (saved[:mpfr] !== nothing)
+                    saved[:mpfr] === nothing || @test SW.backend_library(; precision = :mpfr) == saved[:mpfr]
                 end
                 SW._backend_libraries[:double] = nothing
                 @test_throws r"No backend library configured" SW._require_backend_library(:double)
@@ -107,16 +129,21 @@ if TEST_GROUP in ("all", "api-and-precision")
                     @test SW._backend_filename("wave", kernel) == expected
                 end
                 mktempdir() do directory
-                    SW._backend_libraries[:double] = SW._backend_libraries[:quad] = nothing
+                    SW._backend_libraries[:double] = SW._backend_libraries[:quad] = SW._backend_libraries[:mpfr] = nothing
                     @test !SW._configure_backends_from_local_build!(directory)
                     @test SW.backend_library() === nothing
                     @test SW.backend_library(precision = :quad) === nothing
+                    @test SW.backend_library(precision = :mpfr) === nothing
                     # Discovery only checks filenames. Never load this placeholder.
                     candidate = joinpath(directory, SW._backend_filename("spheroidal_batch_double"))
                     touch(candidate)
                     @test SW._configure_backends_from_local_build!(directory)
                     @test SW.backend_library() == candidate
                     @test SW.backend_library(precision = :quad) === nothing
+                    mpfr_candidate = joinpath(directory, SW._backend_filename("spheroidal_batch_mpfr"))
+                    touch(mpfr_candidate)
+                    @test SW._configure_backends_from_local_build!(directory)
+                    @test SW.backend_library(precision = :mpfr) == mpfr_candidate
                 end
             finally
                 merge!(SW._backend_libraries, saved)
@@ -482,9 +509,44 @@ if TEST_GROUP in ("all", "api-and-precision")
                 0, 1, 1.0 + 0.1im, [-0.1]; spheroid = :oblate, precision = :double, kind = 1)
         end
     end
-
+end
+if test_group_selected("quad-and-domain")
     # Run tests that change BigFloat defaults or backend selection serially.
     include("quad_precision.jl")
+end
+if test_group_selected("arbitrary-precision")
+    include("arbitrary_precision.jl")
+end
+if test_group_selected("precision-quantities")
+    include("precision_quantities.jl")
+end
+if test_group_selected("precision-edge-cases")
+    include("precision_edge_cases.jl")
+end
+let cases = ("precision-diagnostics" => "accuracy,roots", "precision-curvature" => "curvature",
+        "precision-complex-curvature" => "complex-curvature",
+        "precision-eigen-differences" => "eigen-differences", "precision-wave-differences" => "wave-differences")
+    selected = [selection for (group, selection) in cases if test_group_selected(group)]
+    if !isempty(selected)
+        withenv("SPHEROIDALWAVES_PRECISION_API_CASE" => join(selected, ',')) do
+            include("precision_api.jl")
+        end
+    end
+end
+if "all" in TEST_GROUPS
+    include("precision_waves.jl")
+else
+    cases = ("precision-wave-references" => "references",
+        "precision-wave-sensitivities" => "sensitivities",
+        "precision-wave-behavior" => "derivatives,static,dispatch,storage,settings")
+    selected = [selection for (group, selection) in cases if test_group_selected(group)]
+    if !isempty(selected)
+        withenv("SPHEROIDALWAVES_PRECISION_CASE" => join(selected, ',')) do
+            include("precision_waves.jl")
+        end
+    end
+end
+if test_group_selected("quad-and-domain")
     include("angular_precision.jl")
     include("numerical_domain.jl")
 end
@@ -492,12 +554,14 @@ end
 # Independent numerical testsets share the process and its compiled methods.
 # Queue individual testsets so long files cannot leave the other workers idle.
 let file_groups = (
-        # Accuracy and regression checks reuse the API/precision group's methods.
-        "api-and-precision" => ["accuracy.jl", "numerical_regressions.jl"],
+        "accuracy-diagnostics" => ["accuracy.jl"],
+        "numerical-regressions" => ["numerical_regressions.jl"],
+        "angular-and-coefficients" => ["angular_conventions.jl"],
         "functions-and-coefficients" =>
-            ["angular_conventions.jl", "radial_domain.jl", "radial_hankel.jl",
-                "degree_ranges.jl", "degree_batch.jl", "angular_second_kind.jl",
-                "oblate_precision.jl", "integral_eigenvalues.jl"],
+            ["radial_domain.jl", "radial_hankel.jl", "degree_ranges.jl"],
+        "degree-batches" => ["degree_batch.jl"],
+        "functions-and-coefficients" =>
+            ["angular_second_kind.jl", "oblate_precision.jl", "integral_eigenvalues.jl"],
         "parameter-derivatives" =>
             ["parameter_derivatives.jl",
                 "angular_parameter_derivatives.jl", "radial_parameter_derivatives.jl",
@@ -512,16 +576,20 @@ let file_groups = (
            expression.args[1] === Symbol("@testset")
             if expression.args[3] in serial_testsets
                 delete!(serial_testsets, expression.args[3])
-                return TEST_GROUP in ("all", "api-and-precision") ? expression : nothing
+                return test_group_selected("accuracy-and-roots") ? expression : nothing
             end
-            # Keep complex-coordinate Jacobians with continuation and endpoint
-            # checks so each job compiles the numerical methods it needs.
-            group = expression.args[3] in
-                    ("Complex angular parameter sensitivities",
-                "Complex coordinate parameter sensitivities",
-                "Complex-coordinate Jacobian diagnostics keyword") ?
-                    "coordinates-and-endpoints" : current_group[]
-            if TEST_GROUP == "all" || TEST_GROUP == group
+            # Keep costly derivative groups separate on slower runners.
+            group = if expression.args[3] in ("Complex angular parameter sensitivities",
+                    "Complex coordinate parameter sensitivities",
+                    "Complex-coordinate Jacobian diagnostics keyword")
+                "coordinate-sensitivities"
+            elseif expression.args[3] in ("Static radial sensitivities",
+                    "Second parameter derivatives", "Second integral eigenvalue derivatives")
+                "static-and-second-derivatives"
+            else
+                current_group[]
+            end
+            if test_group_selected(group)
                 push!(testsets, expression)
             end
             return nothing

@@ -39,9 +39,9 @@ function _accuracy_epsilon(precision)
     max(_SWFloat(2)^(-112), _SWFloat(eps(BigFloat))) : _SWFloat(eps(Float64))
 end
 
-function _accuracy_unavailable(status)
-    return (; digits = -1, absolute_error = BigFloat(NaN),
-        relative_error = BigFloat(NaN), status)
+function _accuracy_unavailable(status, bits = Base.precision(BigFloat))
+    return (; digits = -1, absolute_error = BigFloat(NaN; precision = bits),
+        relative_error = BigFloat(NaN; precision = bits), status)
 end
 
 function _accuracy_singularities(m, point, target, spheroid, kind)
@@ -95,6 +95,55 @@ function _accuracy_refinement(calculate)
         exception isa Union{ErrorException, DomainError, SingularException} || rethrow()
         return nothing
     end
+end
+
+function _accuracy_component_at_precision(actual, coarse, refined, bits, singular)
+    singular && return _accuracy_unavailable(:singularity, bits)
+    isfinite(actual) || return _accuracy_unavailable(:nonfinite, bits)
+    coarse===nothing && return _accuracy_unavailable(:refinement_failed, bits)
+    a, b, r = Complex{_SWFloat}.((actual, coarse, refined))
+    all(isfinite, (b, r)) || return _accuracy_unavailable(:refinement_failed, bits)
+    scale = max(abs(a), abs(b), abs(r))
+    change = abs(b-r)
+    epsilon = ldexp(one(_SWFloat), 1-bits)
+    change<=epsilon*scale || return _accuracy_unavailable(:refinement_failed, bits)
+    uncertainty = max(4abs(a-r), 4change, epsilon*scale)
+    relative = iszero(r) ? _SWFloat(NaN) : uncertainty/abs(r)
+    maximum_digits = floor(Int, bits*log10(_SWFloat(2)))
+    digits = isnan(relative) ? -1 : iszero(relative) ? maximum_digits :
+        clamp(floor(Int, -log10(relative)), 0, maximum_digits)
+    (; digits, absolute_error = _round_to_bigfloat(uncertainty, bits),
+        relative_error = _round_to_bigfloat(relative, bits), status = :estimated)
+end
+
+function _accuracy_at_precision(m, n, c, points, spheroid, precision, target, kind,
+        normalize, normalization, diagnostics, bits, max_terms; compare = _accuracy_refinement)
+    bits = _validate_precision_bits(bits)
+    target in (:angular, :radial) || throw(ArgumentError("target must be :angular or :radial"))
+    target===:angular && normalization!==:standard &&
+        throw(ArgumentError("radial normalization does not apply to angular functions"))
+    evaluate(p) = target===:angular ?
+        smn(m, n, c, points; spheroid, precision, kind, normalize, precision_bits = p, max_terms) :
+        rmn(m, n, c, points; spheroid, precision, kind, normalization, precision_bits = p, max_terms)
+    original = evaluate(bits)
+    comparison = compare() do
+        (; coarse = evaluate(bits+32), refined = evaluate(bits+64))
+    end
+    records = _with_swprecision(bits+96) do
+        map(eachindex(points)) do i
+            singular = _accuracy_singularities(m, points[i], target, spheroid, kind)
+            components = map((:value, :derivative), singular) do name, is_singular
+                coarse = comparison===nothing ? nothing : getproperty(comparison.coarse, name)[i]
+                refined = comparison===nothing ? nothing : getproperty(comparison.refined, name)[i]
+                _accuracy_component_at_precision(getproperty(original, name)[i],
+                    coarse, refined, bits, is_singular)
+            end
+            (; method = :precision_refinement, value = components[1], derivative = components[2],
+                working_precision = comparison===nothing ? nothing : (bits+32, bits+64), terms = nothing, max_terms)
+        end
+    end
+    digits = [record.value.digits for record in records]
+    diagnostics ? (; digits, diagnostics = records) : digits
 end
 
 function _real_accuracy_reference(m, n, c, points, spheroid, precision, target,

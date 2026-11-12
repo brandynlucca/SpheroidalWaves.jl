@@ -55,6 +55,103 @@ function _integral_eigenvalue_data(n, c, precision; sensitivity = false)
     error("Integral-operator eigenvalue did not converge, including its distance from zero and one")
 end
 
+function _validate_integral_precision_arguments(m, n, c, spheroid, operator, form)
+    m==0 && n>=0 || throw(ArgumentError("integral operators require m=0 and n>=0"))
+    spheroid===:prolate || throw(ArgumentError("integral operators require spheroid=:prolate"))
+    c isa Real && isfinite(c) && c>=0 ||
+        throw(DomainError(c, "integral operators require finite real c >= 0"))
+    form in (:value, :log, :complement) || throw(ArgumentError("invalid integral eigenvalue form"))
+    operator===:fourier && form!==:value &&
+        throw(ArgumentError("the Fourier operator supports only form=:value"))
+end
+
+function _integral_data_at_precision(n, c, precision, bits, max_terms;
+        sensitivity = false, curvature = false)
+    valid(result) = result.amplitude>0 && 0<result.concentration<1 && result.complement>0
+    _refine_quantity_at_precision(bits; valid) do workbits
+        eigenpair = _solve_coefficient_eigenpair_at_precision(
+            0, n, c, :prolate, precision, workbits, nothing, max_terms, sensitivity || curvature)
+        _with_swprecision(Base.precision(real(eigenpair.lambda))) do
+            parameter = _SWFloat(c)
+            origin = _evaluate_coefficient_vector(eigenpair, eigenpair.v, [0])
+            ratio = iseven(n) ? sqrt(_SWFloat(2))*first(eigenpair.v)/only(origin.value) :
+                    parameter*sqrt(_SWFloat(2)/3)*first(eigenpair.v)/only(origin.derivative)
+            amplitude = abs(ratio)
+            concentration = parameter*amplitude^2/(2_SWFloat(pi))
+            complement = 1-concentration
+            base = (; amplitude, concentration, complement)
+            sensitivity || curvature || return base
+            endpoint = only(_evaluate_coefficient_vector(eigenpair, eigenpair.v, [1]).value)
+            dlog = 2endpoint^2/parameter
+            dconcentration = amplitude^2*endpoint^2/_SWFloat(pi)
+            damplitude = if n==0 && parameter<1//2
+                dorigin = _evaluate_coefficient_vector(eigenpair, eigenpair.dv, [0])
+                amplitude*(first(eigenpair.dv)/first(eigenpair.v)-only(dorigin.value)/only(origin.value))
+            else
+                amplitude*(endpoint^2-1//2)/parameter
+            end
+            first_derivatives = (; base..., dlog, dconcentration, damplitude)
+            curvature || return first_derivatives
+            dendpoint = only(_evaluate_coefficient_vector(eigenpair, eigenpair.dv, [1]).value)
+            ddlog = 4endpoint*dendpoint/parameter-2endpoint^2/parameter^2
+            ddconcentration = concentration*(dlog^2+ddlog)
+            ddamplitude = amplitude*((damplitude/amplitude)^2+
+                2endpoint*dendpoint/parameter-(endpoint^2-1//2)/parameter^2)
+            (; first_derivatives..., ddlog, ddconcentration, ddamplitude)
+        end
+    end
+end
+
+function _integral_eigenvalue_at_precision(m, n, c, spheroid, precision, operator, form,
+        bits, max_terms)
+    bits = _validate_precision_bits(bits)
+    _validate_integral_precision_arguments(m, n, c, spheroid, operator, form)
+    _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
+    if iszero(c)
+        value = operator===:fourier ? complex(n==0 ? 2 : 0) :
+                form===:complement ? 1 : form===:log ? -Inf : 0
+        return _round_to_bigfloat(value, bits)
+    end
+    data = _integral_data_at_precision(n, c, precision, bits, max_terms)
+    _with_swprecision(Base.precision(data.concentration)) do
+        value = operator===:fourier ? (1, -im, -1, im)[mod(n, 4)+1]*complex(data.amplitude) :
+                form===:value ? data.concentration : form===:complement ? data.complement :
+                data.concentration>1//2 ? log1p(-data.complement) : log(data.concentration)
+        _round_to_bigfloat(value, bits)
+    end
+end
+
+function _integral_eigen_jacobian_at_precision(m, n, c, spheroid, precision, operator, form,
+        bits, max_terms, order)
+    _validate_integral_precision_arguments(m, n, c, spheroid, operator, form)
+    _validate_coefficient_options(m, n, c, spheroid, precision, nothing, max_terms, :orthonormal)
+    if iszero(c)
+        return _with_swprecision(bits+64) do
+            value = if order==2
+                operator===:fourier ? complex(n==0 ? -_SWFloat(2)/9 : n==2 ? -_SWFloat(8)/45 : zero(_SWFloat)) :
+                form===:log ? _SWFloat(-Inf) : zero(_SWFloat)
+            elseif operator===:fourier
+                n==1 ? complex(zero(_SWFloat), -_SWFloat(2)/3) : complex(zero(_SWFloat))
+            elseif form===:log
+                _SWFloat(Inf)
+            else
+                (form===:complement ? -1 : 1)*(n==0 ? 2/_SWFloat(pi) : zero(_SWFloat))
+            end
+            _round_to_bigfloat(value, bits)
+        end
+    end
+    data = _integral_data_at_precision(n, c, precision, bits, max_terms;
+        sensitivity = true, curvature = order==2)
+    _with_swprecision(Base.precision(data.concentration)) do
+        amplitude = order==1 ? data.damplitude : data.ddamplitude
+        concentration = order==1 ? data.dconcentration : data.ddconcentration
+        logarithm = order==1 ? data.dlog : data.ddlog
+        value = operator===:fourier ? (1, -im, -1, im)[mod(n, 4)+1]*complex(amplitude) :
+                form===:log ? logarithm : form===:complement ? -concentration : concentration
+        _round_to_bigfloat(value, bits)
+    end
+end
+
 function _integral_parameter(m, n, c, spheroid, precision, operator, form)
     m==0 && n>=0 || throw(ArgumentError("integral operators require m=0 and n>=0"))
     spheroid===:prolate ||

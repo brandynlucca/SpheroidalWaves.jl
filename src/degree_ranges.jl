@@ -156,12 +156,16 @@ Use `precision=:quad` to request quad precision with the same numeric arguments.
 function smn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex},
         eta::AbstractVector{<:Real}; spheroid::Symbol = :prolate,
         precision::Symbol = :double, normalize::Bool = false, kind::Integer = 1, scaled::Bool = false,
-        logderivative::Bool = false, second_derivative::Bool = false, derivatives::Integer = 1)
+        logderivative::Bool = false, second_derivative::Bool = false, derivatives::Integer = 1,
+        precision_bits = nothing, max_terms::Integer = 512)
     _validate_degree_range(m, n, eta, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     all(x -> abs(x) <= 1, eta) || throw(ArgumentError("eta must lie in [-1, 1]"))
     kind in (1, 2) || throw(ArgumentError("angular kind must be 1 or 2"))
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    precision_bits === nothing || return _stack_wave_results([smn(m, degree, c, eta;
+        spheroid, precision, precision_bits, max_terms, normalize, kind, scaled,
+        logderivative, second_derivative, derivatives) for degree in n])
     derivatives > 2 && return _stack_wave_results([smn(m, degree, c, eta;
                                     spheroid, precision, normalize, kind, scaled,
                                     logderivative, derivatives) for degree in n])
@@ -224,13 +228,16 @@ function rmn(m::Integer, n::AbstractUnitRange{<:Integer}, c::Union{Real, Complex
         x::AbstractVector{<:Real}; spheroid::Symbol = :prolate,
         precision::Symbol = :double, kind::Integer = 1, scaled::Bool = false,
         logderivative::Bool = false, second_derivative::Bool = false, derivatives::Integer = 1,
-        normalization::Symbol = :standard)
+        normalization::Symbol = :standard, precision_bits = nothing, max_terms::Integer = 512)
     _validate_degree_range(m, n, x, spheroid, precision)
     isfinite(c) || throw(ArgumentError("c must be finite"))
     kind in 1:4 || throw(ArgumentError("kind must be in 1:4"))
     _validate_wave_arguments(
         m, first(n), c, x, spheroid, precision, :radial; kind, normalization)
     derivatives in 1:4 || throw(ArgumentError("derivatives must be in 1:4"))
+    precision_bits === nothing || return _stack_wave_results([rmn(m, degree, c, x;
+        spheroid, precision, precision_bits, max_terms, kind, scaled, logderivative,
+        second_derivative, derivatives, normalization) for degree in n])
     (derivatives > 2 || normalization === :static) &&
         return _stack_wave_results([rmn(m, degree, c, x;
                                         spheroid, precision, kind, scaled, logderivative,
@@ -357,7 +364,8 @@ function spheroidal(m::Integer, n::Union{Integer, AbstractUnitRange{<:Integer}},
         c::Union{Real, Complex}; eta = nothing, x = nothing, coefficients::Bool = false,
         spheroid::Symbol = :prolate, precision::Symbol = :double, normalize::Bool = false,
         kind::Integer = 1, derivatives::Bool = true, parameter_derivatives::Bool = false,
-        basis::Symbol = :ferrers, rtol = nothing, max_terms::Integer = 512)
+        basis::Symbol = :ferrers, rtol = nothing, max_terms::Integer = 512,
+        precision_bits = nothing)
     eta === nothing && x === nothing && !coefficients &&
         throw(ArgumentError("request eta, x, or coefficients"))
     # Validate geometry before applying its angular and radial coordinate domains.
@@ -384,6 +392,25 @@ function spheroidal(m::Integer, n::Union{Integer, AbstractUnitRange{<:Integer}},
     end
     coefficients && _validate_coefficient_options(m, last(degrees), c, spheroid,
         precision, rtol, max_terms, basis)
+    if precision_bits !== nothing
+        result = NamedTuple()
+        if eta !== nothing
+            angular = smn(m, n, c, angular_points; spheroid, precision, precision_bits, max_terms, normalize)
+            derivatives || (angular = (; value = angular.value))
+            result = (; result..., angular)
+        end
+        if x !== nothing
+            radial = rmn(m, n, c, radial_points; spheroid, precision, precision_bits, max_terms, kind)
+            derivatives || (radial = (; value = radial.value))
+            result = (; result..., radial)
+        end
+        if coefficients
+            values = dmn(m, n, c; spheroid, precision, precision_bits, normalize, rtol,
+                max_terms, derivatives = parameter_derivatives, basis)
+            result = (; result..., coefficients = values)
+        end
+        return result
+    end
     # Native coefficients contain values only, so sensitivities use the guarded solver.
     terms = coefficients && !parameter_derivatives ?
             min(max_terms, max(32, div(last(degrees)-m, 2)+ceil(Int, abs(c))+32)) : 0

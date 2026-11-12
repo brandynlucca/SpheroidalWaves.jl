@@ -1,7 +1,6 @@
 # Mathematical basis and usage
 
-Use integer order and degree `0≤m≤n`.
-The parameter `c` and evaluation coordinates may be real or complex. Write `σ=1` for prolate and `σ=-1` for oblate geometry.
+Integer order and degree are bounded by $0 \leq m \leq n$. The parameter $c$ and evaluation coordinates may be real or complex. The parameter $\sigma$ indicates geometry where $\sigma = 1$ denotes prolate while $\sigma = -1$ indicates oblate.
 
 ## [Precision and outputs](@id precision-and-outputs)
 
@@ -12,8 +11,7 @@ s.value
 s.derivative
 ~~~
 
-`value` and `derivative` are vectors; scalar coordinates give length-one vectors.
-The derivative is with respect to the coordinate.
+`value` and `derivative` are vectors; scalar coordinates give length-one vectors. The derivative is with respect to the coordinate.
 
 | Precision | Real angular values and eigenvalues | Complex values and radial outputs |
 |:--|:--|:--|
@@ -22,7 +20,7 @@ The derivative is with respect to the coordinate.
 
 Input precision is what the arguments retain, calculation precision is the arithmetic used, output precision is what returned numbers store, and accuracy is agreement with the mathematical result.
 
-`precision=:quad` uses fixed native quad arithmetic (113 significand bits, about 34 decimal digits). The caller's `BigFloat` precision and rounding control output components and some Julia calculations. Increasing them does not increase native precision or guarantee more accurate digits. `scaled=true` extends range without adding accuracy.
+Without `precision_bits`, `precision=:quad` uses fixed native quad arithmetic (113 significand bits, about 34 decimal digits). The caller's `BigFloat` precision and rounding control output components and some Julia calculations. Increasing them does not increase native precision or guarantee more accurate digits. `scaled=true` extends range without adding accuracy.
 
 | Function | Effect of `BigFloat` settings with `precision=:quad` |
 |:--|:--|
@@ -51,7 +49,21 @@ end
 
 The difference measures agreement, not an accuracy guarantee. `accuracy` provides value estimates, not rigorous bounds or derivative certification.
 
-A future arbitrary-precision request could specify a bit count explicitly while preserving `:double` defaults and existing `:quad` behavior. It would require refinement beyond native quad accuracy. This capability is not currently available, and arbitrary precision alone guarantees neither rigorous bounds nor correct rounding.
+### Explicit arbitrary precision
+
+Use `precision_bits=p` ($p \geq 2$) with `smn`, `rmn`, `spheroidal`, `eigenvalue`, `dmn`, `amn`, `kmn`, `eigenvalue_sweep`, `find_c_for_eigenvalue`, `radial_wronskian`, `accuracy`, coordinate-zero searches, and Jacobians of either parameter-derivative order. Supplying $h$ selects finite differences; the step and adaptive tolerances then control derivative accuracy separately from arithmetic precision. Automatic second-order wave Jacobians refine a fourth-order stencil of analytic first derivatives.
+
+~~~julia
+lambda = eigenvalue(1, 2, 5//4; precision_bits=256)
+d = dmn(1, 2, 5//4; precision_bits=256, normalize=true)
+precision(lambda) # 256
+~~~
+
+Outputs have `p`-bit `BigFloat` components regardless of ambient precision. Use rational or sufficiently precise inputs. Guarded calculations refine precision and expansion length; failed precision refinement or insufficient `max_terms` throws. Branch continuation can fail near coalescing modes. Defaults stay unchanged; rigorous error bounds and correct rounding are not guaranteed.
+
+Higher precision costs more time and memory. Native workspaces and retained caches have byte budgets; oversized requests fail explicitly.
+
+CMake compiles the shared Fortran kernels for each backend. Source builds need MPFR, MPC, and GMP development libraries. Normal installations through the Julia General Registry use the libraries supplied by `SpheroidalWaves_jll`.
 
 ## Parallel evaluation
 
@@ -76,14 +88,11 @@ Keep shared inputs unchanged and use separate output buffers for each task.
 \qquad -1<\eta<1.
 ~~~
 
-The separation constant satisfies `λₘₙ(0)=n(n+1)`.
-The DLMF parameter is `γ²=σc²`;
-see [DLMF 30.2](https://dlmf.nist.gov/30.2).
+The separation constant satisfies $\lambda_{mn}(0) = n(n+1)$. The DLMF parameter is $\gamma^2 = \sigma c^2$; see [DLMF 30.2](https://dlmf.nist.gov/30.2).
 
 ### First kind
 
-`kind=1` is the default. It uses Meixner–Schäfke normalization and includes
-the Condon–Shortley phase `(-1)^m`:
+`kind=1` is the default. It uses Meixner–Schäfke normalization and includes the Condon–Shortley phase $(-1)^m$:
 
 ~~~math
 S_{mn}(0,\eta)=\mathsf P_n^m(\eta),\qquad
@@ -97,10 +106,7 @@ For real `c` and fixed `m`:
 =\frac{2(n+m)!}{(2n+1)(n-m)!}\,\delta_{nk}.
 ~~~
 
-`normalize=true` multiplies by the reciprocal square root of this norm,
-giving unit norm. For complex `c`, normalization is continued analytically;
-it is not a unit integral of the squared magnitude.
-See [DLMF 30.4](https://dlmf.nist.gov/30.4).
+`normalize=true` multiplies by the reciprocal square root of this norm, giving unit norm. For complex `c`, normalization is continued analytically; it is not a unit integral of the squared magnitude. See [DLMF 30.4](https://dlmf.nist.gov/30.4).
 
 ~~~julia
 smn(1, 1, 0.0, 0.3).value  # approximately [-0.953939201416946]
@@ -120,10 +126,9 @@ The regular angular solution factors as $S_{mn}(c,\eta)=(1-\eta^2)^{m/2}F(\eta)$
 | $m=2$ | Zero | Finite, generally nonzero |
 | $m>2$ | Zero | Zero |
 
-For $m=2$, differentiation gives $S'_{2n}(c,1)=-2F(1)$ and $S'_{2n}(c,-1)=2F(-1)$. For example, `smn(2,3,0.65,1)` returns a zero value and a derivative of approximately $-29.53$. At $c=0$, $S_{23}(0,\eta)=15\eta(1-\eta^2)$ has the endpoint derivative $-30$. The singular coefficients of the differential equation do not require the
-regular solution's derivative to diverge. Other evaluators may omit these limits or return zero at an endpoint where the slope is nonzero.
+For $m=2$, differentiation gives $S'_{2n}(c,1)=-2F(1)$ and $S'_{2n}(c,-1)=2F(-1)$. For example, `smn(2,3,0.65,1)` returns a zero value and a derivative of approximately $-29.53$. At $c=0$, $S_{23}(0,\eta)=15\eta(1-\eta^2)$ has the endpoint derivative $-30$. The singular coefficients of the differential equation do not require the regular solution's derivative to diverge. Other evaluators may omit these limits or return zero at an endpoint where the slope is nonzero.
 
-Higher coordinate derivatives have their own finite or divergent limits. `accuracy(...; target=:angular)` returns `-1` at endpoints because no calibrated digit estimate is available there.
+Higher coordinate derivatives have their own finite or divergent limits. `accuracy(...; target=:angular)` returns $-1$ at endpoints because no calibrated digit estimate is available there.
 
 ### Second kind
 
@@ -145,15 +150,10 @@ Q(0,\eta)=\mathsf Q_n^m(\eta),
 =\frac{(n+m)!}{(n-m)!}A_n^m A_n^{-m}.
 ~~~
 
-Here `P` is the default first-kind function, and `A` denotes the joining sums
-in [DLMF 30.11.4](https://dlmf.nist.gov/30.11#E4).
-The second-kind convention is specified by
-[DLMF 30.5](https://dlmf.nist.gov/30.5) and [30.8(ii)](https://dlmf.nist.gov/30.8#ii).
+Here $P$ is the default first-kind function, and $A$ denotes the joining sums in [DLMF 30.11.4](https://dlmf.nist.gov/30.11#E4). The second-kind convention is specified by [DLMF 30.5](https://dlmf.nist.gov/30.5) and [30.8(ii)](https://dlmf.nist.gov/30.8#ii).
 
 !!! warning "Second-kind normalization and endpoints"
-    `normalize=true` is unsupported for `kind=2`.
-    Values and coordinate derivatives diverge at `η=±1` and return signed one-sided
-    infinities. Singular or numerically unresolved normalization raises an error.
+    `normalize=true` is unsupported for `kind=2`. Values and coordinate derivatives diverge at $\eta \pm 1$ and return signed one-sided infinities. Singular or numerically unresolved normalization raises an error.
 
 ## Radial functions
 
@@ -166,10 +166,10 @@ The second-kind convention is specified by
 
 | `kind` | Function |
 |:--|:--|
-| `1` (default) | First kind `R₁` |
-| `2` | Second kind `R₂` |
-| `3` | `R₁+iR₂` |
-| `4` | `R₁-iR₂` |
+| `1` (default) | First kind: $R^{(1)}_{mn}$ |
+| `2` | Second kind: $R^{(2)}_{mn}$ |
+| `3` | Third kind: $R^{(3)}_{mn} = R^{(1)}_{mn} + i R^{(2)}_{mn}$ |
+| `4` | Fourth kind: $R^{(4)}_{mn} = R^{(1)}_{mn} - i R^{(2)}_{mn}$ |
 
 ~~~julia
 rmn(1, 2, 1.25, [1.5, 2.0]; kind=2, precision=:quad)
@@ -177,11 +177,9 @@ rmn(1, 2, 1.25, [0.0, 1.0]; spheroid=:oblate, kind=3, precision=:quad)
 ~~~
 
 !!! warning "Radial domain"
-    Real prolate coordinates satisfy `x≥1`, real oblate coordinates `x≥0`.
-    At prolate `x=1`, the first kind uses one-sided limits. Kinds 2–4 return `NaN`.
-    Standard normalization requires `c≠0`.
+    Real prolate coordinates satisfy $x \geq 1$, real oblate coordinates $x \geq 0$. At prolate $x=1$, the first kind uses one-sided limits. Kinds 2–4 return `NaN`. Standard normalization requires $c \neq 0$.
 
-`normalization=:static` evaluates $c^{-n}R_1$ or $c^{n+1}R_2$, including their finite limits at `c=0`. It supports kinds 1 and 2 in `rmn`, `jacobian_rmn`, `radial_wronskian`, and radial `accuracy`.
+`normalization=:static` evaluates $c^{-n}R_1$ or $c^{n+1}R_2$, including their finite limits at $c=0$. It supports kinds 1 and 2 in `rmn`, `jacobian_rmn`, `radial_wronskian`, and radial `accuracy`.
 
 ~~~julia
 rmn(0, 1, 0, 2; normalization=:static) # value ≈ [2/3]
@@ -197,18 +195,16 @@ Complex coordinates continue the real-coordinate normalization on these cuts:
 | Prolate radial | Real segment `-1 ≤ z < 1` |
 | Oblate radial | Imaginary rays `z=iy`, `abs(y) ≥ 1` |
 
-Angular `z=±1` and prolate `z=1` retain their one-sided endpoint conventions. Oblate continuation passes through `z=0`. Coordinate order does not change the branch. Complex coordinates support the same derivative, scaling, and degree-range options. Use `accuracy(...; diagnostics=true)` for convergence and conditioning estimates.
+Angular $z = \pm 1$ and prolate $z=1$ retain their one-sided endpoint conventions. Oblate continuation passes through $z=0$. Coordinate order does not change the branch. Complex coordinates support the same derivative, scaling, and degree-range options. Use `accuracy(...; diagnostics=true)` for convergence and conditioning estimates.
 
-Validation samples cover both geometries, real and complex parameters and coordinates, and supported kinds and normalizations. Difficult cases include small parameters, angular `c=200`, nonzero-parameter `m=n=50` and `n=60`, scaled `m=n=200` at `c=0`, cancellation, zeros, endpoints, and cut approaches at distances `2^-12` and `2^-40`. Values and derivatives are checked separately against exact or independent high-precision references, using absolute errors near zeros. These samples do not establish accuracy throughout the domain.
+Validation samples cover both geometries, real and complex parameters and coordinates, and supported kinds and normalizations. Difficult cases include small parameters, angular $c=200$, nonzero-parameter $m=n=50$ and $n=60$, scaled $m=n=200$ at $c=0$, cancellation, zeros, endpoints, and cut approaches at distances $2^{-12}$ and $2^{-40}$. Values and derivatives are checked separately against exact or independent high-precision references, using absolute errors near zeros. These samples do not establish accuracy throughout the domain.
 
 ~~~julia
 smn(1, 2, 1.25, 0.3 + 0.2im; derivatives=2)
 rmn(1, 2, 1.25, [1.5 + 0.2im, 2.0 - 0.1im]; kind=3)
 ~~~
 
-For complex `c`, scalar `eigenvalue`, `smn`, and `rmn` follow degree
-`n` from `real(c)` along the vertical segment to `c`.
-Angular normalization and phase follow that branch.
+For complex `c`, scalar `eigenvalue`, `smn`, and `rmn` follow degree `n` from `real(c)` along the vertical segment to `c`. Angular normalization and phase follow that branch.
 
 !!! warning "Branch points"
     Eigenmodes can exchange around a complex branch point.
@@ -217,6 +213,4 @@ Angular normalization and phase follow that branch.
 
 ## Further calculations
 
-[Mathematical tools](mathematical-tools.md) covers eigenvalue operators,
-parameter derivatives, inverse bandwidth, sweeps, degree ranges, scaled values,
-logarithmic derivatives, higher coordinate derivatives, and accuracy diagnostics.
+[Mathematical tools](mathematical-tools.md) covers eigenvalue operators, parameter derivatives, inverse bandwidth, sweeps, degree ranges, scaled values, logarithmic derivatives, higher coordinate derivatives, and accuracy diagnostics. 

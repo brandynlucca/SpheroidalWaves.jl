@@ -1,8 +1,13 @@
 ! Exercise cache misses, reuse, and replacement on independent OpenMP threads.
 ! Guard cells catch a node-count/tolerance swap even for small quadrature rules.
 program native_cache
-  use oblate_swf, only: gauss_cached
+  use oblate_swf, only: oblfcn, gauss_cached, gauss_cache, pleg_cache, store_pleg_cache, &
+    load_pleg_cache, find_pleg_cache, auxiliary_cache_limit_bytes, reserve_cache_bytes, add_cache_bytes
+  use prolate_swf, only: profcn
+  use complex_oblate_swf, only: coblfcn
+  use complex_prolate_swf, only: cprofcn
   use oblate_parameters, only: knd
+  use, intrinsic :: iso_fortran_env, only: int64
   use, intrinsic :: ieee_arithmetic, only: ieee_is_finite
   implicit none
   integer :: iteration, failures
@@ -13,11 +18,16 @@ program native_cache
     failures = failures + check_rule(iteration)
   end do
 !$omp end parallel do
+  failures = failures + check_pleg_storage()
+  failures = failures + check_native_modes(0,1,1.0_knd,1.0_knd,2.0_knd)
+  failures = failures + check_native_modes(0,2,1.0_knd,1.0_knd,2.0_knd)
+  failures = failures + check_native_modes(0,3,1.0_knd,1.0_knd,2.0_knd)
+  failures = failures + check_native_modes(3,10,20.0_knd,0.25_knd,0.25_knd)
   if (failures /= 0) then
-    print *, 'Quadrature cache failures:', failures
+    print *, 'Native cache and mode failures:', failures
     stop 1
   end if
-  print *, 'Passed 256 quadrature cache checks, including reuse and guard cells'
+  print *, 'Passed quadrature, Legendre prefix, cache memory, and mode checks'
 
 contains
   integer function check_rule(iteration) result(errors)
@@ -50,4 +60,166 @@ contains
       end if
     end do
   end function check_rule
+
+  integer function check_pleg_storage() result(errors)
+    integer, parameter :: capacity=512, retained=16
+    real(knd) :: arguments(1), pr(1,capacity), pdr(1,capacity), coefficients(capacity,8)
+    real(knd) :: actual_pr(1,capacity), actual_pdr(1,capacity), actual_coefficients(capacity,8)
+    real(knd) :: pnorm(1), pdnorm(1), actual_pnorm(1), actual_pdnorm(1), actual_arguments(1)
+    integer :: ipnorm(1), ipdnorm(1), actual_ipnorm(1), actual_ipdnorm(1), index, column, slot
+    integer(int64) :: saved_budget, expected_bytes, bytes
+    logical :: fits
+    errors=0
+    saved_budget=auxiliary_cache_limit_bytes
+    auxiliary_cache_limit_bytes=0_int64
+    fits=reserve_cache_bytes(0_int64)
+    if(.not.fits) errors=errors+1
+    auxiliary_cache_limit_bytes=saved_budget
+    arguments=0.25_knd
+    pnorm=2.0_knd
+    pdnorm=3.0_knd
+    ipnorm=4
+    ipdnorm=5
+    do index=1,capacity
+      pr(1,index)=real(index,knd)/8
+      pdr(1,index)=real(index,knd)/4
+      do column=1,8
+        coefficients(index,column)=real(index+column,knd)
+      end do
+    end do
+    call store_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity,pr,pdr,pdnorm,ipdnorm,pnorm,ipnorm, &
+      coefficients(:,1),coefficients(:,2),coefficients(:,3),coefficients(:,4), &
+      coefficients(:,5),coefficients(:,6),coefficients(:,7),coefficients(:,8))
+    slot=find_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity)
+    if(slot==0) then
+      errors=errors+1
+    else
+      expected_bytes=int(10*retained+3,int64)*(storage_size(1.0_knd)/8)+2*(storage_size(1)/8)
+      if(pleg_cache(slot)%bytes/=expected_bytes.or.pleg_cache(slot)%maxp/=capacity) errors=errors+1
+      if(size(pleg_cache(slot)%pr,2)/=retained.or.size(pleg_cache(slot)%pdr,2)/=retained.or. &
+        size(pleg_cache(slot)%alpha)/=retained.or.size(pleg_cache(slot)%coefe)/=retained) errors=errors+1
+      call load_pleg_cache(slot,1,1,retained,capacity,actual_arguments,actual_pr,actual_pdr, &
+        actual_pdnorm,actual_ipdnorm,actual_pnorm,actual_ipnorm,actual_coefficients(:,1), &
+        actual_coefficients(:,2),actual_coefficients(:,3),actual_coefficients(:,4), &
+        actual_coefficients(:,5),actual_coefficients(:,6),actual_coefficients(:,7),actual_coefficients(:,8))
+      if(any(actual_arguments/=arguments).or.any(actual_pr(:,1:retained)/=pr(:,1:retained)).or. &
+        any(actual_pdr(:,1:retained)/=pdr(:,1:retained)).or. &
+        any(actual_coefficients(1:retained,:)/=coefficients(1:retained,:)).or. &
+        any(actual_pnorm/=pnorm).or.any(actual_pdnorm/=pdnorm).or. &
+        any(actual_ipnorm/=ipnorm).or.any(actual_ipdnorm/=ipdnorm)) errors=errors+1
+      if(find_pleg_cache(0,3,15,300,arguments,1,1,retained/2,capacity/2)==0) errors=errors+1
+      if(find_pleg_cache(0,3,15,300,arguments,1,1,retained+1,capacity)/=0) errors=errors+1
+      if(find_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity+1)/=0) errors=errors+1
+      auxiliary_cache_limit_bytes=expected_bytes
+      arguments=0.5_knd
+      call store_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity,pr,pdr,pdnorm,ipdnorm,pnorm,ipnorm, &
+      coefficients(:,1),coefficients(:,2),coefficients(:,3),coefficients(:,4), &
+      coefficients(:,5),coefficients(:,6),coefficients(:,7),coefficients(:,8))
+      if(sum(pleg_cache%bytes)+gauss_cache%bytes>auxiliary_cache_limit_bytes) errors=errors+1
+      if(find_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity)==0) errors=errors+1
+      arguments=0.25_knd
+      if(find_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity)/=0) errors=errors+1
+    end if
+    auxiliary_cache_limit_bytes=0_int64
+    fits=reserve_cache_bytes(0_int64)
+    call store_pleg_cache(0,3,15,300,arguments,1,1,retained,capacity,pr,pdr,pdnorm,ipdnorm,pnorm,ipnorm, &
+      coefficients(:,1),coefficients(:,2),coefficients(:,3),coefficients(:,4), &
+      coefficients(:,5),coefficients(:,6),coefficients(:,7),coefficients(:,8))
+    if(.not.fits.or.any(pleg_cache%valid)) errors=errors+1
+    errors=errors+check_rule(2)
+    if(gauss_cache%valid.or.allocated(gauss_cache%x).or.allocated(gauss_cache%w)) errors=errors+1
+    auxiliary_cache_limit_bytes=saved_budget
+    bytes=0_int64
+    if(add_cache_bytes(bytes,huge(0_int64),2)) errors=errors+1
+    if(add_cache_bytes(bytes,8_int64,huge(0),huge(0))) errors=errors+1
+  end function check_pleg_storage
+
+  integer function check_native_modes(m,degrees,c,prolate_x,oblate_x) result(errors)
+    integer, intent(in) :: m,degrees
+    real(knd), intent(in) :: c,prolate_x,oblate_x
+    integer, parameter :: radial_modes(5)=[2,0,0,1,2], angular_modes(5)=[2,0,2,2,2]
+    real(knd) :: x,arguments(1),r1(degrees),r1d(degrees),r2(degrees),r2d(degrees)
+    real(knd) :: s1(degrees,1),s1d(degrees,1),eigenvalues(degrees)
+    complex(knd) :: cc,cr1(degrees),cr1d(degrees),cr2(degrees),cr2d(degrees)
+    complex(knd) :: cs1(degrees,1),cs1d(degrees,1),ceigenvalues(degrees)
+    complex(knd) :: values(degrees,7),reference(degrees,7),wronskian
+    integer :: r1e(degrees),r1de(degrees),r2e(degrees),r2de(degrees),se(degrees,1),sde(degrees,1)
+    integer :: radial_accuracy(degrees),angular_accuracy(degrees,1),angular_derivative_accuracy(degrees,1)
+    integer :: geometry,stage,radial,angular,channel
+    logical :: active(7)
+    errors=0
+    cc=cmplx(c,0.25_knd,knd)
+    arguments=0.25_knd
+    do geometry=0,3
+      x=prolate_x
+      if(mod(geometry,2)==1) x=oblate_x
+      do stage=1,5
+        radial=radial_modes(stage)
+        angular=angular_modes(stage)
+        select case(geometry)
+        case(0)
+          call profcn(c,m,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
+            radial_accuracy,s1,se,s1d,sde,angular_accuracy,eigenvalues)
+        case(1)
+          call oblfcn(c,m,degrees,radial,x,angular,0,1,arguments,r1,r1e,r1d,r1de,r2,r2e,r2d,r2de, &
+            radial_accuracy,s1,se,s1d,sde,angular_accuracy,eigenvalues)
+        case(2)
+          call cprofcn(cc,m,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
+            radial_accuracy,cs1,se,cs1d,sde,angular_accuracy,angular_derivative_accuracy,ceigenvalues)
+        case(3)
+          call coblfcn(cc,m,degrees,radial,x,angular,0,1,arguments,cr1,r1e,cr1d,r1de,cr2,r2e,cr2d,r2de, &
+            radial_accuracy,cs1,se,cs1d,sde,angular_accuracy,angular_derivative_accuracy,ceigenvalues)
+        end select
+        active=[.true.,radial>0,radial>0,radial==2,radial==2,angular>0,angular>0]
+        if(geometry<2) then
+          values(:,1)=eigenvalues
+          if(radial>0) then
+            values(:,2)=r1*10.0_knd**r1e
+            values(:,3)=r1d*10.0_knd**r1de
+          end if
+          if(radial==2) then
+            values(:,4)=r2*10.0_knd**r2e
+            values(:,5)=r2d*10.0_knd**r2de
+          end if
+          if(angular>0) then
+            values(:,6)=s1(:,1)*10.0_knd**se(:,1)
+            values(:,7)=s1d(:,1)*10.0_knd**sde(:,1)
+          end if
+        else
+          values(:,1)=ceigenvalues
+          if(radial>0) then
+            values(:,2)=cr1*10.0_knd**r1e
+            values(:,3)=cr1d*10.0_knd**r1de
+          end if
+          if(radial==2) then
+            values(:,4)=cr2*10.0_knd**r2e
+            values(:,5)=cr2d*10.0_knd**r2de
+          end if
+          if(angular>0) then
+            values(:,6)=cs1(:,1)*10.0_knd**se(:,1)
+            values(:,7)=cs1d(:,1)*10.0_knd**sde(:,1)
+          end if
+        end if
+        if(stage==1) reference=values
+        if(radial==2) then
+          wronskian=1.0_knd/c
+          if(geometry>=2) wronskian=1.0_knd/cc
+          if(mod(geometry,2)==0) then
+            wronskian=wronskian/(x*(x+2))
+          else
+            wronskian=wronskian/(x*x+1)
+          end if
+          if(any(abs((values(:,2)*values(:,5)-values(:,3)*values(:,4))/wronskian-1)> &
+            5.0e-8_knd)) errors=errors+1
+        end if
+        do channel=1,7
+          if(.not.active(channel)) cycle
+          if(.not.all(ieee_is_finite(real(values(:,channel)))).or. &
+            .not.all(ieee_is_finite(aimag(values(:,channel))))) errors=errors+1
+          if(any(abs(values(:,channel)-reference(:,channel))> &
+            5.0e-12_knd*max(1.0_knd,abs(reference(:,channel))))) errors=errors+1
+        end do
+      end do
+    end do
+  end function check_native_modes
 end program native_cache

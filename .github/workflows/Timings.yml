@@ -1,0 +1,166 @@
+name: Focused CI timings
+
+on:
+  workflow_call:
+    inputs:
+      source_run:
+        description: Successful CI artifact producer run
+        required: true
+        type: string
+      julia:
+        description: Julia version used by the artifact producer
+        type: string
+        default: '1'
+      cases:
+        description: JSON array of name, groups, threads, optimize, and optional os/arch values
+        required: true
+        type: string
+      prepare_runtime:
+        description: Package Julia once for the Intel macOS timing jobs
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime:
+    if: inputs.prepare_runtime
+    name: Prepare the Intel Julia runtime
+    runs-on: macos-26-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.julia }}
+          arch: x64
+      - uses: actions/download-artifact@v8
+        with:
+          name: julia-environment-macos-26-intel-x64-${{ inputs.julia }}
+          path: .scratch/ci-environment
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Package the installed Julia runtime
+        shell: bash
+        run: bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+      - uses: actions/upload-artifact@v7
+        with:
+          name: timing-julia-environment-${{ inputs.julia }}
+          path: .scratch/ci-environment/
+          compression-level: 0
+          retention-days: 1
+
+  timing:
+    needs: runtime
+    if: ${{ !cancelled() && (needs.runtime.result == 'success' || needs.runtime.result == 'skipped') }}
+    name: ${{ matrix.case.name }} - Julia ${{ inputs.julia }}
+    runs-on: ${{ matrix.case.os || 'macos-26-intel' }}
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        case: ${{ fromJSON(inputs.cases) }}
+    env:
+      NEW_RUNTIME_ARTIFACT: ${{ inputs.prepare_runtime && (matrix.case.os == '' || matrix.case.os == 'macos-26-intel') }}
+      JULIA_NUM_THREADS: ${{ matrix.case.threads }}
+      JULIA_NUM_PRECOMPILE_TASKS: '1'
+      JULIA_CPU_TARGET: generic
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
+      SPHEROIDALWAVES_TEST_GROUP: ${{ matrix.case.groups }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the artifact source matches the code under test
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          revision=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)
+          git fetch --depth=1 origin "$revision"
+          # Artifacts contain package code and native libraries; tests come from this checkout.
+          git diff --exit-code "$revision" HEAD -- src deps CMakeLists.txt Project.toml
+      - uses: fortran-lang/setup-fortran@v1
+        if: runner.os == 'Windows'
+        with:
+          compiler: gcc
+          version: '15'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && format('timing-julia-environment-{0}', inputs.julia) || format('julia-environment-{0}-{1}-{2}', matrix.case.os || 'macos-26-intel', matrix.case.arch || 'x64', inputs.julia) }}
+          path: .scratch/ci-environment
+          run-id: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && github.run_id || inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Restore the prepared Julia runtime
+        id: prepared-runtime
+        shell: bash
+        run: |
+          if [[ -f .scratch/ci-environment/julia-runtime.tar.gz ]]; then
+            bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
+            echo 'restored=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: julia-actions/setup-julia@v2
+        if: steps.prepared-runtime.outputs.restored != 'true'
+        with:
+          version: ${{ inputs.julia }}
+          arch: ${{ matrix.case.arch || 'x64' }}
+      - name: Restore the prepared Julia environment
+        shell: bash
+        env:
+          JULIA_VERSION: ${{ inputs.julia }}
+        run: |
+          git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
+          cp .scratch/ci-environment/Manifest.toml Manifest.toml
+          depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
+          mkdir -p "$depot"
+          tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
+          julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
+          if [[ "$JULIA_VERSION" == '1.10' && "$SPHEROIDALWAVES_TEST_GROUP" != *api-and-precision* ]]; then
+            printf '[SpheroidalWaves]\nprecompile_workload = false\n' > LocalPreferences.toml
+          fi
+      - uses: actions/download-artifact@v8
+        with:
+          name: native-backends-${{ matrix.case.os || 'macos-26-intel' }}-${{ matrix.case.arch || 'x64' }}
+          path: build
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Configure native runtimes
+        shell: bash
+        run: |
+          library_prefix=build/lib/libspheroidal_batch_
+          library_extension=so
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            library_prefix=build/bin/spheroidal_batch_
+            library_extension=dll
+            echo "$GITHUB_WORKSPACE/build/bin" >> "$GITHUB_PATH"
+          elif [[ "$RUNNER_OS" == 'macOS' ]]; then
+            library_extension=dylib
+            prefix=$(brew --prefix)
+            missing=()
+            for formula in gcc@15 mpfr libmpc gmp; do
+              [[ -d "$prefix/opt/$formula" ]] || missing+=("$formula")
+            done
+            if (( ${#missing[@]} )); then brew install "${missing[@]}"; fi
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y libmpfr6 libmpc3 libgmp10
+          fi
+          for precision in double quad mpfr; do
+            variable=$(printf '%s' "$precision" | tr '[:lower:]' '[:upper:]')
+            echo "SPHEROIDALWAVES_LIBRARY_$variable=$GITHUB_WORKSPACE/${library_prefix}${precision}.${library_extension}" >> "$GITHUB_ENV"
+          done
+      - uses: julia-actions/julia-runtest@v1
+        env:
+          JULIA_DEBUG: loading
+          JULIA_PKG_PRECOMPILE_AUTO: ${{ contains(matrix.case.groups, 'api-and-precision') && '1' || '0' }}
+        with:
+          coverage: false
+          allow_reresolve: false
+          optimize: ${{ matrix.case.optimize }}
+          compiled_modules: ${{ (contains(matrix.case.groups, 'api-and-precision') || inputs.julia == '1.10') && 'yes' || 'existing' }}
