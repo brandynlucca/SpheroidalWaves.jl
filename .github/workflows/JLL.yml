@@ -1,0 +1,191 @@
+name: Validate existing JLL artifacts
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run:
+        description: Run containing the audited yggdrasil-build artifact
+        required: true
+        type: string
+      os:
+        description: Runner operating system
+        type: string
+        default: macos-latest
+      arch:
+        description: Julia architecture
+        type: string
+        default: aarch64
+      julia:
+        description: Julia version
+        type: string
+        default: '1'
+      suite:
+        description: JLL validation suite
+        type: string
+        default: wave-references-and-behavior
+  workflow_call:
+    inputs:
+      source_run:
+        description: Run containing the audited yggdrasil-build artifact
+        required: true
+        type: string
+      os:
+        description: Runner operating system
+        type: string
+        default: macos-latest
+      arch:
+        description: Julia architecture
+        type: string
+        default: aarch64
+      julia:
+        description: Julia version
+        type: string
+        default: '1'
+      suite:
+        description: JLL validation suite
+        type: string
+        default: wave-references-and-behavior
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  runtime:
+    name: JLL ${{ inputs.suite }} - ${{ inputs.os }} - Julia ${{ inputs.julia }}
+    runs-on: ${{ inputs.os }}
+    env:
+      EXPECTED_JULIA_ARCH: ${{ inputs.arch }}
+      JULIA_CPU_TARGET: generic
+      JULIA_NUM_THREADS: '2'
+      JULIA_PKG_PRECOMPILE_AUTO: '0'
+      JLL_TEST_SUITE: ${{ inputs.suite }}
+      JULIA_NUM_PRECOMPILE_TASKS: '1'
+      OPENBLAS_NUM_THREADS: '1'
+      OMP_NUM_THREADS: '1'
+      SPHEROIDALWAVES_REQUIRE_BACKENDS: 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify the native artifact source
+        if: inputs.source_run != format('{0}', github.run_id)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          revision=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)
+          git fetch --depth=1 origin "$revision"
+          git diff --exit-code "$revision" HEAD -- deps CMakeLists.txt contrib/yggdrasil/build_tarballs.jl
+      - uses: julia-actions/setup-julia@v2
+        with:
+          version: ${{ inputs.julia }}
+          arch: ${{ inputs.arch }}
+      - uses: julia-actions/cache@v2
+        with:
+          cache-name: jll-validation-${{ inputs.os }}-${{ inputs.arch }}-${{ inputs.julia }}
+          include-matrix: 'false'
+          cache-compiled: 'false'
+          delete-old-caches: 'false'
+      - uses: actions/download-artifact@v8
+        with:
+          name: yggdrasil-build
+          path: binarybuilder-products
+          run-id: ${{ inputs.source_run }}
+          github-token: ${{ github.token }}
+      - name: Point the generated JLL at the downloaded tarball
+        shell: julia --color=yes {0}
+        run: |
+          using TOML
+          path = "binarybuilder-products/SpheroidalWaves_jll/Artifacts.toml"
+          artifacts = TOML.parsefile(path)
+          for entry in artifacts["SpheroidalWaves"], download in entry["download"]
+              archive = abspath("binarybuilder-products", basename(download["url"]))
+              @assert isfile(archive) archive
+              archive = replace(archive, '\\' => '/')
+              archive = replace(archive, "%" => "%25", " " => "%20", "#" => "%23")
+              download["url"] = (Sys.iswindows() ? "file:///" : "file://") * archive
+          end
+          open(io -> TOML.print(io, artifacts), path, "w")
+      - name: Load JLL runtimes and test the cross-built libraries
+        shell: bash
+        run: |
+          unset LD_LIBRARY_PATH DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
+          julia --startup-file=no --heap-size-hint=1G --check-bounds=yes -O1 - <<'JULIA'
+          using Pkg, Libdl, Test
+          @assert Sys.ARCH === (ENV["EXPECTED_JULIA_ARCH"] == "x64" ? :x86_64 : :aarch64)
+          Pkg.activate(;temp=true)
+          write(joinpath(dirname(Base.active_project()), "LocalPreferences.toml"), "[SpheroidalWaves]\nprecompile_workload = false\n")
+          Pkg.develop([
+              Pkg.PackageSpec(path=pwd()),
+              Pkg.PackageSpec(path="binarybuilder-products/SpheroidalWaves_jll"),
+          ])
+          using SpheroidalWaves_jll
+          ENV["SPHEROIDALWAVES_LIBRARY_DOUBLE"] = SpheroidalWaves_jll.libspheroidal_batch_double_path
+          ENV["SPHEROIDALWAVES_LIBRARY_QUAD"] = SpheroidalWaves_jll.libspheroidal_batch_quad_path
+          ENV["SPHEROIDALWAVES_LIBRARY_MPFR"] = SpheroidalWaves_jll.libspheroidal_batch_mpfr_path
+          using SpheroidalWaves
+          include("test/require_backends.jl")
+          @testset "JLL libraries and runtime dependencies" begin
+              @test !isdir("build")
+              @test realpath(dirname(dirname(pathof(SpheroidalWaves)))) == realpath(pwd())
+              @test realpath(dirname(dirname(pathof(SpheroidalWaves_jll)))) == realpath("binarybuilder-products/SpheroidalWaves_jll")
+              @test SpheroidalWaves.SpheroidalWaves_jll === SpheroidalWaves_jll
+              for precision in (:double,:quad,:mpfr)
+                  library = SpheroidalWaves.backend_library(;precision)
+                  @test library == ENV["SPHEROIDALWAVES_LIBRARY_$(uppercase(string(precision)))"]
+                  @test occursin("/artifacts/", replace(library, '\\' => '/'))
+                  if Sys.isapple()
+                      for line in split(read(`otool -L $library`, String), '\n')[2:end]
+                          isempty(strip(line)) && continue
+                          dependency = first(split(strip(line), " ("))
+                          @test any(prefix -> startswith(dependency,prefix), ("@rpath/","@loader_path/","/usr/lib/","/System/Library/"))
+                      end
+                  end
+              end
+              julia_root = lowercase(replace(dirname(Sys.BINDIR), '\\' => '/')) * "/"
+              for library in Libdl.dllist()
+                  path = lowercase(replace(library, '\\' => '/'))
+                  @test !occursin("/opt/homebrew/", path)
+                  @test !occursin("/usr/local/cellar/", path)
+                  if occursin(r"^(lib)?(gfortran|gomp|quadmath|gcc_s)", basename(path))
+                      @testset "Compiler runtime: $path" begin
+                          @test occursin("/artifacts/", path) || startswith(path, julia_root)
+                      end
+                  end
+              end
+          end
+          @testset "Arbitrary precision JLL backend" begin
+              value = eigenvalue(0, 0, 1; precision_bits=160)
+              reference = parse(BigFloat, "0.31900005514689273978398198587182649410381437651074172911497005923805300976367"; precision=256)
+              @test precision(value) == 160
+              @test isapprox(value, reference; rtol=big"1e-46")
+          end
+          if ENV["JLL_TEST_SUITE"] == "native"
+              include("test/quad_precision.jl")
+              include("test/numerical_regressions.jl")
+          else
+              ENV["SPHEROIDALWAVES_PRECISION_CASE"] = ENV["JLL_TEST_SUITE"] == "wave-sensitivities" ?
+                  "sensitivities" : "references,derivatives,static,dispatch,storage,settings"
+              include("test/precision_waves.jl")
+          end
+          JULIA
+
+      - name: Collect macOS crash reports
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p crash-reports
+          for directory in "$HOME/Library/Logs/DiagnosticReports" /Library/Logs/DiagnosticReports; do
+            if [[ -d "$directory" ]]; then
+              find "$directory" -maxdepth 1 -iname '*julia*' -type f -exec cp {} crash-reports/ \;
+            fi
+          done
+      - uses: actions/upload-artifact@v7
+        if: failure() && runner.os == 'macOS'
+        with:
+          name: jll-crash-${{ inputs.os }}-${{ inputs.julia }}-${{ inputs.suite }}
+          path: crash-reports/
+          if-no-files-found: warn
+
