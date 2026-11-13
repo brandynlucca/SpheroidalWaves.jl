@@ -129,7 +129,7 @@ jobs:
       - name: Fingerprint native build inputs
         id: native-key
         run: julia --startup-file=no scripts/native_cache_key.jl build
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: native-cache
         if: inputs.clean != true
         with:
@@ -161,7 +161,7 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then ulimit -v 3145728; fi
           cmake --build build --parallel 1
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: inputs.clean != true && steps.native-cache.outputs.cache-hit != 'true'
         with:
           path: |
@@ -305,7 +305,7 @@ jobs:
           # Julia 1.10 checks source mtimes; the compilation key checks source contents.
           git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
           julia --startup-file=no --project=. scripts/prepare_ci_environment.jl
-      - uses: actions/cache/restore@v4
+      - uses: actions/cache/restore@v6
         id: compiled-cache
         if: inputs.clean != true
         with:
@@ -317,7 +317,7 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == 'Linux' ]]; then ulimit -v 3145728; fi
           julia --startup-file=no --heap-size-hint=1G --project=. --check-bounds=yes --inline=yes -O1 scripts/precompile_ci_environment.jl
-      - uses: actions/cache/save@v4
+      - uses: actions/cache/save@v6
         if: inputs.clean != true && steps.compiled-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ steps.julia-key.outputs.depot }}/compiled
