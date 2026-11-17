@@ -48,7 +48,7 @@ jobs:
         with:
           # BinaryBuilder's RISC-V audit needs Julia's newer architecture table.
           version: '1.12'
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .scratch/binarybuilder-depot
           key: binarybuilder-tools-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
