@@ -39,16 +39,16 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: julia-environment-macos-26-intel-x64-${{ inputs.julia }}
-          path: .scratch/ci-environment
+          path: ${{ runner.temp }}/ci-environment
           run-id: ${{ inputs.source_run }}
           github-token: ${{ github.token }}
       - name: Package the installed Julia runtime
         shell: bash
-        run: bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+        run: bash scripts/ci_julia_runtime.sh pack "$RUNNER_TEMP/ci-environment"
       - uses: actions/upload-artifact@v7
         with:
           name: timing-julia-environment-${{ inputs.julia }}
-          path: .scratch/ci-environment/
+          path: ${{ runner.temp }}/ci-environment/
           compression-level: 0
           retention-days: 1
 
@@ -93,15 +93,17 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && format('timing-julia-environment-{0}', inputs.julia) || format('julia-environment-{0}-{1}-{2}', matrix.case.os || 'macos-26-intel', matrix.case.arch || 'x64', inputs.julia) }}
-          path: .scratch/ci-environment
+          path: ${{ runner.temp }}/ci-environment
           run-id: ${{ env.NEW_RUNTIME_ARTIFACT == 'true' && github.run_id || inputs.source_run }}
           github-token: ${{ github.token }}
       - name: Restore the prepared Julia runtime
         id: prepared-runtime
         shell: bash
         run: |
-          if [[ -f .scratch/ci-environment/julia-runtime.tar.gz ]]; then
-            bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
+          artifact_dir="$RUNNER_TEMP/ci-environment"
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then artifact_dir=$(cygpath -u "$artifact_dir"); fi
+          if [[ -f "$artifact_dir/julia-runtime.tar.gz" ]]; then
+            bash scripts/ci_julia_runtime.sh restore "$artifact_dir"
             echo 'restored=true' >> "$GITHUB_OUTPUT"
           fi
       - uses: julia-actions/setup-julia@v2
@@ -115,12 +117,16 @@ jobs:
           JULIA_VERSION: ${{ inputs.julia }}
         run: |
           git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
-          cp .scratch/ci-environment/Manifest.toml Manifest.toml
+          artifact_dir="$RUNNER_TEMP/ci-environment"
           depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
-          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            artifact_dir=$(cygpath -u "$artifact_dir")
+            depot=$(cygpath -u "$depot")
+          fi
+          cp "$artifact_dir/Manifest.toml" Manifest.toml
           mkdir -p "$depot"
-          tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
-          julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
+          tar -xzf "$artifact_dir/depot.tar.gz" -C "$depot"
+          julia --startup-file=no -e '@assert read(joinpath(ENV["RUNNER_TEMP"], "ci-environment", "julia-version.txt"), String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
           if [[ "$JULIA_VERSION" == '1.10' && "$SPHEROIDALWAVES_TEST_GROUP" != *api-and-precision* ]]; then
             printf '[SpheroidalWaves]\nprecompile_workload = false\n' > LocalPreferences.toml
           fi

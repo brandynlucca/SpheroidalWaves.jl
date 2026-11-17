@@ -327,19 +327,23 @@ jobs:
         env:
           PREPARED_DEPOT: ${{ steps.julia-key.outputs.depot }}
         run: |
-          mkdir -p .scratch/ci-environment
-          cp Manifest.toml .scratch/ci-environment/
-          if [[ "$RUNNER_OS" == 'Windows' ]]; then PREPARED_DEPOT=$(cygpath -u "$PREPARED_DEPOT"); fi
+          artifact_dir="$RUNNER_TEMP/ci-environment"
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            artifact_dir=$(cygpath -u "$artifact_dir")
+            PREPARED_DEPOT=$(cygpath -u "$PREPARED_DEPOT")
+          fi
+          mkdir -p "$artifact_dir"
+          cp Manifest.toml "$artifact_dir/"
           mkdir -p "$PREPARED_DEPOT"/{artifacts,packages,registries,compiled,logs,scratchspaces}
-          tar -czf .scratch/ci-environment/depot.tar.gz -C "$PREPARED_DEPOT" artifacts packages registries compiled logs scratchspaces
-          julia --startup-file=no -e 'print(VERSION, " ", Base.GIT_VERSION_INFO.commit)' > .scratch/ci-environment/julia-version.txt
+          tar -czf "$artifact_dir/depot.tar.gz" -C "$PREPARED_DEPOT" artifacts packages registries compiled logs scratchspaces
+          julia --startup-file=no -e 'print(VERSION, " ", Base.GIT_VERSION_INFO.commit)' > "$artifact_dir/julia-version.txt"
           if [[ '${{ matrix.platform.os }}' == 'macos-26-intel' ]]; then
-            bash scripts/ci_julia_runtime.sh pack .scratch/ci-environment
+            bash scripts/ci_julia_runtime.sh pack "$artifact_dir"
           fi
       - uses: actions/upload-artifact@v7
         with:
           name: julia-environment-${{ matrix.platform.os }}-${{ matrix.platform.arch }}-${{ matrix.version }}
-          path: .scratch/ci-environment/
+          path: ${{ runner.temp }}/ci-environment/
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
@@ -416,22 +420,26 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: julia-environment-${{ matrix.suite.os }}-${{ matrix.suite.arch }}-${{ matrix.version }}
-          path: .scratch/ci-environment
+          path: ${{ runner.temp }}/ci-environment
       - name: Restore the prepared Julia runtime
         if: startsWith(matrix.suite.groups, 'native-') == false && matrix.suite.os == 'macos-26-intel'
         shell: bash
-        run: bash scripts/ci_julia_runtime.sh restore .scratch/ci-environment
+        run: bash scripts/ci_julia_runtime.sh restore "$RUNNER_TEMP/ci-environment"
       - name: Restore the prepared Julia environment
         if: startsWith(matrix.suite.groups, 'native-') == false
         shell: bash
         run: |
           git ls-files -z -- src Project.toml | xargs -0 touch -t 200001010000
-          cp .scratch/ci-environment/Manifest.toml Manifest.toml
+          artifact_dir="$RUNNER_TEMP/ci-environment"
           depot=$(julia --startup-file=no -e 'print(first(DEPOT_PATH))')
-          if [[ "$RUNNER_OS" == 'Windows' ]]; then depot=$(cygpath -u "$depot"); fi
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then
+            artifact_dir=$(cygpath -u "$artifact_dir")
+            depot=$(cygpath -u "$depot")
+          fi
+          cp "$artifact_dir/Manifest.toml" Manifest.toml
           mkdir -p "$depot"
-          tar -xzf .scratch/ci-environment/depot.tar.gz -C "$depot"
-          julia --startup-file=no -e '@assert read(".scratch/ci-environment/julia-version.txt", String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
+          tar -xzf "$artifact_dir/depot.tar.gz" -C "$depot"
+          julia --startup-file=no -e '@assert read(joinpath(ENV["RUNNER_TEMP"], "ci-environment", "julia-version.txt"), String) == string(VERSION, " ", Base.GIT_VERSION_INFO.commit)'
           if [[ '${{ matrix.version }}' == '1.10' && "$SPHEROIDALWAVES_TEST_GROUP" != *api-and-precision* ]]; then
             printf '[SpheroidalWaves]\nprecompile_workload = false\n' > LocalPreferences.toml
           fi

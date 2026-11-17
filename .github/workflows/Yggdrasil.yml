@@ -22,7 +22,6 @@ permissions:
 
 env:
   BINARYBUILDER_AUTOMATIC_APPLE: 'true'
-  BUILDER_DEPOT: ${{ github.workspace }}/.scratch/binarybuilder-depot
   JULIA_CPU_TARGET: generic
   JULIA_NUM_THREADS: '1'
   JULIA_NUM_PRECOMPILE_TASKS: '1'
@@ -36,23 +35,25 @@ jobs:
     name: Prepare BinaryBuilder and select targets
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     outputs:
       version: ${{ steps.recipe.outputs.version }}
       platforms: ${{ steps.targets.outputs.platforms }}
       targets: ${{ steps.targets.outputs.targets }}
     steps:
       - uses: actions/checkout@v7
+      - name: Configure the build tools depot
+        run: |
+          echo "BUILDER_DEPOT=$RUNNER_TEMP/binarybuilder-depot" >> "$GITHUB_ENV"
+          echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/binarybuilder-depot:" >> "$GITHUB_ENV"
       - uses: julia-actions/setup-julia@v2
         with:
           # BinaryBuilder's RISC-V audit needs Julia's newer architecture table.
           version: '1.12'
       - uses: actions/cache@v6
         with:
-          path: .scratch/binarybuilder-depot
-          key: binarybuilder-tools-v1-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
-          restore-keys: binarybuilder-tools-v1-${{ runner.os }}-
+          path: ${{ runner.temp }}/binarybuilder-depot
+          key: binarybuilder-tools-v2-${{ runner.os }}-${{ hashFiles('.github/workflows/Yggdrasil.yml') }}
+          restore-keys: binarybuilder-tools-v2-${{ runner.os }}-
       - name: Select the shared-source commit and version
         id: recipe
         shell: julia --color=yes {0}
@@ -100,13 +101,13 @@ jobs:
           end
       - name: Save the prepared build tools and recipe
         run: |
-          mkdir -p .scratch/binarybuilder-tools
-          tar -czf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT" .
-          cp contrib/yggdrasil/build_tarballs.jl .scratch/binarybuilder-tools/build_tarballs.jl
+          mkdir -p "$RUNNER_TEMP/binarybuilder-tools"
+          tar -czf "$RUNNER_TEMP/binarybuilder-tools/depot.tar.gz" -C "$BUILDER_DEPOT" .
+          cp contrib/yggdrasil/build_tarballs.jl "$RUNNER_TEMP/binarybuilder-tools/build_tarballs.jl"
       - uses: actions/upload-artifact@v7
         with:
           name: binarybuilder-tools
-          path: .scratch/binarybuilder-tools/
+          path: ${{ runner.temp }}/binarybuilder-tools/
           compression-level: 0
           retention-days: 1
 
@@ -115,8 +116,6 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     strategy:
       fail-fast: false
       max-parallel: 12
@@ -124,18 +123,22 @@ jobs:
         target: ${{ fromJSON(needs.prepare.outputs.platforms) }}
     steps:
       - uses: actions/checkout@v7
+      - name: Configure the build tools depot
+        run: |
+          echo "BUILDER_DEPOT=$RUNNER_TEMP/binarybuilder-depot" >> "$GITHUB_ENV"
+          echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/binarybuilder-depot:" >> "$GITHUB_ENV"
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
       - uses: actions/download-artifact@v8
         with:
           name: binarybuilder-tools
-          path: .scratch/binarybuilder-tools
+          path: ${{ runner.temp }}/binarybuilder-tools
       - name: Restore the prepared build tools and recipe
         run: |
           mkdir -p "$BUILDER_DEPOT"
-          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
-          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+          tar -xzf "$RUNNER_TEMP/binarybuilder-tools/depot.tar.gz" -C "$BUILDER_DEPOT"
+          cp "$RUNNER_TEMP/binarybuilder-tools/build_tarballs.jl" contrib/yggdrasil/build_tarballs.jl
       - name: Build and audit all three precision libraries
         env:
           BUILD_TARGET: ${{ matrix.target }}
@@ -155,24 +158,26 @@ jobs:
     needs: [prepare, target-build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      JULIA_DEPOT_PATH: '${{ github.workspace }}/.scratch/binarybuilder-depot:'
     outputs:
       version: ${{ needs.prepare.outputs.version }}
     steps:
       - uses: actions/checkout@v7
+      - name: Configure the build tools depot
+        run: |
+          echo "BUILDER_DEPOT=$RUNNER_TEMP/binarybuilder-depot" >> "$GITHUB_ENV"
+          echo "JULIA_DEPOT_PATH=$RUNNER_TEMP/binarybuilder-depot:" >> "$GITHUB_ENV"
       - uses: julia-actions/setup-julia@v2
         with:
           version: '1.12'
       - uses: actions/download-artifact@v8
         with:
           name: binarybuilder-tools
-          path: .scratch/binarybuilder-tools
+          path: ${{ runner.temp }}/binarybuilder-tools
       - name: Restore the prepared build tools and recipe
         run: |
           mkdir -p "$BUILDER_DEPOT"
-          tar -xzf .scratch/binarybuilder-tools/depot.tar.gz -C "$BUILDER_DEPOT"
-          cp .scratch/binarybuilder-tools/build_tarballs.jl contrib/yggdrasil/build_tarballs.jl
+          tar -xzf "$RUNNER_TEMP/binarybuilder-tools/depot.tar.gz" -C "$BUILDER_DEPOT"
+          cp "$RUNNER_TEMP/binarybuilder-tools/build_tarballs.jl" contrib/yggdrasil/build_tarballs.jl
       - uses: actions/download-artifact@v8
         with:
           pattern: yggdrasil-target-*
