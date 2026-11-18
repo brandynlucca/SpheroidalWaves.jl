@@ -136,53 +136,7 @@ Sensitivity analysis requires derivatives with respect to the spheroidal paramet
 \endgroup
 ```
 
-Arithmetic precision does not establish accuracy after cancellation and expansion truncation (Table \ref{tab:diagnostics}). `MSWF` returns accuracy estimates, and `scattering` checks Wronskians and alternative representations. `SpheroidalWaves.jl` reports separate value and derivative estimates from refinement, including unavailable or failed-refinement status. The diagnostics support convergence assessment without certifying error bounds.
-
-```{=latex}
-\begin{table}[H]
-    \centering
-    \caption{
-        Consistency diagnostics, including the radial Wronskian $\mathcal{W}_R=R_{mn}^{(1)}(R_{mn}^{(2)})'-(R_{mn}^{(1)})'R_{mn}^{(2)}$. \texttt{SpheroidalWaves.jl} supplies normalized Wronskian residuals.
-    }
-    \label{tab:diagnostics}
-    \small
-    \resizebox{\linewidth}{!}{%
-        \begin{tabular}{|r|*{8}{l|}}
-            \hline
-                \textbf{Diagnostic} &
-                \rotatebox{90}{\hspace{4pt}\texttt{MSWF}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{SWFunctions.jl}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{SciPy}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{echoSMs}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{acousticTS}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{spheroidal}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{Wolfram}\hspace{4pt}} &
-                \rotatebox{90}{\hspace{4pt}\texttt{SpheroidalWaves.jl}\hspace{4pt}} \\
-            \hline
-                $\mathcal{W}\left(R_{mn} \right)$ & $\times^{a}$ & $\times$ & $\times$ & $\times$ & $\times$ & $\checkmark^{b}$ & $\checkmark^{c}$ & $\checkmark$ \\
-            \hline
-                Accuracy diagnostics & $\checkmark$ & $\times$ & $\times$ & $\times^{d}$ & $\times^{d}$ & $\checkmark^{b}$ & $\checkmark^{e}$ & $\checkmark^{f}$ \\
-            \hline
-        \end{tabular}
-    }
-\end{table}
-\nopagebreak[4]
-\vspace{-8pt}
-\begingroup
-\fontsize{8}{9.5}\selectfont
-```
-
-\textsuperscript{a}Internal calculation.\
-\textsuperscript{b}Wronskian residuals and differences between alternative representations.\
-\textsuperscript{c}General [Wronskian operator](https://reference.wolfram.com/language/ref/Wronskian.html).\
-\textsuperscript{d}Backend accuracy arrays omitted from returned results.\
-\textsuperscript{e}General [precision tracking](https://reference.wolfram.com/language/ref/Accuracy.html).\
-\textsuperscript{f}Refinement-based estimates.
-
-```{=latex}
-\par
-\endgroup
-```
+Arithmetic precision does not establish accuracy after cancellation and expansion truncation. `MSWF` calculates Wronskians internally and returns accuracy estimates, while `echoSMs` and `acousticTS` omit backend accuracy arrays from returned results. `scattering` checks Wronskian residuals and alternative representations, and `Wolfram` provides general [Wronskian](https://reference.wolfram.com/language/ref/Wronskian.html) and [precision-tracking](https://reference.wolfram.com/language/ref/Accuracy.html) operators. `SpheroidalWaves.jl` supplies normalized Wronskian residuals and separate value and derivative refinement estimates, including unavailable or failed-refinement status. The diagnostics support convergence assessment without certifying error bounds.
 
 Separation eigenvalues determine the differential-equation solutions, whereas concentration eigenvalues quantify finite-interval energy retention [@slepian_pollak1961]. `SpheroidalWaves.jl` computes concentration and finite Fourier eigenvalues for real prolate $m=0$, $c\geq0$ (Table \ref{tab:spectral}). `SciPy` and `Wolfram` supply general root finders, while `SpheroidalWaves.jl` provides dedicated eigenvalue inversion. Logarithmic and complementary concentration targets preserve small values near zero and unit concentration.
 
