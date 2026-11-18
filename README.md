@@ -6,7 +6,6 @@
 [![GitHub Version](https://img.shields.io/github/v/release/brandynlucca/SpheroidalWaves.jl?label=GitHub)](https://github.com/brandynlucca/SpheroidalWaves.jl)
 [![Yggdrasil](https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2FJuliaPackaging%2FYggdrasil%2Fmaster%2FS%2FSpheroidalWaves%2Fbuild_tarballs.jl&search=version%5Cs%2A%3D%5Cs%2Av%22%28%5B%5E%22%5D%2B%29%22&replace=v%241&label=Yggdrasil&color=forestgreen)](https://platform.juliahub.com/ui/Packages/General/SpheroidalWaves_jll)
 [![Julia Compatibility](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbrandynlucca%2FSpheroidalWaves.jl%2Fmaster%2FProject.toml&query=%24.compat.julia&suffix=%2B&label=Julia&color=purple)](https://julialang.org)
-[![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/SpheroidalWaves.jl?label=Last%20commit)](https://github.com/brandynlucca/SpheroidalWaves.jl/commits/main)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728039.svg)](https://doi.org/10.5281/zenodo.19728039)
 [![status](https://joss.theoj.org/papers/ee705a74f4a858066b9e9f8bdb9f64c7/status.svg)](https://joss.theoj.org/papers/ee705a74f4a858066b9e9f8bdb9f64c7)
 
@@ -15,6 +14,7 @@
 [![Documentation (latest)](https://img.shields.io/badge/docs-latest-blue?label=Package%20documentation%20(latest))](https://brandynlucca.github.io/SpheroidalWaves.jl/dev/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL3-green.svg?label=License)](LICENSE)
 
+[![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/SpheroidalWaves.jl?label=Last%20commit)](https://github.com/brandynlucca/SpheroidalWaves.jl/commits/main)
 [![CI](https://img.shields.io/github/actions/workflow/status/brandynlucca/SpheroidalWaves.jl/CI.yml?branch=main&label=Build%20status)](https://github.com/brandynlucca/SpheroidalWaves.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![codecov](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl/graph/badge.svg?token=ZH28KZ4DTQ)](https://codecov.io/gh/brandynlucca/SpheroidalWaves.jl)
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fjuliapkgstats.com%2Fapi%2Fv1%2Ftotal_downloads%2FSpheroidalWaves&query=total_requests&label=SpheroidalWaves%20Downloads)](https://juliapkgstats.com/pkg/SpheroidalWaves)
