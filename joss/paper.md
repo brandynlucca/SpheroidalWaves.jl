@@ -204,10 +204,10 @@ Test cases used `SpheroidalWaves.jl` to validate the outputs of the [spheroidal 
 
 # AI usage disclosure
 
-AI tools were used in a limited capacity during later package development. OpenAI Codex (GPT-6) was assisted with debugging and refining the `Yggdrasil` workflow ([`Yggdrasil.yml`](https://github.com/brandynlucca/SpheroidalWaves.jl/blob/v0.7.0/.github/workflows/Yggdrasil.yml)) for generating the precompiled binaries. It also assisted with addressing bugs in the continuous integration workflow ([`CI.yml`](https://github.com/brandynlucca/SpheroidalWaves.jl/blob/v0.7.0/.github/workflows/CI.yml)) that arose due to differences in Fortran compilers, precision arithmetic, and parallelization across Windows, Linux, and MacOS containers. All AI-generated test results, artifacts, and reports were systematically human-reviewed and -validated.
+OpenAI Codex (GPT-6) assisted with debugging and refining the [Yggdrasil workflow](https://github.com/brandynlucca/SpheroidalWaves.jl/blob/v0.7.0/.github/workflows/Yggdrasil.yml) for precompiled binaries. Additional assistance addressed [continuous integration](https://github.com/brandynlucca/SpheroidalWaves.jl/blob/v0.7.0/.github/workflows/CI.yml) bugs involving Fortran compilers, precision arithmetic, and parallelization across Windows, Linux, and macOS containers. All AI-generated test results, artifacts, and reports underwent systematic human review and validation.
 
 # Acknowledgements
 
-The original Fortran-based methods were originally developed by Arnie Lee Van Buren and Jeffrey E. Boisvert, which make up the `MSWF` collection. Their open-source solvers make the recurrence and expansion methods available for reuse in research software, including serving as  the basis for the Fortran kernels in `SpheroidalWaves.jl`. This research received no funding, and the author declares no competing interests.
+Arnie Lee Van Buren and Jeffrey E. Boisvert developed the recurrence and expansion methods in the open-source `MSWF` collection. `SpheroidalWaves.jl` uses the Fortran solvers as the basis for angular and radial function evaluation. The research received no funding, and the author declares no competing interests.
 
 # References
