@@ -192,18 +192,7 @@ Separation eigenvalues determine the differential-equation solutions, whereas co
 
 The functions `smn` and `rmn` evaluate angular and radial functions, while `spheroidal` combines wave and coefficient results. Fortran supplies double and quadruple arithmetic, with `MPFR` [@fousse2007] and `MPC` [@enge2022] supporting arbitrary precision. Explicit precision requests refine arithmetic and expansion length separately and preserve requested `BigFloat` precision independently of ambient settings. Scaled mantissa/exponent outputs extend range without increasing accuracy. Unresolved refinement raises an error.
 
-Expansion coefficients give the weights used to reconstruct first-kind angular functions from Ferrers functions. Default normalization and basis choices give [@dlmf{}, §§[30.8(i)](https://dlmf.nist.gov/30.8#i), [30.11(i)](https://dlmf.nist.gov/30.11#i), and [30.11(v)](https://dlmf.nist.gov/30.11#v)]:
-$$
-  \begin{aligned}
-    S_{mn}^{(1)}(c,\eta)
-      &=\sum_{\ell\ge m}'d_\ell^{mn}(c)\,\mathsf P_\ell^m(\eta),\\
-    A_{mn}(c)&=\sum_{\ell\ge -m}'d_\ell^{mn}(c),\\
-    R_{mn}^{(1)}(c,x)
-      &=K_{mn}(c)\sum_{\ell\ge m}'d_\ell^{mn}(c)\,P_\ell^m(z),\qquad c\ne0,
-  \end{aligned}
-  \label{eq:coefficients}
-$$
-where $d_\ell^{mn}$ (`dmn`) weights each Ferrers function, $A_{mn}$ (`amn`) is a coefficient sum used in angular–radial connection formulas, and $K_{mn}$ (`kmn`) scales the exterior angular expansion into the first-kind radial function. All three quantities are dimensionless. Primed sums select $\ell$ with the parity of $n$. The functions $\mathsf P_\ell^m$ and $P_\ell^m$ are Ferrers and exterior Legendre functions, with $z=x$ (prolate) or $z=-ix$ (oblate). The $A_{mn}$ sum includes coefficients extended below degree $m$ by recurrence. `dmn` also provides parameter derivatives and an orthonormal basis independently of wave normalization. Angular first-kind normalization is Meixner–Schäfke or unit norm for real parameters, analytically continued for complex parameters. Radial kinds one and two offer standard normalization or static normalization with finite $c=0$ limits. `eigenvalue` returns separation, concentration, or Fourier eigenvalues, reusing angular coefficients for the integral operators [@osipov2013]. `find_c_for_eigenvalue` inverts separation or concentration eigenvalues within a real bracket.
+The functions `dmn`, `amn`, and `kmn` expose angular expansion weights, coefficient sums, and angular–radial connection factors [@dlmf]. Coefficient access supports reconstruction in Ferrers and exterior Legendre bases under the [documented expansion and normalization conventions](https://brandynlucca.github.io/SpheroidalWaves.jl/dev/mathematical-tools/#Expansion-coefficients-and-connection-factors). `eigenvalue` supplies separation eigenvalues and reuses angular coefficients for concentration and Fourier eigenvalues [@osipov2013]. `find_c_for_eigenvalue` inverts separation or concentration eigenvalues within a real bracket.
 
 Derivative calculations reuse analytic expressions to limit subtraction errors. First parameter derivatives follow coefficient expansions and governing equations. Second wave parameter derivatives difference analytic first derivatives, requiring additional evaluations and step-size refinement. Coordinate derivatives through fourth order follow differentiated equations, with one-sided endpoint limits. Complex-parameter continuation matches angular profiles and phase across derivative samples and reports unresolved continuation. `angular_zeros` locates first-kind angular zeros and stationary points for real $c$. `radial_zeros` locates zeros and stationary points of radial kinds one and two for real nonzero $c$ on finite nonsingular intervals.
 
