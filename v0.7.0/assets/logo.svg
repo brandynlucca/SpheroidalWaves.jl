@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="700" height="700" viewBox="0 0 1200 1200" role="img" aria-labelledby="title description">
+  <title id="title">SpheroidalWaves.jl</title>
+  <desc id="description">Julia's green, red, and purple dots become a sphere, a prolate spheroid, and an oblate spheroid. White waves cross each shape above a white wordmark on charcoal.</desc>
+
+  <!-- Editable vector master. All artwork is native SVG; no embedded bitmap.
+       Edit the ellipse dimensions, wave paths, colors, or live text below. -->
+  <defs>
+    <clipPath id="green-boundary">
+      <ellipse cx="610" cy="192" rx="178" ry="178"/>
+    </clipPath>
+    <clipPath id="red-boundary">
+      <ellipse cx="355" cy="516" rx="145" ry="237"/>
+    </clipPath>
+    <clipPath id="purple-boundary">
+      <ellipse cx="791" cy="576" rx="230" ry="169"/>
+    </clipPath>
+  </defs>
+
+  <rect id="background" width="1200" height="1200" fill="#171C28"/>
+
+  <g id="julia-dots" stroke="none" transform="translate(-261 0) scale(1.4)">
+    <g id="green-sphere" clip-path="url(#green-boundary)">
+      <ellipse cx="610" cy="192" rx="178" ry="178" fill="#389826"/>
+      <g id="green-waves" fill="none" stroke="#FFFFFF" stroke-width="25">
+        <path d="M 414,169 C 464,39 527,59 602,137 S 732,255 807,138"/>
+        <path d="M 420,295 C 471,177 535,207 603,265 S 729,382 802,257"/>
+      </g>
+    </g>
+
+    <g id="red-prolate" clip-path="url(#red-boundary)">
+      <ellipse cx="355" cy="516" rx="145" ry="237" fill="#CB3C33"/>
+      <g id="red-waves" fill="none" stroke="#FFFFFF" stroke-width="25">
+        <path d="M 189,444 C 243,338 298,384 354,436 S 459,535 520,430"/>
+        <path d="M 188,597 C 240,491 298,536 354,589 S 459,688 520,583"/>
+      </g>
+    </g>
+
+    <g id="purple-oblate" clip-path="url(#purple-boundary)">
+      <ellipse cx="791" cy="576" rx="230" ry="169" fill="#9558B2"/>
+      <g id="purple-waves" fill="none" stroke="#FFFFFF" stroke-width="25">
+        <path d="M 539,536 C 625,416 704,486 790,529 S 958,630 1043,520"/>
+        <path d="M 537,659 C 622,539 704,609 790,652 S 958,753 1043,643"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Live, editable lettering. Arial Bold is used for the supplied PNG. -->
+  <text id="wordmark" x="14" y="1164" fill="#FFFFFF"
+        font-family="Arial, Helvetica, sans-serif" font-weight="700" font-size="112"
+        textLength="1172" lengthAdjust="spacingAndGlyphs">SpheroidalWaves.jl</text>
+</svg>
