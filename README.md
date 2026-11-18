@@ -8,6 +8,7 @@
 [![Julia Compatibility](https://img.shields.io/badge/dynamic/toml?url=https%3A%2F%2Fraw.githubusercontent.com%2Fbrandynlucca%2FSpheroidalWaves.jl%2Fmaster%2FProject.toml&query=%24.compat.julia&suffix=%2B&label=Julia&color=purple)](https://julialang.org)
 [![GitHub last commit](https://img.shields.io/github/last-commit/brandynlucca/SpheroidalWaves.jl?label=Last%20commit)](https://github.com/brandynlucca/SpheroidalWaves.jl/commits/main)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19728039.svg)](https://doi.org/10.5281/zenodo.19728039)
+[![status](https://joss.theoj.org/papers/ee705a74f4a858066b9e9f8bdb9f64c7/status.svg)](https://joss.theoj.org/papers/ee705a74f4a858066b9e9f8bdb9f64c7)
 
 
 [![Documentation (stable)](https://img.shields.io/badge/docs-stable-blue?label=Package%20documentation%20(stable))](https://brandynlucca.github.io/SpheroidalWaves.jl/stable/)
