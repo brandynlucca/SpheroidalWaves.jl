@@ -24,19 +24,7 @@ bibliography: paper.bib
 
 # Statement of need
 
-Numerical analysts and researchers solving differential equations or studying spectral concentration need reliable spheroidal wave functions across orders, parameters, and arithmetic precisions. Cancellation and truncation errors require separate refinement of arithmetic precision and expansion length. Established Fortran solvers [@vanburen_mswf] and arbitrary-precision C++ software [@adelman2014] address function evaluation, but projection, parameter differentiation, and integral-operator calculations also require compatible coefficients and normalization conventions. `SpheroidalWaves.jl` supplies function and derivative calculations across real and complex arguments through a reusable Julia interface with shared normalization and precision controls.
-
-Angular regularity determines the separation eigenvalue shared by the angular and radial equations. The angular and radial functions satisfy the separated Helmholtz equations [@dlmf{}, §§[30.2(i)](https://dlmf.nist.gov/30.2#i), [30.13(iv)](https://dlmf.nist.gov/30.13#iv), and [30.14(iv)](https://dlmf.nist.gov/30.14#iv)]:
-$$
-  \begin{aligned}
-    \frac{d}{d\eta}\left[(1-\eta^2)\frac{dS_{mn}}{d\eta}\right]
-      +\left[\lambda_{mn}(c)-\sigma c^2\eta^2-\frac{m^2}{1-\eta^2}\right]S_{mn}&=0,\\
-    \frac{d}{dx}\left[(x^2-\sigma)\frac{dR_{mn}}{dx}\right]
-      +\left[c^2x^2-\lambda_{mn}(c)-\frac{\sigma m^2}{x^2-\sigma}\right]R_{mn}&=0,
-  \end{aligned}
-  \label{eq:spheroidal-equations}
-$$
-where $S_{mn}(c,\eta)$ and $R_{mn}(c,x)$ are the angular and radial functions, $\lambda_{mn}(c)$ is the separation eigenvalue, $c$ is the spheroidal parameter, and $\eta$ and $x$ are the angular and radial coordinates. All quantities are dimensionless. Integer order $m$ and degree $n$ satisfy $0\leq m\leq n$, and $\sigma$ selects a prolate ($\sigma = 1$) or oblate ($\sigma = -1$) geometry. Real coordinates satisfy $-1<\eta<1$, with $x>1$ for prolate and $x\geq0$ for oblate geometries, respectively. Endpoint limits and complex continuation require the conventions described below.
+Numerical analysts and researchers solving differential equations or studying spectral concentration need reliable spheroidal wave functions across orders, parameters, and arithmetic precisions. Cancellation and truncation errors require separate refinement of arithmetic precision and expansion length. Established Fortran solvers [@vanburen_mswf] and arbitrary-precision C++ software [@adelman2014] address function evaluation, but projection, parameter differentiation, and integral-operator calculations also require compatible coefficients and normalization conventions. `SpheroidalWaves.jl` supplies function and derivative calculations across real and complex arguments through a reusable Julia interface with shared normalization and precision controls. Angular regularity fixes the shared separation eigenvalue $\lambda_{mn}(c)$ for order $m$, degree $n$, and spheroidal parameter $c$ [@dlmf]. Angular and radial functions $S_{mn}(c,\eta)$ and $R_{mn}(c,x)$ use coordinates $\eta$ and $x$, respectively. The [mathematical documentation](https://brandynlucca.github.io/SpheroidalWaves.jl/dev/math-and-usage/) gives governing equations, normalization conventions, and coordinate domains for the dimensionless quantities.
 
 # State of the field
 
