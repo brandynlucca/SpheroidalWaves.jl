@@ -12,7 +12,7 @@ authors:
     orcid: 0000-0003-3145-2969
     affiliation: '1'
 affiliations:
-  - name: Fisheries Collaborative Program, University of California Santa Cruz, 1156 High Street, Santa Cruz, CA 95064
+  - name: Fisheries Collaborative Program, University of California Santa Cruz, 1156 High Street, Santa Cruz, CA, USA 95064
     index: 1
 date: 17 November 2026
 bibliography: paper.bib
